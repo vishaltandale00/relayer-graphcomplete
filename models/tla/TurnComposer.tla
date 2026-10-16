@@ -52,10 +52,15 @@ CONSTANTS
                     \* since keeps out of the prompt is retired from its
                     \* scope (SCP-021). Before, it stayed and could be carried
                     \* forward later
-  HoldUncertain     \* TRUE since review of #512: a send whose failure leaves
+  HoldUncertain,    \* TRUE since review of #512: a send whose failure leaves
                     \* it unknown whether it was sent is held once its turn
                     \* arrives (SCP-019). Before, its text could be carried
                     \* into the turn it created
+  MessagesInParallel \* TRUE since #719: thread messages run in parallel. A run
+                    \* never disables the prompt, and the server admits a
+                    \* message while another runs. Before, the prompt was
+                    \* disabled while the latest turn ran, and the server
+                    \* refused a second message with interaction_in_progress
 
 None == "none"
 Null == MaxText + 1   \* composer-drafts has no value for the key
@@ -159,16 +164,18 @@ EnterScope(next) ==
         carried |-> stored = Null /\ empty /\ carried, prior |-> prior, retired |-> retired]
 
 \* render() for thread t (WS:3749-3938): the scope transition, then
-\* renderInteractionState sets prompt.disabled from the latest turn's status
-\* (WS:4043-4047). Under CarryUnsentDraft, a carried draft moves: it is
-\* persisted under its new scope and removed from the old one.
+\* renderInteractionState sets prompt.disabled. Under MessagesInParallel only
+\* a workspace that cannot compose disables it, so a run never does; before,
+\* it followed the latest turn's status. Under CarryUnsentDraft, a carried
+\* draft moves: it is persisted under its new scope and removed from the old
+\* one.
 EnterScopeEffect(next, isRunning) ==
   LET e == EnterScope(next) IN
   /\ drafts' = e.drafts
   /\ text' = e.text
   /\ rev' = e.rev
   /\ active' = next
-  /\ disabled' = isRunning
+  /\ disabled' = (isRunning /\ ~MessagesInParallel)
   /\ persisted' = IF e.carried
                   THEN [persisted EXCEPT ![next] = e.text, ![e.prior] = Null]
                   ELSE IF e.retired THEN [persisted EXCEPT ![e.prior] = Null]
@@ -251,9 +258,12 @@ SwitchThread(u) ==
   /\ UNCHANGED holdVars
 
 \* requestInteractionSend (WS:3347-3491) through submitInteraction up to its
-\* await (WS:3199-3218). Send is enabled only with text, an enabled prompt,
-\* no in-flight send for this thread, and loaded drafts (WS:3113-3121), so
-\* the draft-load awaits resolve without yielding to another task. The
+\* await (WS:3199-3218). Send is enabled with text, an enabled prompt and
+\* loaded drafts (WS:3113-3121), so the draft-load awaits resolve without
+\* yielding to another task. Since #719 Send stays enabled while this
+\* thread's earlier send posts, but a click then waits for that post to
+\* settle and reads the composer afresh, as a click after it would: the
+\* model keeps one send per thread, and a click waits for pc = "idle". The
 \* intent is captured at the click. threads.submitInteraction reads the
 \* thread from viewState behind a dynamic import (graph.js), which is
 \* assumed to resolve in the same task.
@@ -321,11 +331,11 @@ ReconcileEnds(t) ==
 -----------------------------------------------------------------------------
 (* The follow-up POST and its continuations (TH:733-812).                 *)
 
-\* submitInteraction's finally resets prompt.disabled from the status on
-\* screen, whichever thread that is (WS:3334-3338); requestInteractionSend's
-\* finally releases the in-flight entry and sendAttempt (WS:3485-3490).
+\* submitInteraction's finally resets prompt.disabled, before #719 from the
+\* status on screen, whichever thread that is (WS:3334-3338). The send's post
+\* ends here, which releases a Send clicked meanwhile.
 FinallyEffect(t) ==
-  /\ disabled' = running[view]
+  /\ disabled' = (running[view] /\ ~MessagesInParallel)
   /\ pc' = [pc EXCEPT ![t] = "idle"]
   /\ owner' = IF owner = t THEN None ELSE owner
 
@@ -399,14 +409,15 @@ PostLost(t) ==
   /\ UNCHANGED <<view, productVars, active, intent, fresh, sent, unsent>>
 
 \* The server records the follow-up turn before it starts the run and
-\* answers (crates/relayer-app-server/src/api/threads.rs:600-666). It does so
-\* only while the thread has no active interaction
-\* (storage/sqlite/interactions.rs:249-259, interaction_in_progress);
-\* otherwise PostFails. A start that fails after the turn is recorded
-\* restores the draft through the retry path, which is not modeled.
+\* answers (crates/relayer-app-server/src/api/threads.rs:600-666). Since #719
+\* it does so while other turns run; before, only while the thread had no
+\* active interaction (interaction_in_progress), and otherwise PostFails.
+\* ~pendingTurn bounds the model to one unloaded turn per thread. A start
+\* that fails after the turn is recorded restores the draft through the
+\* retry path, which is not modeled.
 PostInserted(t) ==
   /\ pc[t] = "post"
-  /\ ~pendingTurn[t] /\ ~running[t] /\ latest[t] < MaxTurns
+  /\ ~pendingTurn[t] /\ (MessagesInParallel \/ ~running[t]) /\ latest[t] < MaxTurns
   /\ pc' = [pc EXCEPT ![t] = "posted"]
   /\ pendingTurn' = [pendingTurn EXCEPT ![t] = TRUE]
   /\ sent' = sent \cup {intent[t].text}
@@ -609,8 +620,19 @@ SentTextIsNotShownAgain ==
 \* (SCP-021): stranded text the user replaced is not shown again.
 SupersededStaysGone == \A t \in Threads : Shown(t) \notin superseded
 
-\* One follow-up POST per thread at a time (WS:3354-3356).
+\* One follow-up POST per thread at a time: a Send clicked while one posts
+\* waits for it (WS requestInteractionSend, postingSends).
 OneSendPerThread == \A t \in Threads : pc[t] = "post" => intent[t].scope[1] = t
+
+\* #719: thread messages run in parallel. While the thread on screen has a
+\* running turn and no send of its own in flight, the prompt is usable, so
+\* the user can type and Send; and a message the user sent is recorded
+\* beside the running turn instead of being refused.
+MessageNeverWaitsOnRun ==
+  /\ \A t \in Threads : view = t /\ running[t] => ~disabled
+  /\ \A t \in Threads :
+       pc[t] = "post" /\ running[t] /\ ~pendingTurn[t] /\ latest[t] < MaxTurns
+         => ENABLED PostInserted(t)
 
 -----------------------------------------------------------------------------
 (* Liveness.                                                              *)

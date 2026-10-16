@@ -340,7 +340,7 @@ describe("A follow-up the server rejects outright", () => {
     world = await new AuthoredInputSendWorld().ready();
     await world.click("#sendInteraction");
     await world.newerTurnArrives({ text: "Here is my answer", invoked: true });
-    world.post.response.reject(Object.assign(new Error("interaction_in_progress"), { status: 409 }));
+    world.post.response.reject(Object.assign(new Error("The message was rejected."), { status: 422 }));
     await world.settled();
     expect(world.promptText).toBe("Here is my answer");
   });

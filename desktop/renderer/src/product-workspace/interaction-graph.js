@@ -35,6 +35,13 @@ export function interactionGraph(turns, selectedId) {
     height: Math.max(160, ...positioned.map((node) => node.y + 90)) };
 }
 
+// A run waiting for capacity (#720) says so, apart from one queued behind its node.
+export function interactionGraphStatus(node) {
+  if (node.completionStatus === "accepted") return "Response ready";
+  if (node.completionStatus === "queued" && node.queueReason === "capacity") return "Waiting for capacity";
+  return node.completionStatus || "Interaction";
+}
+
 export function renderInteractionGraph(document, graph, selectedId, select) {
   const root = document.createElement("div");
   root.className = "interaction-graph-surface";
@@ -58,7 +65,7 @@ export function renderInteractionGraph(document, graph, selectedId, select) {
     if (String(selectedId) === node.id) button.setAttribute("aria-current", "true");
     const label = document.createElement("span"); label.className = "interaction-graph-node-label";
     label.textContent = node.text || "Interaction";
-    const status = document.createElement("small"); status.textContent = node.completionStatus === "accepted" ? "Response ready" : node.completionStatus || "Interaction";
+    const status = document.createElement("small"); status.textContent = interactionGraphStatus(node);
     const incoming = graph.edges.filter((edge) => edge.target === node.id);
     const relationships = incoming.map((edge) => {
       const source = byId.get(edge.source)?.text || "Interaction";

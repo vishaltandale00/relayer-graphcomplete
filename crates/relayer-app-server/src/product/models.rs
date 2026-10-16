@@ -131,6 +131,8 @@ pub(crate) struct Interaction {
     pub(crate) completion_status: String,
     pub(crate) stop_requested: bool,
     pub(crate) stop_error: Option<String>,
+    /// A `queued` run that waits for capacity (#720), not behind a run on its node.
+    pub(crate) waiting_for_capacity: bool,
     pub(crate) harness_configuration_name: Option<String>,
     pub(crate) harness_configuration_digest: Option<String>,
     pub(crate) permission_profile_id: String,

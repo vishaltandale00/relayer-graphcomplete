@@ -108,7 +108,7 @@ replays against the real app-server code:
 - **Projection:** the product's settlement reason (`execWhy`) is compared, so
   a wrongly projected reason is caught.
 - **`finalPromises`:** these must hold at the end of the scenario.
-- **The deadlock the model missed:** the model has no harness session lock. The real-process `recursive-complete-e2e` test found the gap: child admission first asked the host to set up the thread's session, which the running root turn holds while it awaits the child. Children now skip that step (`admit_invoked_execution`). The adapter's fake harness rejects session setup as busy, so the fast tier guards against it too.
+- **The deadlock the model missed:** the model has no harness session lock. The real-process `recursive-complete-e2e` test found the gap: child admission first asked the host to set up the thread's session, which the running root turn then held while it awaited the child. Children now skip that step (`admit_invoked_execution`). The adapter's fake harness rejects session setup as busy, so the fast tier guards against it too.
 - **Selected children:** a scenario whose initial state has `selected = TRUE` seeds a catalog and gives the root a model selection. The child inherits it and is admitted: the fake harness signs the admission with the app server's own digest helpers. The replay compares the child's attempt and lease, read from the product database, with the model.
 - **Unheld background work:** the semantic and exit observers run on their own. A step that sets them off (`ChildReturn`, `ProviderExit`) is compared together with the background steps that follow it, once they have run. Comparing it at once raced the observer.
 - **Beyond the traces:** direct adapter tests cover what the model abstracts:
@@ -322,8 +322,8 @@ child from the parent's `prepareComplete` to settlement:
 - the broker's product preparation and binding, and a preparation that ends
   ambiguously;
 - the execution row before `launching`, and capability activation;
-- the thread's one active message turn: the user's next message
-  (`UserSends`), which the gate admits only while no message turn runs;
+- the user's messages (`UserSends`), up to two beside the parent's own turn.
+  Each starts a fresh native session, and nothing has gated them since #719;
 - a run the user starts from another invoke action (`UserInvokes`), which
   starts a fresh native session and runs beside the message turns;
 - the product's Stop of the child, and a user's re-invoke of the delegate
@@ -338,17 +338,23 @@ store errors, the background retry after them, and a crash inside a cleanup
 are not modeled; Rust tests cover them. `launch-today` mirrors the
 code, with every fix on; each `-reverted` check turns one fix off.
 
+The old one-active-message-turn gate survives only as `HumanTurnInProgress`.
+Each decision removes one term from it: messages (#719), the child, and
+invoked runs (#717). With all three on, it counts nothing, as the code has no gate.
+
 | Check | Verdict | Finding |
 | --- | --- | --- |
-| `launch-safety` | passes | A settled execution row has a terminal current and product row. Startup leaves no interrupted child active. Whenever no message turn runs, the user's next message is admitted (`SendNeverWaitsOnChild`, which reads `ENABLED UserSends`, so the child's and the invoked run's states are checked against the gate itself). Two message turns never run at once (`OneHumanTurn`). A run the user invokes never waits, even beside another invoked run: the model tracks up to two at once (`InvokeNeverWaits`). The product neither stops nor runs an agent's child (`ProductLeavesChildAlone`). |
+| `launch-safety` | passes | A settled execution row has a terminal current and product row. Startup leaves no interrupted child active. A user's message never waits: not for the parent's turn, another message, the child or an invoked run (`MessageNeverWaits`). Once the parent is done and no message runs, the child never refuses a message (`SendNeverWaitsOnChild`). Both read `ENABLED UserSends`, so they check the guard itself. A run the user invokes never waits, even beside another (`InvokeNeverWaits`). The product neither stops nor runs an agent's child (`ProductLeavesChildAlone`). |
+| `launch-message-overlap` | Reachability; expected violation | The user's message runs beside the parent's message turn (`OneMessageTurn`, the old gate's promise). So `MessageNeverWaits` is not vacuous. |
 | `launch-liveness` | passes | Without a restart, every child the parent launched ends in the graph, and its product row ends once its parent is done. |
 | `launch-restart-liveness` | passes | Across two restarts, every child the product recorded ends in both stores. |
 | `launch-activation-reverted`, `launch-activation-liveness-reverted` | Fixed; the reverted checks show the old traces | A failed or lost activation restored the child to `submitted` and settled only the execution row. An exact retry got 200 and launched nothing, product Stop answered 500, and the next human turn got 422. Now the activation failure fails both stores (`ActivationFailsGraph`). Regression test: `a_failed_activation_fails_the_child_in_both_stores_and_an_exact_retry_reports_it`. |
 | `launch-restart-reverted` | Fixed; the reverted check shows the old trace | A restart after the child row existed but before `launching` re-bound the child and left its current active. A second restart then quarantined it as a provenance mismatch, because the expected occurrence was read only while the parent was accepted or running. Startup now reads the child's own occurrence whatever its parent's status, and fails the child in both stores with `application_restart`; a reserved row settles (`StartupFailsUnlaunched`). Startup also marks results an older build left unmarked when only an agent could have created them, and retries a child it kept after a transient graph failure in the background. A deterministic startup failure still fails the child's graph current when its node carries the child's own occurrence, and an unbound child is located without revalidating its model. None of this is modeled: the model has no startup errors or schema versions. Regression tests: `a_restart_before_launch_fails_the_bound_child_in_both_stores`, `a_restart_fails_a_bound_child_whose_parent_already_failed`, `a_restart_fails_an_unbound_child_whose_parent_already_failed`, `a_restart_fails_a_stuck_child_an_older_build_left_unmarked`, `a_restart_that_cannot_reach_the_graph_fails_the_child_once_it_can`, `a_deterministic_startup_failure_fails_the_child_in_both_stores`, `a_restart_fails_an_unbound_child_whose_model_no_longer_validates`, `a_restart_finishes_the_graph_half_of_a_refused_child`. |
 | `launch-refused-prepare-reverted`, `launch-child-row-reverted` | Fixed; the reverted checks show the old traces | An ambiguous preparation left the claimed child `submitted` and unbound, and the broker answered 422 "already in progress". Once the parent stopped, nothing recovered it, even across restarts. The refused-launch cleanup now fails it in both stores with `preparation_failed` and binds it to the parent's graph interaction (`RefusedLaunchFailsChild`). It fails the product row first, so a later launch cannot reserve or claim the child; `RefusedCleanup` is one atomic step, so the model does not show that ordering. Only the launch that claimed the child's preparation starts the cleanup, so a concurrent duplicate's refusal cannot end a child the claiming launch still runs. Regression tests: `an_ambiguous_preparation_fails_the_claimed_child_in_both_stores`, `a_duplicate_launchs_refusal_leaves_the_claiming_launch_its_child`. |
-| `launch-child-gate-reverted` | Decision; the reverted check shows the old trace | A child still running after its parent was accepted refused the thread's next human turn with 422. By product decision, only human root turns hold the thread (`ChildrenOutsideRootGate`, the gate's guard on `UserSends`). With it off, `SendNeverWaitsOnChild` fails as soon as the parent is accepted while the child is still pending; `OneHumanTurn` holds either way. Regression tests: `only_message_turns_hold_the_thread`, `a_running_child_does_not_hold_the_next_human_turn_and_product_stop_refuses_it`, the renderer tests that feed agent children to `composerStatusForThread` and `productStopTarget`, and the recursive end-to-end test "lets the next human turn run while a launched child still runs". |
-| `launch-invoke-gate-reverted` | Decision (#717); the reverted check shows the old trace | The gate counted a user's invoked run as the thread's one active turn, so an invoke waited for the running message turn and the next message waited for the invoke. By product decision, an invoked run starts a fresh native session and holds nothing (`InvokesOutsideRootGate`, the gate's guard on `UserInvokes` and its term in `HumanTurnInProgress`). With it off, `InvokeNeverWaits` fails in the initial state, where the parent's message turn runs; `OneHumanTurn` holds either way. Regression tests: `invoked_runs_start_beside_an_active_turn`, `only_message_turns_hold_the_thread`, and the renderer tests that feed a user's invoked run to `composerStatusForThread` and `productStopTarget`. |
-| `launch-product-child-reverted` | Decision; the reverted check shows the old trace | The product's Stop of a child answered 500 or recorded a Stop nothing acted on, and a user's invoke of the delegate action ran the child on the product path, where neither the user nor the parent could stop it. Now the product refuses both (`ProductLeavesChildren`, the guard on `UserStopsChild` and `UserReinvokes`). Regression tests: `only_message_turns_hold_the_thread` (Stop with and without an execution row) and `a_users_invoke_does_not_run_an_agents_child`. |
+| `launch-child-gate-reverted` | Decision; the reverted check shows the old trace | A child still running after its parent was accepted refused the thread's next human turn with 422. By product decision, a child never holds the thread (`ChildrenOutsideRootGate`, its term in `HumanTurnInProgress`). With it off, `SendNeverWaitsOnChild` fails once the parent is accepted while the child is still pending. Regression tests: `no_run_holds_the_thread`, `a_running_child_does_not_hold_the_next_human_turn_and_product_stop_refuses_it`, the renderer tests that feed agent children to `composerStatusForThread` and `productStopTarget`, and the recursive end-to-end test "lets the next human turn run while a launched child still runs". |
+| `launch-invoke-gate-reverted` | Decision (#717); the reverted check shows the old trace | The gate counted a user's invoked run as the thread's one active turn, so an invoke waited for the running message turn and the next message waited for the invoke. By product decision, an invoked run starts a fresh native session and holds nothing (`InvokesOutsideRootGate`, the gate's guard on `UserInvokes` and its term in `HumanTurnInProgress`). With it off, and messages no longer counted (#719), `InvokeNeverWaits` fails once one invoked run runs: a second invoke waits for it. Regression tests: `invoked_runs_start_beside_an_active_turn`, `no_run_holds_the_thread`, and the renderer tests that feed a user's invoked run to `composerStatusForThread` and `productStopTarget`. |
+| `launch-message-gate-reverted` | Decision (#719); the reverted check shows the old trace | The thread had one active message turn: a message sent while the parent's turn or another message ran was refused with `interaction_in_progress`. By product decision, every root run starts a fresh native session, so a message holds nothing (`MessagesOutsideRootGate`, its term in `HumanTurnInProgress`). With it off, `MessageNeverWaits` fails in the initial state, where the parent's turn runs; `OneMessageTurn` holds. Regression test: `no_run_holds_the_thread`. |
+| `launch-product-child-reverted` | Decision; the reverted check shows the old trace | The product's Stop of a child answered 500 or recorded a Stop nothing acted on, and a user's invoke of the delegate action ran the child on the product path, where neither the user nor the parent could stop it. Now the product refuses both (`ProductLeavesChildren`, the guard on `UserStopsChild` and `UserReinvokes`). Regression tests: `no_run_holds_the_thread` (Stop with and without an execution row) and `a_users_invoke_does_not_run_an_agents_child`. |
 | `launch-graph-orphan` | Known open | A crash after the parent's `prepareComplete` but before the broker's first product write leaves a graph-only child. No product row names it, so startup cannot fail it, and its current stays active. |
 
 ### `NodeRunQueue.tla`
@@ -389,6 +395,48 @@ decision off.
 | `node-queue-release-reverted` | Decision 4 (#716); the reverted check shows the old trace | A run that failed or was stopped kept its node, so the runs queued behind it never started. Every settlement hands the node on (`ReleaseOnSettle`). Regression tests: `a_settled_run_hands_its_node_to_the_oldest_queued_run` and the end-to-end test above, whose run ahead fails. |
 | `node-queue-context-reverted` | Decision 3 (#716); the reverted check shows the old trace | A queued run's context read when it was sent misses the accepted result of the run ahead. Context is read at start (`ContextAtStart`). Regression tests: `accepted_thread_history_lists_accepted_human_turns_in_order` and the end-to-end test above, which checks the queued run's `threadHistory`. |
 | `node-queue-restart-reverted` | Fixed; the reverted check shows the old trace | A run queued at a restart stayed queued behind a run that no longer existed. Startup now interrupts it like an executing run, and invoking its action again resumes it (`StartupInterruptsQueued`). #722 replaces this with paused runs. Regression test: `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
+
+### `RunCapacity.tla`
+
+This model covers the app's internal limit on human-started runs (#720, PRD
+12.2 PAR-011 to PAR-014), composed with the per-node run queue. It has two
+human runs on one node, two with nodes of their own, one agent child, a limit
+of two, and at most one restart:
+
+- admission (`Send`, `Admit`): a run takes its node or waits behind it, then
+  takes a free slot or waits as `queued` for capacity, holding its node;
+- an agent's child (`LaunchChild`), which never asks for a slot;
+- settlement (`Settle`), then the release of the slot (`ReleaseSlot`), which
+  passes it to the oldest waiting run, and of the node (`ReleaseNode`);
+- Remove of a queued run (`Remove`), which takes it out of either wait;
+- a crash, which loses every slot, hold and wait, and startup, which
+  interrupts the runs that waited.
+
+The slot and the node are released in separate steps, as separate tasks
+release them in the code. Releasing a slot passes it to the oldest waiting run
+in the same step, as the code does under one lock (`AtomicHandOff`). The ghost
+`before` records which waiting run began to wait first, apart from the queue
+that release serves, so `StartsInOrder` is not a restatement of release. A
+storage failure during a release keeps the settled run's slot and the oldest
+waiter's place, and the release is retried; that is not modeled. Duplicate
+deliveries, which join a run's slot or its wait, are not modeled. Graph
+preparation, approvals and the provider are not modeled. `capacity-today`
+mirrors the code; each `-reverted` check turns one fix or decision off.
+
+| Check | Verdict | Finding |
+| --- | --- | --- |
+| `capacity-safety` | passes | Executing human-started runs never exceed the limit (`WithinLimit`). Runs waiting for capacity start first in, first out by when they began to wait (`StartsInOrder`), and no new run starts while another waits (`NoStartAheadOfWaiting`). No run waits while a slot is idle (`NoIdleSlotWhileWaiting`), and every waiting run is in the live wait, also after a restart (`WaitIsLive`). Runs on one node still run one at a time (`OneRunPerNode`), and a child never waits for capacity (`ChildrenNeverWait`). |
+| `capacity-children-beside-full` | Reachability; expected violation | An agent's child runs while human-started runs fill every slot. |
+| `capacity-both-waits` | Reachability; expected violation | One run waits behind a run on its node, then takes the node and waits for capacity. |
+| `capacity-liveness` | passes | Without a restart, every run waiting for capacity that the user does not remove starts. |
+| `capacity-restart-liveness` | passes | Across a restart, every run waiting for capacity leaves the wait. It runs with a limit of one to keep the search short. |
+| `capacity-race-reverted` | Fixed; the reverted check shows the race | Two runs racing for the last slot both saw it free and both started. Admission checks and takes a slot, or queues, in one step under the lock (`AtomicAdmission`). Regression tests: `racing_runs_never_exceed_the_limit_and_start_in_order` and `human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free`. |
+| `capacity-fifo-reverted` | Decision (#720); the reverted check shows the old trace | A slot that could pass to any waiting run started a later run first. It passes to the oldest (`Fifo`). Regression tests: the two above. |
+| `capacity-jump-reverted` | Decision (#720); the reverted check shows the trace | With the hand-off split from the release and no check that a run waits, a new run took a freed slot ahead of a waiting run. The code makes both defenses, so no code test can reach the trace; the model is the evidence. |
+| `capacity-jump-guarded` | passes | With the hand-off split but admission's check kept (`WaitBehindWaiting`), no new run jumps a waiting one and order holds. Each defense is enough on its own. |
+| `capacity-release-reverted` | Fixed; the reverted check shows the trace | A settled run that only freed its slot left the waiting runs beside an idle slot. Release passes the slot on (`ReleaseHandsSlot`). Regression test: the end-to-end test above. |
+| `capacity-children-reverted` | Decision 5 (#716); the reverted check shows the trace | Counting children would make a child wait behind human-started runs, a recursion scheduler. Children never ask for a slot (`ChildrenUncounted`). Regression test: `an_agent_child_starts_while_human_started_runs_fill_the_capacity`. |
+| `capacity-restart-reverted` | Fixed; the reverted check shows the trace | A run that waited for capacity at a restart stayed queued for a slot nothing would pass it. Startup interrupts it (`StartupInterruptsWaits`). Regression tests: `a_run_waits_for_capacity_from_its_claimed_start_and_a_stop_removes_it` and `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
 
 ### `ExecutionLeases.tla`
 
@@ -481,8 +529,9 @@ modeled (`ForgetReleased`).
 This model covers the follow-up composer across two threads:
 
 - typing, which persists the draft under the active scope `thread:latest turn`;
-- Send, the follow-up POST, the server recording the turn before it answers,
-  and its `interaction_in_progress` rule;
+- Send, the follow-up POST, and the server recording the turn before it
+  answers. Since #719 the server records a message while other turns run,
+  and a run never disables the prompt (`MessagesInParallel`);
 - the refresh that loads the new turn, or skips it when the navigation entry
   `[thread, turn, layer path]` changed or the refresh failed;
 - settlement of the submitted draft and its revision comparison;
@@ -508,7 +557,15 @@ created elsewhere to keep the per-promise checks fast; `composer-fixed` and
 | `composer-without-carry` | Records the bug | With `CarryUnsentDraft` off, text typed during a send is stranded. |
 | `composer-settlement-erases-edit` | Fixed; now passes | Before the fix (#513): re-entering a scope with persisted text assigned `currentPromptRevision + 1`, which could repeat a revision the scope already had. An edit after Send could then reach the submitted revision, and settlement cleared the prompt and deleted the persisted draft. A scope's revision now only moves forward. Scenario: `composer-settlement-erases-edit`. |
 | `composer-sent-text-lingers` | Fixed; now passes | Before the fix (#513): re-entering a scope during a send bumped its revision though the text was unchanged, so settlement no longer recognized the sent text and left it in an enabled composer. Unchanged text now keeps its revision. Scenario: `composer-sent-text-lingers`. |
-| `composer-one-send-per-thread` | passes | Every send releases its thread's Send button. The model has one send slot per thread, so it cannot attempt a second Send; a test in `test/turn-composer-traces.test.mjs` forces one while the first is in flight, after leaving and returning to the thread, and checks it does not post. |
+| `composer-one-send-per-thread` | passes | Every send releases its thread's Send button. The model has one send slot per thread. Since #719 Send stays enabled while a send posts, and a click then waits for that post and reads the composer afresh. Tests in `test/turn-composer-traces.test.mjs` click Send during the post: it posts only text typed since, or nothing. |
+| `composer-parallel-messages` | passes | #719: a running turn never disables the prompt, and the server records a message beside it (`MessageNeverWaitsOnRun`). Text typed and sent while a turn runs survives as before. Scenario: `composer-send-beside-running-turn`. |
+| `composer-message-gate-reverted` | Decision (#719); the reverted check shows the old trace | With `MessagesInParallel` off, the prompt is disabled while the latest turn runs, and the server refuses the next message. |
+
+Since #719 two messages of one thread can be sent while neither turn has loaded. The model keeps
+`pendingTurn` a single flag per thread, so it never has two sent but unloaded turns. Posts are
+serialized in the renderer, which narrows this gap but does not close it. The renderer keeps one
+persisted sent-follow-up record per thread, and a second send replaces it. After a restart, text
+whose turn never loaded could then be offered again. No test or model check covers that case.
 | `composer-invoked-turns` | Fixed; now passes | Before the fix (review of #512): the submission was held only once `submitInteraction` began, after Send had waited for authored input commits. A turn created elsewhere that arrived during the wait carried the text into its scope, and the Send then posted it and cleared only the older scope, so the sent text stayed. The submission is now held from the click. A Send that ends without posting hands back text a newer turn left in its scope into the empty prompt, as a rejected POST does; text typed since wins. One thread, three turns. Regression tests: the "newer turn arriving while Send waits" cases in `test/authored-input-send-traces.test.mjs`, since only that world holds a Send on an authored commit. The draft-send warning, which the model leaves out, also holds the text while open and hands it back when cancelled; a test in the same file covers it. |
 | `composer-without-click-hold` | Records the bug | With `HoldFromClick` off, the text is carried away while Send waits. |
 | `composer-without-uncertain-hold` | Records the bug | With `HoldUncertain` off, the text of a POST that failed after the server recorded it is carried into the turn it created, and could be sent again (SCP-019). The renderer recognizes that turn by the text: any draft whose text a later turn of the thread carries was sent, which also holds after a restart. A turn an invoke action created does not count, so a definitely rejected send still comes back. An unrelated turn, or a POST that never reached the server, still carries the text forward. A retry refused after the turn arrived does not hand the text back. Scenarios: `composer-uncertain-send-stays-put`, `composer-retry-of-landed-send`. |
@@ -1011,141 +1068,6 @@ first; leases requested meanwhile are refused. The regression tests are
 check of `shutdownServices` in `desktop-shell.test.mjs`. Both were found by a
 Codex review of #572.
 
-### `HarnessCodexThread.tla`
-
-This model covers `codex.basic`'s persistent root thread across serialized
-root turns. Prompts carry only the current turn, so the native thread is the
-only holder of prior conversation ([#584](https://github.com/vishaltandale00/relayer-graphcomplete/issues/584)).
-It must be kept whenever it can be resumed, and a reset must be visible.
-
-- **Harness:** the saved thread, the Codex home it is bound to, the step that
-  saves it, and the pending reset notice.
-- **App server:** `thread/start`, `thread/resume` and `turn/start`. A thread
-  has a rollout only in the `CODEX_HOME` whose `turn/start` was accepted on it.
-  `thread/resume` without one fails with "no rollout found", as the pinned
-  Codex 0.147.0 binary does.
-- **Providers and homes:** the subscription `s` has its own home `S`. Two
-  API-key providers, `k1` and `k2`, share Codex's default home `D`, as they do
-  in production today.
-- **Interruptions:** Stop, the per-turn force-stop and force shutdown, and a
-  thread saved by an earlier release, whose home is unknown and whose rollout
-  may be missing. A force marks the turn, and the kill lands later (`Kill`), so
-  a `turn/start` answer already in flight can still arrive. A Stop while
-  `turn/start` is pending kills the app-server.
-
-The model decides only resumption for the provider each turn uses. Which
-providers an existing conversation may select belongs to the legacy
-compatibility policy, so the model lets every turn pick any provider.
-
-`codex-thread-today` mirrors the code, and each `-reverted` check turns one fix
-off. Nine constants hold the fixes:
-
-- `CommitAtTurnStart`: the thread is saved when `turn/start` is accepted
-  (`onTurnId`), not when `thread/start` answers.
-- `ThreadRecordsHome`: the saved thread records a binding, and a turn that
-  does not match it starts a fresh thread.
-- `BindToHome`: that binding is the Codex home, not the provider definition, so
-  providers that share a home keep resuming the thread.
-- `RecoverMissingRollout`: a `thread/resume` that finds no rollout forgets the
-  saved thread and starts a fresh one in the same turn.
-- `ForceForgets`: a force-stop or force shutdown of a root turn that sent
-  `turn/start` forgets the saved thread.
-- `CommitChecksForce`: a `turn/start` answer that arrives after the force is not
-  saved (`onTurnId` checks the force signal).
-- `ForgetOnlyAfterTurnStart`: a turn forced before it sent `turn/start` wrote
-  nothing, so the saved thread is kept.
-- `StopForgetsPendingStart`: a Stop that kills the app-server while
-  `turn/start` is pending forgets the thread, as a force does.
-- `ResetsVisible`: every forget leaves a reset notice, which the next fresh
-  root thread reports.
-
-The properties are:
-
-- `NoDeadResume`: a root turn never fails on a thread Codex cannot resume.
-- `ResumeOnlyMaterialized`: only a thread with a rollout in the turn's home is
-  offered for resume, except one saved by an earlier release.
-- `NoKilledResume`: a conversation killed mid-write, by a force or by a Stop
-  while `turn/start` was pending, is never resumed (PRD, Provider execution
-  access).
-- `NoNeedlessForget`: after a root turn in a home finishes, or is stopped once
-  running, the next root turn in that home resumes its thread, whichever
-  provider it uses. Only a later killed conversation lifts this.
-- `NoSilentReset`: a root turn that starts a fresh thread after a root
-  conversation was lost reports it. Each loss is reported once.
-- `NeverResumes`: a witness, expected to be violated, that a real resume is
-  reachable.
-
-| Check | Verdict | Finding |
-| --- | --- | --- |
-| `codex-thread-resumable` | Fixed; now passes | Before the fix (H1): the thread was saved as soon as `thread/start` answered, and reset only when the presentation version changed. A follow-up in another Codex home resumed it without its rollout, and a Stop between `thread/start` and `turn/start` pinned a thread that never got one. Every later root turn failed with "no rollout found", also after a restart. Regressions: `codex-root-thread.test.ts` drives the real app-server transport against an emulated app-server with Codex's rollout rules. |
-| `codex-thread-home-reverted` | violated: shows why the fix is needed | Without a recorded binding, a follow-up in another home resumes a thread with no rollout there. |
-| `codex-thread-commit-reverted` | violated: shows why the fix is needed | A Stop before `turn/start` leaves a saved thread with no rollout. |
-| `codex-thread-recovery-reverted` | violated: shows why the fix is needed | A thread saved by an earlier release, with no rollout in the turn's home, fails the turn. It is still offered for resume, so that existing conversations keep their thread. |
-| `codex-thread-force-reverted` | violated: shows why the fix is needed | A force that keeps the saved thread lets the next root turn resume the killed conversation. |
-| `codex-thread-late-commit-reverted` | violated: shows why the fix is needed | A `turn/start` answer that arrives after the force saves the forced thread again. |
-| `codex-thread-forget-unwritten-reverted` | violated: shows why the fix is needed | Found in review: a force during `thread/resume`, before `turn/start`, forgot a thread nothing wrote. Now kept. Regressions: the two "before its turn/start" cases in `codex-root-thread.test.ts`. |
-| `codex-thread-home-binding-reverted` | violated: shows why the fix is needed | #584: binding the thread to its provider definition dropped native history when a follow-up moved between API-key providers sharing Codex's default home. Regression: "keeps resuming across providers that share a Codex home". |
-| `codex-thread-stop-kill-reverted` | violated: shows why the fix is needed | Found in review: a Stop while `turn/start` was pending killed the app-server but kept the thread. Regression: "forgets, visibly, a root thread whose turn a Stop killed while turn/start was pending". |
-| `codex-thread-silent-reset-reverted` | violated: shows why the fix is needed | #584: without the notice, a root turn silently starts over after its native conversation was lost. Regressions: the reset assertions in `codex-root-thread.test.ts`. |
-| `codex-thread-resume-witness` | violated: witness | A real resume is reachable. |
-
-In review, three mutants of this model and `HarnessPrimeRoot` passed every
-property then shipped: `Commit` always clearing the saved thread, `Force`
-keeping it, and force close forgetting an idle Prime session. They now violate
-`NoNeedlessForget`, `NoKilledResume` and Prime's `NoNeedlessForget`.
-
-`ResumeOnlyMaterialized` exempts the earlier release's thread by design: its
-home is unknown, so the harness tries it once and binds it on success.
-`NoNeedlessForget` gives up continuity only when a turn runs in another home,
-where the thread cannot be resumed.
-
-### `HarnessPrimeRoot.tla`
-
-This model covers the harness host and Prime Agent's persistent root session:
-
-- **Host:** the per-thread session lock, capture and persist after a run,
-  graceful close, force close, a crash and one restart.
-- **Prime:** pinning, rotation, reload, the force-stop generation, and the
-  presentation instructions each session was built with.
-- **Turns:** two root turns and one invoked child, which only captures state.
-
-`prime-root-today` mirrors the code, and each `-reverted` check turns one fix
-off. Five constants hold the fixes:
-
-- `ForcePersists`: the host records the harness state as soon as a per-turn
-  force-stop fires, not when the host run ends up to ten seconds later.
-- `ForceShutdownForgets`: force shutdown forgets the root session while a root
-  conversation runs on it, as a per-turn force-stop does.
-- `ForgetOnlyRunning`: only when an unforced root turn is bound to that
-  session. A turn still acquiring its session wrote nothing, and a turn
-  already force-stopped dropped its session then.
-- `ForceClosePersists`: force close captures and persists that state, although
-  it skips close's final persist.
-- `SessionScopedInstructions`: each session reads its own presentation
-  instructions. Before, every session read the shared resource loader's cache,
-  which only a session's `reload()` refreshed.
-
-| Check | Verdict | Finding |
-| --- | --- | --- |
-| `prime-root-serialized` | passes | Root turns stay serialized, and two root natives never share a session. |
-| `prime-root-memory` | passes | While the harness is live, it never pins a force-stopped root conversation. |
-| `prime-root-capture` | Fixed; now passes | Before the fix: a graceful close captured the state, a force-stop then fired, and the close persisted the stale capture. |
-| `prime-root-capture-reverted` | violated: shows why the fix is needed | Without recording at the force-stop, the close persists the stopped session. |
-| `prime-root-restart-close` | Fixed; now passes | Before the fix: a turn force-stopped after close had persisted was restored after the restart. |
-| `prime-root-restart-close-reverted` | violated: shows why the fix is needed | Same trace with the force-stop recorded only at the end of the host run. |
-| `prime-root-force-close` | Fixed; now passes | Before the fix (H2): quitting while a root turn ran ended in force close. Force shutdown kept the root session (Codex kept its thread), and nothing persisted, so the restart resumed the killed conversation. The check also holds `NoNeedlessForget`: an idle session, or one a turn is still acquiring, is kept. Regressions: `host-root-session-force.test.ts` (Codex through the real host, restarted) and the Prime force-shutdown test in `prime-agent.test.ts`. |
-| `prime-root-force-close-forget-reverted` | violated: shows why the fix is needed | Force close persists the killed conversation it did not forget. |
-| `prime-root-force-close-persist-reverted` | violated: shows why the fix is needed | The previously saved killed conversation survives. |
-| `prime-root-forget-running-reverted` | violated: shows why the fix is needed | Found in review: forgetting whenever a root turn is in flight forgets a session a turn was still acquiring. `NoNeedlessForget` now also covers an idle session. Regression: "keeps the root session when force shutdown ends a root turn still acquiring it". |
-| `prime-root-keep-witness` | violated: witness | An idle session survives a force close and the restart. |
-| `prime-root-crash` | Open, narrowed | A crash after a per-turn force-stop but before its state write lands restores the stopped conversation. The write now starts when the force fires. Before, it waited for the host run to end. Regression for the new timing: "records a force-stopped root turn's forgotten session before its host run ends". |
-| `prime-root-instructions` | Fixed; now passes | Before the fix (H3): a rotated root session was built from the loader's cache, which held the previous version's instructions, because `createAgentSessionFromServices` does not reload it (PPG-003). Regression: `prime-agent-native-instructions.test.ts` with the real Prime SDK 0.8.1 and no inference; it also covers invoked children, which the model leaves out. |
-| `prime-root-instructions-reverted` | violated: shows why the fix is needed | With the shared cache, a rotated root session runs with stale instructions. |
-| `prime-root-liveness` | passes | A force-stopped turn's host run always ends and frees the lock. |
-
-`Restart` after a close or force close waits for the writes they await. A
-crash may restart at any point.
-
 ### `HarnessCodexAuth.tla`
 
 This model covers the per-`CODEX_HOME` `auth.json` refcount and its serialized
@@ -1214,7 +1136,7 @@ no bug, and its checks guard the queue against regressions.
   - remint races in the graph server;
   - the parent's `/result` long poll;
   - grandchildren;
-  - several turns on one harness session or thread;
+  - several turns on one thread;
   - in the lease model, a user's Stop before the native turn starts;
   - store errors other than a refused drain in the provider service, and
     acknowledgement failures.

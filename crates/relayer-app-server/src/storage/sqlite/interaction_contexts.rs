@@ -92,7 +92,6 @@ impl SqliteProductStore {
         input: NewInteractionInput<'_>,
         model_selection: Option<&InteractionModelSelection>,
         require_model_selection: bool,
-        enforce_single_active_interaction: bool,
     ) -> Result<InteractionInputInsertOutcome, StorageError> {
         let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let thread: Option<(String, String, String)> = sqlx::query_as(
@@ -103,9 +102,9 @@ impl SqliteProductStore {
         })?;
 
         if let Some(row) = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),(SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),i.input_digest FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 AND i.input_identity=?2",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),(SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued'),i.input_digest FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.thread_id=?1 AND i.input_identity=?2",
         ).bind(thread_id.value()).bind(input.input_identity).fetch_optional(&mut *tx).await? {
-            let stored_digest: String = row.try_get(39)?;
+            let stored_digest: String = row.try_get(40)?;
             if stored_digest != input.input_digest {
                 return Err(StorageError::IncompatibleSchema(
                     "interaction input identity was reused with different content".into(),
@@ -163,20 +162,6 @@ impl SqliteProductStore {
             return Ok(InteractionInputInsertOutcome::Existing(existing));
         }
 
-        if enforce_single_active_interaction {
-            let active: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
-                .bind(thread_id.value())
-                .fetch_one(&mut *tx)
-                .await?;
-            if active {
-                return Err(StorageError::Catalog(
-                    crate::product::CatalogError::invalid(
-                        "interaction_in_progress",
-                        "Wait for the active interaction to finish.",
-                    ),
-                ));
-            }
-        }
         let submitted_input = if let Some(expected_revision) = input.submitted_input_draft_revision
         {
             let current_revision: Option<i64> =
@@ -359,6 +344,7 @@ impl SqliteProductStore {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: crate::product::InteractionId::from_database(id),
             thread_id,
             sequence,
@@ -376,6 +362,8 @@ impl SqliteProductStore {
             completion_error: None,
             latest_attempt: None,
         };
+        // An earlier message a model failure returned to unsent can no longer be retried (#719).
+        super::fail_stale_returned_messages(&mut tx, thread_id.value()).await?;
         tx.commit().await?;
         Ok(InteractionInputInsertOutcome::Created(interaction))
     }
@@ -595,7 +583,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -628,7 +615,6 @@ mod tests {
                     submitted_input_draft_revision: Some(0),
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -685,7 +671,6 @@ mod tests {
                     submitted_input_draft_revision: None,
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -823,13 +808,7 @@ mod tests {
             submitted_input_draft_revision: None,
         };
         let created = store
-            .insert_interaction_input(
-                ThreadId::from_database(thread_id),
-                input(),
-                None,
-                false,
-                false,
-            )
+            .insert_interaction_input(ThreadId::from_database(thread_id), input(), None, false)
             .await
             .unwrap();
         let interaction = match created {
@@ -864,7 +843,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap_err();
@@ -873,13 +851,7 @@ mod tests {
             StorageError::IncompatibleSchema(_)
         ));
         let replay = store
-            .insert_interaction_input(
-                ThreadId::from_database(thread_id),
-                input(),
-                None,
-                false,
-                false,
-            )
+            .insert_interaction_input(ThreadId::from_database(thread_id), input(), None, false)
             .await
             .unwrap();
         assert!(
@@ -941,7 +913,6 @@ mod tests {
                     submitted_input_draft_revision: None,
                 },
                 None,
-                false,
                 false,
             )
             .await
@@ -1007,13 +978,7 @@ mod tests {
             submitted_input_draft_revision: None,
         };
         let created = store
-            .insert_interaction_input(
-                ThreadId::from_database(thread_id),
-                input,
-                None,
-                false,
-                false,
-            )
+            .insert_interaction_input(ThreadId::from_database(thread_id), input, None, false)
             .await
             .unwrap();
         let interaction = match created {
@@ -1040,7 +1005,6 @@ mod tests {
                 },
                 None,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -1060,7 +1024,6 @@ mod tests {
                     submitted_input_draft_revision: None,
                 },
                 None,
-                false,
                 false,
             )
             .await

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "issues": [
+    719
+  ],
+  "runId": "9275ac0c-eb9d-4f6d-b655-ea9a2d11ec3f",
+  "profile": "prime-openrouter",
+  "harness": "prime-agent-basic",
+  "modelId": "openai/gpt-6-luna",
+  "source": {
+    "commit": "544340a74029dce6889f067e78fe38adc87fd83d",
+    "clean": false,
+    "workspaceDigest": "sha256:dbb19064e5b3c5fc59289822a352cbd6a0dbd75ab04b258ea706c96ef0336b80"
+  },
+  "startedAt": "2026-10-16T04:45:38.482Z",
+  "executables": {
+    "graphServer": {
+      "path": "target/debug/relayer-graph-server",
+      "sha256": "e6f9fed0d15650c796d36b82426fe2860c5001e1f4ed2c4691330e270fc7014e"
+    },
+    "appServer": {
+      "path": "target/debug/relayer-app-server",
+      "sha256": "1b645268812ef2cc0fb417de82544c8b8ddb4149ad12c9cba62fc7271ab6f27a"
+    }
+  },
+  "temporalFeatures": {
+    "schemaRead": true,
+    "rootCurrentWrite": true,
+    "projectionUi": true,
+    "invokeResolution": true,
+    "providerRecursion": true
+  },
+  "actions": {
+    "invoke": {
+      "id": 7,
+      "sourceNodeId": 28
+    },
+    "question": {
+      "id": 8,
+      "sourceNodeId": 29
+    },
+    "annotatedNode": "30"
+  },
+  "runs": [
+    {
+      "name": "invoke",
+      "interactionId": 2,
+      "completionStatus": "accepted"
+    },
+    {
+      "name": "plain",
+      "interactionId": 3,
+      "completionStatus": "accepted"
+    },
+    {
+      "name": "annotated",
+      "interactionId": 4,
+      "completionStatus": "accepted"
+    },
+    {
+      "name": "answered",
+      "interactionId": 5,
+      "completionStatus": "accepted"
+    }
+  ],
+  "snapshots": {
+    "invoke": {
+      "annotations": [],
+      "answers": []
+    },
+    "plain": {
+      "annotations": [],
+      "answers": []
+    },
+    "annotated": {
+      "annotations": [
+        "I already know Python, so lean on that."
+      ],
+      "answers": []
+    },
+    "answered": {
+      "annotations": [],
+      "answers": [
+        "{\"action\":{\"control\":\"text\",\"prompt\":\"How many minutes a day can you practise?\"},\"value\":{\"text\":\"20\"}}"
+      ]
+    }
+  },
+  "checks": {
+    "allAdmitted": true,
+    "threeSendsRanTogether": true,
+    "sendsRanBesideTheInvoke": true,
+    "plainSendCarriedNothing": true,
+    "annotatedSendCarriedOnlyItsAnnotation": true,
+    "answeredSendCarriedOnlyItsAnswer": true,
+    "allAccepted": true
+  },
+  "passed": true,
+  "finishedAt": "2026-10-16T04:51:17.086Z"
+}

@@ -11,7 +11,9 @@ use crate::{
         ThreadId,
     },
 };
-pub(crate) use sqlite::{PersonalPresentationPin, QueuedStop, SqliteProductStore};
+pub(crate) use sqlite::{
+    CAPACITY_WAIT_INTERRUPTED, PersonalPresentationPin, QueuedStop, SqliteProductStore,
+};
 use thiserror::Error;
 
 pub(crate) struct ProductStateSnapshot {

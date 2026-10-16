@@ -2728,8 +2728,15 @@ async function run() {
   const cancelled = await createInteraction(productSession, threadId, protectedPrompt(cancelPath, "must-not-appear", "Do not retry after cancellation."));
   const cancelWaiting = await waitForOpenApproval(productSession, threadId, cancelled.id, "cancelled-provider-request");
   await capture("cancellation-waiting", ["protected action pending before explicit completion cancellation"], cancelWaiting.receipt);
+  // Root runs run side by side (#719), so the harness cancel names the completion it stops.
+  const cancelledInteraction = (detail) => detail.interactions.find((item) => String(item.id) === String(cancelled.id));
+  const cancelledCompletionId = cancelledInteraction(await waitForThread(productSession, threadId, (detail) => (
+    cancelledInteraction(detail)?.graphNodeId != null
+  ), "cancelled request graph binding")).graphNodeId;
   const cancelResult = await abortableEvidenceOperation("harness cancellation", async (signal) => {
-    const response = await fetch(new URL(`/sessions/${threadId}/cancel`, runtimeSession.harnessUrl), {
+    const url = new URL(`/sessions/${threadId}/cancel`, runtimeSession.harnessUrl);
+    url.searchParams.set("completionId", String(cancelledCompletionId));
+    const response = await fetch(url, {
       method: "POST",
       headers: { Authorization: `Bearer ${runtimeSession.harnessControlToken}`, "Content-Type": "application/json" },
       body: "{}",

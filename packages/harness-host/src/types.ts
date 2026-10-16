@@ -183,8 +183,8 @@ export interface HarnessTraceSink {
 }
 
 /**
- * One accepted earlier interaction of the thread, as graph pointers. A fresh native session reads
- * the turn's message from its interaction node and its answer from its layer.
+ * One accepted earlier interaction of the thread, as graph pointers. A root run reads the turn's
+ * message from its interaction node and its answer from its layer.
  */
 export interface HarnessThreadHistoryEntry {
   readonly interactionNodeId: number;
@@ -192,18 +192,12 @@ export interface HarnessThreadHistoryEntry {
   readonly responseLayerId?: number;
 }
 
-/**
- * Product-owned: this root run starts a fresh native session. It runs beside the thread's other
- * runs and never resumes or replaces the thread's native root session.
- */
-export type HarnessNativeSessionMode = "fresh";
-
 export interface HarnessCompletionTraceContext {
   readonly threadIconSelection?: { readonly eligible: true };
-  readonly requireNativeContinuity?: boolean;
-  readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
-  readonly nativeSession?: HarnessNativeSessionMode;
-  /** The thread's accepted interactions in order, sent with a fresh root run. */
+  /**
+   * The thread's latest accepted interactions in order. The product sends them with every root
+   * run, because every root run starts a fresh native session (#719).
+   */
   readonly threadHistory?: readonly HarnessThreadHistoryEntry[];
   readonly productInteractionId: number;
   readonly personalPresentationVersionId?: number;
@@ -270,12 +264,10 @@ export type CompletionOrigin =
 
 export interface HarnessRunContext {
   readonly threadIconSelection?: { readonly eligible: true };
-  /** Trusted product assertion: a fresh native root would lose legacy context. */
-  readonly requireNativeContinuity?: boolean;
-  readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
-  /** A fresh root run never resumes or replaces the thread's native root session. */
-  readonly nativeSession?: HarnessNativeSessionMode;
-  /** The thread's accepted interactions in order. Present for a fresh root run. */
+  /**
+   * The thread's latest accepted interactions in order, as graph pointers. Every root run starts a
+   * fresh native session and never resumes one (#719), so this is how it finds earlier turns.
+   */
   readonly threadHistory?: readonly HarnessThreadHistoryEntry[];
   /** GraphComplete provenance; provider session identity is deliberately separate. */
   readonly origin: CompletionOrigin;

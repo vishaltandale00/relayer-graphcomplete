@@ -131,3 +131,22 @@ export function actionReviewKind(action) {
     || (action?.kind === "invoke" && action.targetLayerId != null)
   ) ? "navigate-action" : "invoke-action";
 }
+
+/**
+ * Merges the run an invoke returned into the thread's interactions (#720). A row a refresh
+ * already moved past waiting, to running or to an end, is newer and is kept. The server omits
+ * a queue reason when the run does not wait, so an old one never lingers.
+ */
+export function mergeInvokedInteraction(interactions = [], interaction) {
+  const existing = interactions.find((item) => String(item.id) === String(interaction.id));
+  if (existing && !["not_started", "submitted", "queued"].includes(existing.completionStatus)) return interactions;
+  // A run waits behind its node first and for capacity after, so a node wait never replaces a
+  // capacity wait a refresh already saw.
+  if (existing?.completionStatus === "queued" && existing.queueReason === "capacity"
+    && interaction.completionStatus === "queued" && interaction.queueReason !== "capacity") return interactions;
+  const merged = { ...existing, ...interaction };
+  if (!("queueReason" in interaction)) delete merged.queueReason;
+  return existing
+    ? interactions.map((item) => (item === existing ? merged : item))
+    : [...interactions, merged];
+}

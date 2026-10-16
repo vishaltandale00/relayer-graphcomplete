@@ -814,7 +814,7 @@
         "SettlementClearsOnlySentText",
         "SentTextIsNotShownAgain"
       ],
-      "summary": "A render during the POST re-enables the prompt; text typed then moves into the new turn's draft when it loads.",
+      "summary": "Text typed during the POST, after a render, moves into the new turn's draft when it loads.",
       "steps": [
         [
           "Type"
@@ -852,7 +852,7 @@
         "SettlementClearsOnlySentText",
         "SentTextIsNotShownAgain"
       ],
-      "summary": "Leaving the thread and returning during the POST re-enables the prompt; text typed then moves into the new turn's draft when it loads.",
+      "summary": "Text typed after leaving the thread and returning during the POST moves into the new turn's draft when it loads.",
       "steps": [
         [
           "Type"
@@ -1327,6 +1327,71 @@
         [
           "PostFails",
           "A"
+        ]
+      ]
+    },
+    {
+      "id": "composer-send-beside-running-turn",
+      "module": "TurnComposer",
+      "preset": "composer-replay-parallel",
+      "init": "view = \"A\"",
+      "promises": [
+        "UnsentDraftSurvives",
+        "SettlementClearsOnlySentText",
+        "SentTextIsNotShownAgain"
+      ],
+      "summary": "A message is sent while the thread's latest turn still runs (#719): the prompt stays usable, the server records it beside the running turn, and both run.",
+      "steps": [
+        [
+          "Type"
+        ],
+        [
+          "ClickSend"
+        ],
+        [
+          "PostInserted",
+          "A"
+        ],
+        [
+          "PostSucceeds",
+          "A"
+        ],
+        [
+          "RefreshReturns",
+          "A"
+        ],
+        [
+          "Settle",
+          "A"
+        ],
+        [
+          "Type"
+        ],
+        [
+          "ClickSend"
+        ],
+        [
+          "PostInserted",
+          "A"
+        ],
+        [
+          "PostSucceeds",
+          "A"
+        ],
+        [
+          "RefreshReturns",
+          "A"
+        ],
+        [
+          "Settle",
+          "A"
+        ],
+        [
+          "TurnFinishes",
+          "A"
+        ],
+        [
+          "Type"
         ]
       ]
     },
