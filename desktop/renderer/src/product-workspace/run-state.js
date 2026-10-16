@@ -26,12 +26,14 @@ export function interactionActivity(interaction) {
  * A thread's symbol from its human turns, as the app server computes it for thread lists. Every
  * human-started run, message or invoke, runs beside the others (#719), so the symbol means "any
  * run active": the most urgent active run wins over the latest turn, even a finished one.
- * Otherwise the latest turn's failure shows.
+ * Otherwise the latest turn's failure shows. An agent's child never makes the thread running, but
+ * its pending approval request is the user's to answer, even after its graph settled.
  */
-export function threadActivity(turns = []) {
+export function threadActivity(turns = [], childApprovalPending = false) {
   const active = turns.filter(runIsActive);
   const stopping = (turn) => turn.stopRequested && !turn.stopError;
-  if (active.some((turn) => turn.completionStatus === "waiting_for_approval" && !stopping(turn))) return "needs_approval";
+  const needsApproval = (turn) => runIsActive(turn) && turn.completionStatus === "waiting_for_approval" && !stopping(turn);
+  if (turns.some(needsApproval) || childApprovalPending) return "needs_approval";
   if (active.some(stopping)) return "stopping";
   if (active.length > 0) return "running";
   return turns.at(-1)?.completionStatus === "failed" ? "failed" : null;
