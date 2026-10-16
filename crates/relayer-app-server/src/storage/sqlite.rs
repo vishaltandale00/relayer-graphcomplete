@@ -54,7 +54,6 @@ pub(crate) const QUEUED_RUN_STOPPED: &str = "Stopped before it started.";
 pub(crate) const CAPACITY_WAIT_INTERRUPTED: &str =
     "Relayer stopped before this message had capacity to start. Send it again to run it.";
 
-
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {
     pool: SqlitePool,

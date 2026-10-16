@@ -1112,7 +1112,8 @@ impl RuntimeClient {
                 "traceContext": { "productInteractionId": command.product_interaction_id },
             });
             if command.thread_icon_selection_eligible {
-                complete_body["traceContext"]["threadIconSelection"] = serde_json::json!({"eligible": true});
+                complete_body["traceContext"]["threadIconSelection"] =
+                    serde_json::json!({"eligible": true});
             }
             if let Some(history) = command.thread_history {
                 complete_body["traceContext"]["threadHistory"] = serde_json::to_value(history)
@@ -4897,7 +4898,11 @@ mod tests {
                         assert_eq!(headers["authorization"], "Bearer harness-control");
                         assert_eq!(body["interactionId"], 7);
                         // No root run resumes a native session (#719): nothing asks for one.
-                        for retired in ["nativeSession", "requireNativeContinuity", "nativeHistoryAnchor"] {
+                        for retired in [
+                            "nativeSession",
+                            "requireNativeContinuity",
+                            "nativeHistoryAnchor",
+                        ] {
                             assert!(body["traceContext"].get(retired).is_none(), "{body}");
                         }
                         if observed_calls.fetch_add(1, Ordering::SeqCst) == 0 {

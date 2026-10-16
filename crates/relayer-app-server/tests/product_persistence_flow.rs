@@ -5964,7 +5964,11 @@ async fn thread_messages_run_beside_each_other_and_node_runs_from_the_accepted_g
     }
     for body in [&first_body, &second_body] {
         let context = &body["traceContext"];
-        for retired in ["nativeSession", "requireNativeContinuity", "nativeHistoryAnchor"] {
+        for retired in [
+            "nativeSession",
+            "requireNativeContinuity",
+            "nativeHistoryAnchor",
+        ] {
             assert!(context.get(retired).is_none(), "{context}");
         }
         assert_eq!(context["threadHistory"], json!([root.clone()]), "{context}");
@@ -5985,7 +5989,11 @@ async fn thread_messages_run_beside_each_other_and_node_runs_from_the_accepted_g
         follow_up_body["traceContext"]["threadHistory"],
         json!([root, {"interactionNodeId": first_node, "responseLayerId": 900 + first_node}]),
     );
-    assert!(follow_up_body["traceContext"].get("nativeSession").is_none());
+    assert!(
+        follow_up_body["traceContext"]
+            .get("nativeSession")
+            .is_none()
+    );
 
     for run in [second, x, y, follow_up] {
         fixture.settle(run, true);
@@ -6005,7 +6013,6 @@ async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free()
     // Node 7 offers actions 41, 44 and 47; every other action has a node of its own.
     const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 8), (43, 9), (44, 7), (46, 11), (47, 7)];
     let fixture = HeldRunsFixture::open(ACTIONS, Some(2)).await;
-    let thread_id = fixture.thread_id;
 
     // Two runs fill the limit.
     let (a, _) = fixture.invoke(41).await;

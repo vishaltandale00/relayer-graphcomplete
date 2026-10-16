@@ -806,12 +806,7 @@ mod tests {
             submitted_input_draft_revision: None,
         };
         let created = store
-            .insert_interaction_input(
-                ThreadId::from_database(thread_id),
-                input(),
-                None,
-                false,
-            )
+            .insert_interaction_input(ThreadId::from_database(thread_id), input(), None, false)
             .await
             .unwrap();
         let interaction = match created {
@@ -854,12 +849,7 @@ mod tests {
             StorageError::IncompatibleSchema(_)
         ));
         let replay = store
-            .insert_interaction_input(
-                ThreadId::from_database(thread_id),
-                input(),
-                None,
-                false,
-            )
+            .insert_interaction_input(ThreadId::from_database(thread_id), input(), None, false)
             .await
             .unwrap();
         assert!(
@@ -986,12 +976,7 @@ mod tests {
             submitted_input_draft_revision: None,
         };
         let created = store
-            .insert_interaction_input(
-                ThreadId::from_database(thread_id),
-                input,
-                None,
-                false,
-            )
+            .insert_interaction_input(ThreadId::from_database(thread_id), input, None, false)
             .await
             .unwrap();
         let interaction = match created {

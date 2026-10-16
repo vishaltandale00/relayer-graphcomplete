@@ -1090,11 +1090,13 @@ mod tests {
             .await
             .unwrap();
         // The first message still runs.
-        sqlx::query("UPDATE interactions SET completion_status='running',graph_node_id=100 WHERE id=?1")
-            .bind(thread.root_interaction_id.value())
-            .execute(&store.pool)
-            .await
-            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='running',graph_node_id=100 WHERE id=?1",
+        )
+        .bind(thread.root_interaction_id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
         let action = InputAction {
             control: InputControl::Text,
             prompt: "Notes".into(),
@@ -1151,7 +1153,9 @@ mod tests {
                     occurrence: &occurrence(300),
                     source_node_id: 400,
                     action: &action,
-                    value: &ActionInputValue::Text { text: "First answer".into() },
+                    value: &ActionInputValue::Text {
+                        text: "First answer".into(),
+                    },
                 },
                 0,
             )
@@ -1165,7 +1169,15 @@ mod tests {
         )
         .unwrap();
         let answered = created(
-            send("answered", Some(vec![occurrence(300)]), answered_digest.clone(), vec![], vec![], Some(revision)).await,
+            send(
+                "answered",
+                Some(vec![occurrence(300)]),
+                answered_digest.clone(),
+                vec![],
+                vec![],
+                Some(revision),
+            )
+            .await,
         );
         // An overlapping send that reserved the same answer is refused: it is consumed once.
         let replayed_digest = relayer_graph_core::interaction_input_authority_digest(
@@ -1173,8 +1185,20 @@ mod tests {
             std::slice::from_ref(&first_answer),
         )
         .unwrap();
-        match send("replayed", Some(vec![occurrence(300)]), replayed_digest, vec![], vec![], Some(revision)).await {
-            Err(StorageError::ActionInputDraftConflict { code: "input_draft_revision_conflict", .. }) => {}
+        match send(
+            "replayed",
+            Some(vec![occurrence(300)]),
+            replayed_digest,
+            vec![],
+            vec![],
+            Some(revision),
+        )
+        .await
+        {
+            Err(StorageError::ActionInputDraftConflict {
+                code: "input_draft_revision_conflict",
+                ..
+            }) => {}
             other => panic!("one answer was consumed twice: {other:?}"),
         }
 
@@ -1186,7 +1210,9 @@ mod tests {
                     occurrence: &occurrence(301),
                     source_node_id: 400,
                     action: &action,
-                    value: &ActionInputValue::Text { text: "Second answer".into() },
+                    value: &ActionInputValue::Text {
+                        text: "Second answer".into(),
+                    },
                 },
                 store.action_input_draft(thread.id).await.unwrap().revision,
             )
@@ -1226,8 +1252,20 @@ mod tests {
         );
         // The annotation was consumed by that send; another send cannot take it too.
         let again_digest = relayer_graph_core::interaction_input_digest("again", &[]).unwrap();
-        match send("again", None, again_digest, contexts, vec!["annotation".into()], None).await {
-            Err(StorageError::ContextDraftConflict { code: "context_confirmation_not_pending", .. }) => {}
+        match send(
+            "again",
+            None,
+            again_digest,
+            contexts,
+            vec!["annotation".into()],
+            None,
+        )
+        .await
+        {
+            Err(StorageError::ContextDraftConflict {
+                code: "context_confirmation_not_pending",
+                ..
+            }) => {}
             other => panic!("one annotation was consumed twice: {other:?}"),
         }
 
@@ -1235,12 +1273,33 @@ mod tests {
         let answered_input = store.interaction_input(answered.id).await.unwrap().unwrap();
         assert_eq!(answered_input.submitted_inputs, vec![first_answer]);
         assert!(answered_input.contexts.is_empty());
-        let annotated_input = store.interaction_input(annotated.id).await.unwrap().unwrap();
+        let annotated_input = store
+            .interaction_input(annotated.id)
+            .await
+            .unwrap()
+            .unwrap();
         assert_eq!(annotated_input.submitted_inputs, vec![second_answer]);
         assert_eq!(annotated_input.contexts.len(), 1);
-        assert!(store.interaction_consumes_context_confirmations(annotated.id).await.unwrap());
-        assert!(!store.interaction_consumes_context_confirmations(answered.id).await.unwrap());
-        assert!(store.action_input_draft(thread.id).await.unwrap().attachments.is_empty());
+        assert!(
+            store
+                .interaction_consumes_context_confirmations(annotated.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !store
+                .interaction_consumes_context_confirmations(answered.id)
+                .await
+                .unwrap()
+        );
+        assert!(
+            store
+                .action_input_draft(thread.id)
+                .await
+                .unwrap()
+                .attachments
+                .is_empty()
+        );
         store.pool.close().await;
     }
 
