@@ -6636,11 +6636,19 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
         [head, identified, plain, second, third, waiting]
     );
     assert_eq!(fixture.thread_summary().await["pausedRuns"], 0);
-    // A repeated Resume of a run that already ended reports it as it stands and starts
-    // nothing; a Discard of it changes nothing.
-    let (status, ended) = fixture.run_action(other, "resume").await;
+    // A repeated Resume of a run the user resumed, which has ended since, reports it as it
+    // stands and starts nothing.
+    let (status, ended) = fixture.run_action(head, "resume").await;
     assert_eq!(status, StatusCode::OK, "{ended}");
-    assert_eq!(ended["interactions"][0]["completionStatus"], "stopped");
+    assert_eq!(ended["interactions"][0]["completionStatus"], "accepted");
+    // A run that was never resumed is refused: the discarded one, and a run that was never
+    // paused at all.
+    for never_resumed in [other, fixture.source_interaction_id] {
+        let (status, refused) = fixture.run_action(never_resumed, "resume").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["code"], "run_not_resumable");
+    }
+    // A Discard of a run that already ended changes nothing.
     let (status, discarded) = fixture.run_action(other, "discard").await;
     assert_eq!(status, StatusCode::OK, "{discarded}");
     assert_eq!(discarded["completionStatus"], "stopped");

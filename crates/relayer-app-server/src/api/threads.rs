@@ -3368,9 +3368,10 @@ pub(super) async fn resume_interaction(
         interaction.completion_status.as_str(),
         "paused" | "interrupted"
     ) {
-        // A run that already resumed, or that ended since, is reported as it stands, so a
-        // repeated Resume whose answer was lost starts nothing twice.
-        if interaction.completion_status != "not_started" {
+        // A run the user already resumed is reported as it stands, even once it has ended, so
+        // a repeated Resume whose answer was lost starts nothing twice. A run that was never
+        // paused or interrupted is refused.
+        if state.product.was_resumed(interaction_id).await? {
             return Ok(Json(ResumedRunsResponse {
                 interactions: vec![interaction.into()],
             }));

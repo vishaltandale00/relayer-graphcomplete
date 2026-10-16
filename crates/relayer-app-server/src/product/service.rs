@@ -2910,6 +2910,10 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn was_resumed(&self, run: InteractionId) -> Result<bool, ProductError> {
+        self.storage.was_resumed(run).await.map_err(Into::into)
+    }
+
     pub(crate) async fn restore_restart_run(
         &self,
         run: InteractionId,

@@ -98,6 +98,16 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
+    /// Whether the user resumed this run after a restart (#722).
+    pub(crate) async fn was_resumed(&self, run: InteractionId) -> Result<bool, StorageError> {
+        Ok(sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM run_resumptions WHERE interaction_id=?1)",
+        )
+        .bind(run.value())
+        .fetch_one(&self.pool)
+        .await?)
+    }
+
     /// Records a run's new execution receipts on the graph interaction it is already bound to.
     /// A message a restart interrupted resumes under the thread's current harness, which an
     /// upgrade or a harness retirement may have changed (#722). Only a message with no invoke
@@ -195,6 +205,12 @@ impl SqliteProductStore {
             .await?
             .rows_affected();
             if changed == 1 {
+                // Durable evidence that the user resumed it, so a repeated Resume can report
+                // it as it stands once it has ended.
+                sqlx::query("INSERT INTO run_resumptions(interaction_id,resumed_at) VALUES (?1,strftime('%s','now') || '000') ON CONFLICT(interaction_id) DO NOTHING")
+                    .bind(run.value())
+                    .execute(&mut *transaction)
+                    .await?;
                 claimed.push(*run);
             }
         }
@@ -214,7 +230,8 @@ impl SqliteProductStore {
         if !matches!(status, "paused" | "interrupted") {
             return Ok(false);
         }
-        let result = sqlx::query(
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let restored = sqlx::query(
             "UPDATE interactions SET completion_status=?2,completion_error=?3
              WHERE id=?1 AND completion_status='submitted'
                AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=?1)
@@ -223,9 +240,19 @@ impl SqliteProductStore {
         .bind(run.value())
         .bind(status)
         .bind(note)
-        .execute(&self.pool)
-        .await?;
-        Ok(result.rows_affected() == 1)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected()
+            == 1;
+        // It never started, so it waits for the user's Resume as though none happened.
+        if restored {
+            sqlx::query("DELETE FROM run_resumptions WHERE interaction_id=?1")
+                .bind(run.value())
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(restored)
     }
 
     /// Marks a discarded run whose graph current a Stop settled as discarded, not stopped by a
@@ -477,6 +504,8 @@ mod tests {
             vec![runs[1], runs[2]]
         );
         assert_eq!(store.completion_status_for_test(runs[1]).await, "submitted");
+        assert!(store.was_resumed(runs[1]).await.unwrap());
+        assert!(!store.was_resumed(runs[0]).await.unwrap());
         assert!(
             store
                 .claim_restart_runs(thread, &[runs[1]])
@@ -492,6 +521,8 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(store.completion_status_for_test(runs[2]).await, "paused");
+        // A run returned to paused never started, so no Resume is on record for it.
+        assert!(!store.was_resumed(runs[2]).await.unwrap());
         assert!(
             !store
                 .restore_restart_run(runs[2], "paused", None)
