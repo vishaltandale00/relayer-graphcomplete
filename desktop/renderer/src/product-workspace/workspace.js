@@ -4645,6 +4645,10 @@ export function createProductWorkspace({
     const host = $("#interactionInputHistory");
     const inputs = interaction?.submittedInputs || [];
     host.classList.toggle("hidden", inputs.length === 0);
+    // A turn's submitted inputs never change, so a refresh keeps open rows and the list's scroll.
+    const key = inputs.length && interaction?.id != null ? `${interaction.id}:${inputs.length}` : "";
+    if (key && host.dataset.inputsKey === key) return;
+    host.dataset.inputsKey = key;
     if (!inputs.length) {
       host.replaceChildren();
       return;
@@ -4661,7 +4665,10 @@ export function createProductWorkspace({
       const prompt = graphDocument.createElement("span");
       prompt.textContent = input.action?.prompt || "Input";
       const value = graphDocument.createElement("span");
-      value.textContent = submittedInputHistoryPresentation(input).fullValue;
+      const { compactValue, fullValue } = submittedInputHistoryPresentation(input);
+      // A closed row holds only the bounded prefix; the exact value is laid out only while open.
+      value.textContent = compactValue;
+      item.addEventListener("toggle", () => { value.textContent = item.open ? fullValue : compactValue; });
       summary.append(prompt, value);
       item.append(summary);
       list.append(item);
