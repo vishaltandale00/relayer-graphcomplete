@@ -13,7 +13,7 @@
   },
   "rendererArtifact": {
     "directory": "desktop/renderer",
-    "digest": "596c747ea0b4c4f6f4ca0da9b1f328c3448e750839c4fce55958323a2b725efc",
+    "digest": "a2c7dc2ee8c88324846df279065339006398a70c96ca0b60ac9ce788c15c6836",
     "files": {
       "assets/relayer-logo.svg": {
         "bytes": 509,
@@ -284,16 +284,16 @@
         "sha256": "507d33ea4454767adde7bc29143897ccebe90dc601d88d6b0864079dadfc30fd"
       },
       "src/product-workspace/view.js": {
-        "bytes": 16067,
-        "sha256": "ababaea4790894662580eee8ea955616991ac4ac401b1802841432fba73e8f82"
+        "bytes": 16060,
+        "sha256": "ecaf8f007f92f68497825074a2a24580823a735ae7176fdbd0e9dcb97d56b0cb"
       },
       "src/product-workspace/workspace-layout.js": {
         "bytes": 4731,
         "sha256": "8e5d307f95b1863fb995606ca32a832de088916716c39476f9d31f2174de002d"
       },
       "src/product-workspace/workspace.js": {
-        "bytes": 330649,
-        "sha256": "57227ad94514eda00a8c2d3d9b0e561d9accec2123d97c6947c3269243530b66"
+        "bytes": 331028,
+        "sha256": "08ffc724b4eebf749cb9209fb70ca9cacb57bca4c8a60ead8d78b29919864c95"
       },
       "src/project-composer-navigation.js": {
         "bytes": 282,
@@ -400,8 +400,8 @@
         "sha256": "8ef7bdf6d8b97ef298e083ad42c7e87670e4bd588468970a43c1f73da60c0831"
       },
       "styles.css": {
-        "bytes": 137435,
-        "sha256": "2078c75f80f17569a8c6130305cfb9647a00ac842b46dcca1d77d5015bd5bb23"
+        "bytes": 137526,
+        "sha256": "9a38c7ef4fef9f815a8a0aefdfed98235669b92023e0546bb2c03bd0626853db"
       },
       "vendor/artifact-office.LICENSES.txt": {
         "bytes": 62430,
