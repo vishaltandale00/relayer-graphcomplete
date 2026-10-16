@@ -27,6 +27,34 @@ pub(crate) struct NodeRunQueue {
     preparing: Arc<std::sync::Mutex<HashMap<InteractionId, usize>>>,
 }
 
+struct Preparation<'a, OnAbandon: FnOnce()> {
+    queue: &'a NodeRunQueue,
+    run: InteractionId,
+    on_abandon: Option<OnAbandon>,
+}
+
+impl<OnAbandon: FnOnce()> Drop for Preparation<'_, OnAbandon> {
+    fn drop(&mut self) {
+        self.queue.end_preparing(self.run);
+        // Cleanup observes this delivery gone, even if it starts on another runtime worker.
+        if let Some(on_abandon) = self.on_abandon.take() {
+            on_abandon();
+        }
+    }
+}
+
+/// An owned preparing mark for a run (#720); it ends when dropped.
+pub(crate) struct PreparingHold {
+    queue: NodeRunQueue,
+    run: InteractionId,
+}
+
+impl Drop for PreparingHold {
+    fn drop(&mut self) {
+        self.queue.end_preparing(self.run);
+    }
+}
+
 #[derive(Default)]
 struct NodeState {
     holder: Option<Holder>,
@@ -90,11 +118,40 @@ impl NodeState {
 }
 
 impl NodeRunQueue {
-    pub(crate) fn begin_preparing(&self, run: InteractionId) {
+    /// Tracks only this delivery's preparation, including while it waits for the runtime.
+    pub(crate) async fn while_preparing<T>(
+        &self,
+        run: InteractionId,
+        preparation: impl std::future::Future<Output = T>,
+        on_abandon: impl FnOnce(),
+    ) -> T {
+        self.begin_preparing(run);
+        let mut scope = Preparation {
+            queue: self,
+            run,
+            on_abandon: Some(on_abandon),
+        };
+        let result = preparation.await;
+        scope.on_abandon = None;
+        result
+    }
+
+    /// Marks a run preparing for as long as the returned hold lives (#720). A held run stays
+    /// its request's from its claim, through its wait for capacity, to its preparation, so a
+    /// Stop that lands meanwhile is settled by that request, never beside it.
+    pub(crate) fn hold_preparing(&self, run: InteractionId) -> PreparingHold {
+        self.begin_preparing(run);
+        PreparingHold {
+            queue: self.clone(),
+            run,
+        }
+    }
+
+    fn begin_preparing(&self, run: InteractionId) {
         *self.preparing.lock().unwrap().entry(run).or_default() += 1;
     }
 
-    pub(crate) fn end_preparing(&self, run: InteractionId) {
+    fn end_preparing(&self, run: InteractionId) {
         let mut preparing = self.preparing.lock().unwrap();
         if let Some(count) = preparing.get_mut(&run) {
             *count -= 1;
@@ -362,7 +419,7 @@ impl NodeRunQueue {
     }
 
     #[cfg(test)]
-    pub(crate) async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
+    pub(super) async fn holder(&self, key: NodeRunKey) -> Option<InteractionId> {
         self.nodes
             .lock()
             .await
@@ -814,15 +871,90 @@ mod tests {
 
     /// Two deliveries of one run can prepare at once: the run stays marked as preparing until
     /// the last of them returns (Codex review on #732).
-    #[test]
-    fn preparation_marks_count_concurrent_deliveries() {
+    #[tokio::test]
+    async fn preparation_marks_count_concurrent_deliveries() {
         let queue = NodeRunQueue::default();
         let run = InteractionId::from_database(7);
-        queue.begin_preparing(run);
-        queue.begin_preparing(run);
-        queue.end_preparing(run);
+        let (first_entered, first_started) = tokio::sync::oneshot::channel();
+        let (second_entered, second_started) = tokio::sync::oneshot::channel();
+        let (finish, finished) = tokio::sync::oneshot::channel();
+        let first = {
+            let queue = queue.clone();
+            tokio::spawn(async move {
+                queue
+                    .while_preparing(
+                        run,
+                        async move {
+                            first_entered.send(()).unwrap();
+                            std::future::pending::<()>().await;
+                        },
+                        || {},
+                    )
+                    .await;
+            })
+        };
+        let second = {
+            let queue = queue.clone();
+            tokio::spawn(async move {
+                queue
+                    .while_preparing(
+                        run,
+                        async move {
+                            second_entered.send(()).unwrap();
+                            finished.await.unwrap();
+                        },
+                        || {},
+                    )
+                    .await;
+            })
+        };
+        first_started.await.unwrap();
+        second_started.await.unwrap();
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
         assert!(queue.is_preparing(run));
-        queue.end_preparing(run);
+        finish.send(()).unwrap();
+        second.await.unwrap();
         assert!(!queue.is_preparing(run));
+    }
+
+    /// PAR-008: a preparation task that no longer exists must not keep Stop waiting for it.
+    #[tokio::test]
+    async fn preparation_tracking_ends_when_its_task_panics_or_is_cancelled() {
+        for panic in [true, false] {
+            let queue = NodeRunQueue::default();
+            let run = InteractionId::from_database(7);
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let preparing = {
+                let queue = queue.clone();
+                tokio::spawn(async move {
+                    queue
+                        .while_preparing(
+                            run,
+                            async move {
+                                entered.send(()).unwrap();
+                                if panic {
+                                    panic!("preparation failed while running");
+                                }
+                                std::future::pending::<()>().await;
+                            },
+                            || {},
+                        )
+                        .await;
+                })
+            };
+            started.await.unwrap();
+            if !panic {
+                assert!(queue.is_preparing(run));
+                preparing.abort();
+            }
+            let error = preparing.await.unwrap_err();
+            assert_eq!(error.is_panic(), panic);
+            assert_eq!(error.is_cancelled(), !panic);
+            assert!(
+                !queue.is_preparing(run),
+                "Stop would defer to a preparation task that already ended"
+            );
+        }
     }
 }
