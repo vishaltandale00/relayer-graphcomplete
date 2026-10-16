@@ -25,6 +25,8 @@ export function observeHumanTaskPresentation({ bridge, getState, documentObject 
       if (key === previous) return;
       previous = key;
       snapshot.observedAt = Date.now();
+      // Local after-paint state must not lag behind a queued evidence write.
+      bridge.present?.(snapshot);
       pending = pending.then(() => bridge.observe(snapshot)).catch(() => {
         // Evidence gaps are visible on review; never block the human's task.
         captureFailures++;

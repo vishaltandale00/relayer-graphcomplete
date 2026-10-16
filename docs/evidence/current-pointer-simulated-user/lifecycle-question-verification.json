@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "45a9ba05d4192f9d14cd5338ac543a556be9f6af",
+  "testedWorkspaceDigest": "2dd0f7bd8a9170b4195c41cc8ea4c23d77eaf231598d148f123bd606d381ca86",
+  "outcomes": {
+    "build": "pass",
+    "fullCheckCommand": "failed: two timeouts; preserved",
+    "nativeWorkspaceAndDoc": 770,
+    "nativeCrashAndDoc": 361,
+    "typeScriptAndWorkspaceChecks": "pass",
+    "initialVitest": {
+      "passed": 4256,
+      "failed": 2,
+      "skipped": 3,
+      "passingFiles": 322,
+      "failedFiles": 2,
+      "skippedFiles": 1
+    },
+    "isolatedPreviouslyFailingFiles": {
+      "passed": 143,
+      "files": 2,
+      "maxWorkers": 1,
+      "timeoutIncreases": false,
+      "sourceChanges": false
+    },
+    "secretBoundaryPassed": 2,
+    "pythonSdkPassed": 97,
+    "receiptGates": "pass",
+    "prdReadability": "pass",
+    "fullEvalWeb": "pass",
+    "compiledRuntimeScenariosPassed": 12
+  },
+  "logs": {
+    "lifecycle-question-build-v2.txt": {
+      "sha256": "603396f2d52ec8f851dfd1f101d641679082ef0c219700e4b02fb4c1fb67c683",
+      "byteLength": 2040
+    },
+    "lifecycle-question-build.txt": {
+      "sha256": "db9e1f51629440be6f25310a4c45378f8d13ec40283a962295a52de62840f0cf",
+      "byteLength": 2040
+    },
+    "lifecycle-question-check.txt": {
+      "sha256": "cba4e2dd7ec81f110c666b6f94147f39ced8b4241549b6d8091884362784d242",
+      "byteLength": 138848
+    },
+    "lifecycle-question-compiled.txt": {
+      "sha256": "3c62a3557fd23d7d9822f4ba9f2f093d1c292e3c6383d49703afe45935421200",
+      "byteLength": 380
+    },
+    "lifecycle-question-python.txt": {
+      "sha256": "3a4e1223a3f37bcbc8655a5e0b67a7ef447ce33b40aff6f7b28a73e49bcea2be",
+      "byteLength": 196
+    },
+    "lifecycle-question-readability.txt": {
+      "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+      "byteLength": 166
+    },
+    "lifecycle-question-real-examples-red.txt": {
+      "sha256": "e2354be014a5b7cc6d4808a5c80b9f05d10ff3db03965d2d44dec3d79c161968",
+      "byteLength": 4060
+    },
+    "lifecycle-question-real-examples.txt": {
+      "sha256": "0a3048ce069f87bdef180a88766bddf7d77cf8d1d5d8890c7ae1a9ad5955dd2a",
+      "byteLength": 267
+    },
+    "lifecycle-question-receipts.txt": {
+      "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+      "byteLength": 927
+    },
+    "lifecycle-question-secret.txt": {
+      "sha256": "3df85d8c2ec21a38deacbf15ef142b66b008f92438f1fd6b93b2aabc4fdee9bd",
+      "byteLength": 428
+    },
+    "lifecycle-question-timeout-isolation.txt": {
+      "sha256": "d9d62e8ff1b72b33775643ab4b152b517a97c1d51c2036b4843614602da3c8ff",
+      "byteLength": 585
+    },
+    "lifecycle-question-warm-v2.txt": {
+      "sha256": "f3723759cb24943a67b32a821b2bcf15d371d503f8a4b9beecf6502d390ee3d7",
+      "byteLength": 56658
+    },
+    "lifecycle-question-warm-v3.txt": {
+      "sha256": "20cb4201a1d7ed928ad6af060cde7a0e0344f727c0a9a9b6014fd287c6c9d2f4",
+      "byteLength": 56658
+    },
+    "lifecycle-question-warm-v4.txt": {
+      "sha256": "f8e3934c557e951ee7cba2726d7207ec1fea7ca92559821507b135a206355741",
+      "byteLength": 259
+    },
+    "lifecycle-question-warm.txt": {
+      "sha256": "caa57f732ba000b36e855c6578af48d23817f264c232530c62f17e9808835f22",
+      "byteLength": 259
+    },
+    "lifecycle-question-web.txt": {
+      "sha256": "22dd025a62874535c4ef435d2f9bd13e37fb58de9804c070e023e34d092ed1e8",
+      "byteLength": 5212
+    }
+  },
+  "limits": [
+    "The failed npm run check is not rewritten as green. All selected checkpoints have passing evidence across the initial run, exact-file isolation and the explicit continuation.",
+    "The public-share failure was a 15-second timeout; provider video timed out waiting for onboarding. The isolated passes establish non-reproduction, not a proven contention cause.",
+    "No source or timeout changes were made for the isolated rerun. Earlier new-test fixture/assertion failures remain retained.",
+    "Historical renderer/native-input/Stop/source-bound visual evidence applies only to its unchanged source and is not rerun or relabeled here."
+  ]
+}

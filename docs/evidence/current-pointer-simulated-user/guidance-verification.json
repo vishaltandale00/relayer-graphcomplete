@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "kind": "guidance-repair-verification",
+  "base": "18c46db76ec9a70855836d64e5849b3802f154be",
+  "logs": {
+    "guidance-repair-build-v2.txt": {
+      "sha256": "6173037bbc07514763d5e295e0fa9594740d5ba3541eaa69ccec7789cd347afc",
+      "byteLength": 2040
+    },
+    "guidance-repair-check-v3.txt": {
+      "sha256": "71c2afffe7c679507dd93a74a8d60148f35b8f5ca1af1a8a5d19de068956e99e",
+      "byteLength": 138180
+    },
+    "guidance-repair-warm-v2.txt": {
+      "sha256": "37f8c0c17831081b2e2ec00d76ae4f517b5a7629a179c117f1e0bf3f6c364c65",
+      "byteLength": 259
+    },
+    "guidance-repair-secondary-v2.txt": {
+      "sha256": "a52e4468c665b6de64cc0f62b4595fb74fb214fcc650f25cebaa6ab5991845aa",
+      "byteLength": 257
+    },
+    "guidance-repair-recipes.txt": {
+      "sha256": "cccf83d00320dab98b53b24b93f47ab9e8f1f9da9ff7b311782928a7de6be465",
+      "byteLength": 270
+    },
+    "guidance-repair-compiled.txt": {
+      "sha256": "8789c28345fa8ea300154d4583ca550cbd994e3b62a2d4469207a50214d94184",
+      "byteLength": 259
+    },
+    "guidance-repair-artifact-example.txt": {
+      "sha256": "20fb408f56d8a17b338d07b09ceeb9979687a1fff44f931367aecdb5e8e102f4",
+      "byteLength": 2296
+    },
+    "guidance-repair-artifact-example-v3.txt": {
+      "sha256": "417a617be66fde510a7d0ad65a8ea269c2ac647270fccd51dace442b423da321",
+      "byteLength": 267
+    },
+    "guidance-repair-web.txt": {
+      "sha256": "0272346b51f12788630fae9d9059d9c2f4102ccc8e7d08e03272fd62ba71d7ed",
+      "byteLength": 3136
+    },
+    "guidance-repair-web-v2.txt": {
+      "sha256": "93fbdf5d55a52f629f6ca109e9e8482d1a931e881ab94f16476a4e4d5e020e4c",
+      "byteLength": 2731
+    },
+    "guidance-repair-current-browser.txt": {
+      "sha256": "26cd82526121a6f79a1d5f1d0049aa25211976effa6e5299a05a241051d15914",
+      "byteLength": 990
+    }
+  },
+  "outcomes": {
+    "build": "pass",
+    "fullCheck": "pass",
+    "nativeWorkspaceAndDoc": 770,
+    "nativeCrashAndDoc": 361,
+    "vitestPassed": 4254,
+    "vitestSkipped": 3,
+    "pythonSdk": 97,
+    "fullEvalWeb": "fail",
+    "currentNativeBrowserChapter": "pass",
+    "currentAuthoredBrowserChapter": "pass",
+    "compiledRuntimeScenarios": 12,
+    "exactArtifactExample": "pass"
+  },
+  "limits": [
+    "Log bytes are retained privately; hashes bind the recorded runs.",
+    "Executable files match the corrected live source; evidence documentation changed afterward.",
+    "Full Eval web failure remains unresolved; scoped chapters are not a full-runner pass.",
+    "Live Answer receipt does not establish candidate incorporation."
+  ],
+  "workspaceDigestAtCorrectedLiveStart": "a9420890aeafbfca0ce7047978742c98c59a81de6a26178ed65ad4a079d2d038"
+}

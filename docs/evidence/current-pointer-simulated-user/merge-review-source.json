@@ -1,0 +1,351 @@
+{
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "digest": "82852d2c481090db7ad15d4bd22d359f5e6473646871eee2201ae2f4f24e97b7",
+  "files": [
+    {
+      "path": "CONTEXT.md",
+      "sha256": "04a61f99b383f9d9c3f6717480e84468d4637be76ac41d8c1bf0059e618374ce"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api.rs",
+      "sha256": "4f8f68f7210ca208c9c67921856670f7cc90a514eec16094fd30d7fc2414acfc"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "sha256": "f8a8aa92e7eb64f0adc65612176c3d586b19ee711372a4a1ce5a12aafb75fe40"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/live_answers.rs",
+      "sha256": "994f24d609ac9f92d53d9b183bbfb5e64fefdf8b004b8f138617f15e1d73abad"
+    },
+    {
+      "path": "crates/relayer-app-server/src/environment.rs",
+      "sha256": "1e037a7ac2d0d8a03d183f7465c66c1561a74584590a5ac867a59ccdb8e81514"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "9819dee7e926670a0ae4834fd5555af002e5089bad26745536a6da6cbbb33a07"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "340d0efcdee534dca5cfbb9fce25649d9a9fa513020c7d8d3fa91dd59bd15e55"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "4441637f7ad9b5feb019208691e6edfe57582eaf28567e9080fa87cb61538c7b"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/live_answers.rs",
+      "sha256": "26f0ce04e17e6861fa7780b07a1fd5c88c20528c4ed0a11e9edc44e4663abc58"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/writer.rs",
+      "sha256": "22d09df7f7876266b5ec9cbc413bcdc8c6ea28e1a07f3f24a947e474c0688c19"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "b0eedd8d3f714d3a4254ac0529367785a95e5759539b7dc37514a409b08243ee"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+      "sha256": "a74cb6d0d07ec5332fbf8779d156724e8530da5a606e4ce64ab709bc70ec7003"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0040_live_answers.sql",
+      "sha256": "908e1ab1352b68da974c4d41f3866326a3e422b6d725f8cf8cc07c61256ea2e2"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/graph_database.rs",
+      "sha256": "5ea1e4cf18be7d8d249258803d95d62a5dd2e9b5c27974715858d47a0b7d5031"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/live_answers.rs",
+      "sha256": "f0736e773e16fd6a87333b3e26e0cdbd5c4861d7c20ee8d232ca65e320820839"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+      "sha256": "550dcb663998729e68f315e4b6989d02c2bccfae7889764622d5999b5ea5e234"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "1dd713c3a8299d1feb2061439f04296dd150e08b9a2c986051d15430f7517445"
+    },
+    {
+      "path": "desktop/eval-main/evaluator-selection.mjs",
+      "sha256": "2f6d36897ea16b34aa374133722c3233a35c122925c30cd22379ebc4de3fb87d"
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "06fb20ae713a101c2868f5644a2d85dd0913ac678d38163aa653e138de58ad93"
+    },
+    {
+      "path": "desktop/eval-main/setup-registry.mjs",
+      "sha256": "35cf5e209cc2686f485519e9b69ea7007302f596196d1c4ef16490718206056c"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-browser.mjs",
+      "sha256": "721de6dc3a8828cc01ba8de7b7880ad6f47eae4be9d22581495600f42f6ef02a"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-service.mjs",
+      "sha256": "90af7c6af18db84f200f31a0a6fcf1475d6e595028f4ada7adee5f9d645bb8c4"
+    },
+    {
+      "path": "desktop/eval-main/task-actor.mjs",
+      "sha256": "73b4a398e871e6cd87bec526cfeba78b5e7691644d3e4da785ef74edba6ffff4"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "sha256": "a02799cec08e7283bf6132091b02f290ce40055f2ac04d197dfb3204eba4c12b"
+    },
+    {
+      "path": "desktop/eval-renderer/human-tasks.js",
+      "sha256": "04cf4c9f24a40eaf901cc1bfd678c47f6c98ce33b1511d8c3994a71b9be8d4d5"
+    },
+    {
+      "path": "desktop/eval-renderer/web-bridge.js",
+      "sha256": "beb1aa3bb5c3ae4e121f13691be048918c65b7dc837a08a379d236972a696518"
+    },
+    {
+      "path": "desktop/main/managed-runtimes/recipes.mjs",
+      "sha256": "33083b85c85ea38fd10a3c3904d21066e7fafb4318efec4288c6262c27d1488b"
+    },
+    {
+      "path": "desktop/main/services/prime-agent-runtime.mjs",
+      "sha256": "17113140254b796aa62ea243c40e915ccc367773ab62e3687543d6a8fe9a251d"
+    },
+    {
+      "path": "desktop/renderer/src/human-task-observer.js",
+      "sha256": "832dcf2ef2bef9688b6d642d8aac8f4b201eeccf1aa58bafe10a7d2de8c140fc"
+    },
+    {
+      "path": "desktop/renderer/src/live-answers.js",
+      "sha256": "6c2103d6049bd94adc4b05a9b31e59d13036b6f309e9235aa91969a2a634a4c6"
+    },
+    {
+      "path": "desktop/renderer/src/main.js",
+      "sha256": "619a39b5024fe2f774acd63b3188c81249c6dad52242d47c5f37101371d12466"
+    },
+    {
+      "path": "desktop/renderer/src/node-input-drafts.js",
+      "sha256": "29d10cd0797b1aff7597c326a3cd4efc0a5e10b4d69041508eaf6f4d9992e9b9"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+      "sha256": "72d6c6a59dea41f7c0e69fc12bf9209cbeaf8b5bef7f08b5a5aa5175e217609b"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "c2f0697af85c83e6e6c03d2934e8bbcdf2b7268af2c0b3b448988813ddd5d0d6"
+    },
+    {
+      "path": "desktop/shared/telemetry-module-inventory.mjs",
+      "sha256": "f9fa4da180dce3464dc3e763d2e638a8f127008c7528aa635576a7903907e014"
+    },
+    {
+      "path": "harnesses/claude-basic.yaml",
+      "sha256": "dd97df2b4a09eeacb0aee25b14894af7f6d4f68d33198d626372a0884ab095ed"
+    },
+    {
+      "path": "harnesses/codex-basic.yaml",
+      "sha256": "87a148f38e63649fe70352ffcbdc6244a538389db8d37cf3e0c81bd892db7d33"
+    },
+    {
+      "path": "harnesses/prime-agent-basic.yaml",
+      "sha256": "86f39bd58893010ac72281d1616a7896bb61b5d9727f52cff0c3f809eabca11c"
+    },
+    {
+      "path": "package.json",
+      "sha256": "2ac70ad2f9535b78101f514b1c9aab834636d3316e539f7b31fa786705d6334e"
+    },
+    {
+      "path": "packages/eval-runner/src/simulated-user/task-actor.ts",
+      "sha256": "df4c0c01b710f7e3aaffd0512b74127156539be247f2a1598269dac2c75eae7b"
+    },
+    {
+      "path": "packages/graph-client/src/client.ts",
+      "sha256": "057f81cddb3f75e003e759c43d8e6cfa9bd61b6cb7beb33faed152a40fdcf0c8"
+    },
+    {
+      "path": "packages/graph-client/src/types.ts",
+      "sha256": "26bacaafede085a5cd9a82c3d10634db609e08ec8746cace97f4ebe6ae276fae"
+    },
+    {
+      "path": "packages/graph-client/test/live-answers.test.ts",
+      "sha256": "b07b0a6a2580fa4a0919f4df8e7174c8c558d6b20d92ba2afe70b28e675845bc"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "bfff19c8e4967af1570863aa8f7c7f2a16c1a1e01e0aa9963d8074508b3f22a8"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+      "sha256": "9b8802fe6f688c5730cf06ddb2410655ddaaba11bac34e48316db3d244e14d1d"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "bcda602b7e28247e52c2350e74e300087f2052f2c4ddb3a1ef1609d1557fbd7f"
+    },
+    {
+      "path": "packages/harness-host/test/claude-basic.test.ts",
+      "sha256": "42059e352f8ebe4d471222c5bb1675e04f3daad93e0281dbe4c71d4969f3baac"
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "9053f2b9e7b1641f981f2b001e8458f10faa749f6c10da0690baa5b1079378c8"
+    },
+    {
+      "path": "packages/harness-host/test/configuration.test.ts",
+      "sha256": "d0b5591b4e2cd8f17bc41161e50e6d1e901af442e9c0d2a32e9376bb4c5b0218"
+    },
+    {
+      "path": "packages/harness-host/test/graph-authoring-repair-examples.test.ts",
+      "sha256": "f8ff29ad76cfa0b67a5f80fae83300703170c146a4c26e461d83fdb70b01af34"
+    },
+    {
+      "path": "packages/harness-host/test/prime-agent.test.ts",
+      "sha256": "45fafba1e77f579ac5db5058b8fe7187239208b313a0251180bb501f021cbd66"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/authoring.py",
+      "sha256": "72f37d30b869f8a6d2a2e14f567cb70182f3d2ca662c81d490837810bdedc02b"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_live_answers.py",
+      "sha256": "0d95c482f2d8e4b787407648f7255c147d4b182c7eecc3a2e333621313154664"
+    },
+    {
+      "path": "scripts/build-public-share-viewer-artifact.mjs",
+      "sha256": "59e84f41890a1d7b72936ef8ba66fff7c2e184dcbed8d57b6039b6a31b7a8e30"
+    },
+    {
+      "path": "scripts/capture-provider-ux-video.mjs",
+      "sha256": "fb31b66a5ea7cb29e81f34965be3003cdb8d4627ef323a1ec5eec954336d0518"
+    },
+    {
+      "path": "scripts/ci/affected-modules.v1.json",
+      "sha256": "ce05e12d3c934e64884ce0e3948e2430d3ad875b9dcdb6ed32d3646a5b509e6d"
+    },
+    {
+      "path": "scripts/electron-proof-process.mjs",
+      "sha256": "79215db24b7af90351f9bc15e9f131d2a4bd6e1342ae31e28c32a53d2f0e99b7"
+    },
+    {
+      "path": "scripts/eval-current-actor-proof.mjs",
+      "sha256": "ed43e985025bb6ebe8ae138440c17148ae138ec9bd84888f28533ac423e1800b"
+    },
+    {
+      "path": "scripts/evidence-browser-target.mjs",
+      "sha256": "2fb667aea8622c4cc9ec42cde60526eaf7c86e328c65728657f7486a00f49dde"
+    },
+    {
+      "path": "scripts/run-desktop-stop-test.mjs",
+      "sha256": "163e1f29ba507143478a94161a08ad2c0b8f011a85cbf49f95c63ca9c476f2bc"
+    },
+    {
+      "path": "scripts/run-node-input-actions-test.mjs",
+      "sha256": "4e066fef0c24718a1ca656c9e65a8c418dbf1d0c85bc2089e2b5d7002b6c9165"
+    },
+    {
+      "path": "scripts/test-desktop-node-input-actions.mjs",
+      "sha256": "b6842c07b12f0809dc8366368a2c3fc6e4d9677b70cfe9a1a9199187c9349b8b"
+    },
+    {
+      "path": "scripts/test-desktop-stop.mjs",
+      "sha256": "c0dfb84658625f22d2e1c16d6cf39b4353175765054e32e624c5eab956146a32"
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "sha256": "257a427a9426b58744cdd39c7cf4a9ad44ba16985687d7df8d9fbcb921e94819"
+    },
+    {
+      "path": "test/ci-affected-plan.test.mjs",
+      "sha256": "d6364bab7c6262ba5e10d8338834e74c860f5a1cc95fd3a5134d24e67af5af2a"
+    },
+    {
+      "path": "test/electron-proof-process.test.mjs",
+      "sha256": "68546bc7775a9b36ed5ff0153ea559f6ed3e6d6bce737c067c1226b54f1c6a58"
+    },
+    {
+      "path": "test/eval-human-task-observer.test.mjs",
+      "sha256": "efc43078158bd4be20d0b88489a84809b5ececd0d9fbdea8fe272c4da8486251"
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "sha256": "addb4cd7d7fa0dd40cbaade1aa04c1326205004722ba9489457b8f325013fe10"
+    },
+    {
+      "path": "test/eval-human-tasks-renderer.test.mjs",
+      "sha256": "6c63bb8976c7fc815a3a7d7ed7d3be422c2861b8fb4a4d8beb9c86a3c67ee8c7"
+    },
+    {
+      "path": "test/eval-setup-registry.test.mjs",
+      "sha256": "c4cfdcbe4ea2e142c836c86a08ecfac21ffd3c0a2295f30412752ce821c3b2e3"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "sha256": "e794a3e459804a404dd5e6bf334d82198d4ff1dfc77dc06cb69c80e45e5e0a98"
+    },
+    {
+      "path": "test/evidence-browser-target.test.mjs",
+      "sha256": "30690529d9ca53efa5d8326371e0ad4ba0494cd46b725b345b8cb4fd579349b9"
+    },
+    {
+      "path": "test/graph-authoring-replay.test.mjs",
+      "sha256": "329992c97717e5d3091f1e3580baba71068a79e9f68fd0e1e1caf7a23315a443"
+    },
+    {
+      "path": "test/live-answers.test.mjs",
+      "sha256": "11d6b30f56b32a3fb35e859691499c027d5cd82bf772d1301e095cda25745ff9"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "sha256": "265c88614c4ca89948859f127c58981f4268269bf56a1e1973437c980ec0f197"
+    },
+    {
+      "path": "test/provider-electron-evidence.test.mjs",
+      "sha256": "c9f7d84143b4cdd2610121e06d8fd4f323c0c5894a7f3ad222167244f20b25a5"
+    },
+    {
+      "path": "test/workspace-graph-refresh.test.mjs",
+      "sha256": "7220eb6c9b27c097a0c8284fcfeb4d85967fa6201259120c5e7fd7ec424de9d6"
+    },
+    {
+      "path": "vendor/prime-agent/manifest.json",
+      "sha256": "dac88b570b2ae0cc3dc1a780a95e4a37cce343ce6e046872d53d4ca1462f4aab"
+    }
+  ],
+  "immutableMainCommit": "8c8e05694c69c40ad5f173e9613a7ef739846f41",
+  "preReviewHead": "02e05513bd90f9153b3389fc5429405d329b1942",
+  "scope": "PR executable/config/test source including six merge-review fixes; unchanged main files bound by immutable main commit.",
+  "sourceBindingQualification": "Production/configuration and runtime-test source stayed fixed after preMappingDigest. Only the named two CI owner-map/planner files and canonical browser proof driver changed afterward; their distinct checkpoints are recorded separately. The full-check attempt stopped in Rust before importing those JavaScript files. Final build is rerun after these proof-only repairs.",
+  "preMappingDigest": "086395d7d54bfa981dd6fa2f95af2036409eb3babebd3dad474b53223b713f52",
+  "preBrowserProofRepairDigest": "6442bdccdc5f46845d028cc3bfd480a689278f632ccd7aff89df81be3772a263",
+  "proofOnlyFollowups": [
+    {
+      "path": "scripts/ci/affected-modules.v1.json",
+      "beforeSha256": "5d0a5dc17380611e1a84e2155d148c0d90eb28129db20c9c198a0f5c64031642",
+      "afterSha256": "ce05e12d3c934e64884ce0e3948e2430d3ad875b9dcdb6ed32d3646a5b509e6d",
+      "beforeSourceCommit": "02e05513bd90f9153b3389fc5429405d329b1942"
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "beforeSha256": "b178576d15de97e0032dd9c9d8203ef9f3246df910f751afcef8426e96676c78",
+      "afterSha256": "257a427a9426b58744cdd39c7cf4a9ad44ba16985687d7df8d9fbcb921e94819",
+      "beforeSourceCommit": "02e05513bd90f9153b3389fc5429405d329b1942"
+    },
+    {
+      "path": "test/ci-affected-plan.test.mjs",
+      "beforeSha256": "a890492e622923e2bc1eccf5e746bb480bc540ce7d5a11e044befc64ab76a961",
+      "afterSha256": "d6364bab7c6262ba5e10d8338834e74c860f5a1cc95fd3a5134d24e67af5af2a",
+      "beforeSourceCommit": "02e05513bd90f9153b3389fc5429405d329b1942"
+    }
+  ],
+  "unchangedProductionAndRuntimeTests": {
+    "paths": 75,
+    "digest": "b1ce7618149d4b9b0a4ea72259a5ea91a0c2627f76251e43e8868cd3fcb9cc9e",
+    "qualification": "All source except the three named CI/proof-only followups; same hashes before and after verification."
+  },
+  "preInputProofRepairDigest": "541abf7f250fb5d7036d51f720f0d9aa227dda31a7f836112e98e25d854ccd57",
+  "preCalibrationReadinessDigest": "014385386c63b0c7eeb8584d39414f74431d99b1d562e3e22cbfe2f5cdd6ecd9"
+}

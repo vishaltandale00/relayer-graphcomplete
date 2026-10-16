@@ -1,6 +1,6 @@
 import { Window } from "happy-dom";
-import { taskActorControlIdentity, taskActorRebindControl } from "../desktop/eval-main/task-actor-browser.mjs";
-import { taskActorPresentationReady } from "../desktop/eval-main/task-actor-browser.mjs";
+import { taskActorControlIdentity, taskActorRebindControl, taskActorWorkingControlAllowed } from "../desktop/eval-main/task-actor-browser.mjs";
+import { taskActorPresentationReady, taskActorCurrentIdentity, taskActorCurrentUnchanged } from "../desktop/eval-main/task-actor-browser.mjs";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,7 +15,7 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const action = (kind, extra = {}) => ({ kind, ref: "visible", value: "", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Route undecided", ...extra });
-async function fixture({ decide, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null, voluntaryStop = false } = {}) {
+async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null, voluntaryStop = false } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "task-actor-test-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const turns = [{ id: 1, completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : {}) }];
@@ -32,6 +32,7 @@ async function fixture({ decide, maxActions = 8, busy = false, failWrite = false
     fetchImpl: async (url, init) => {
       if (init.method === "POST") {
         dispatches.push(url.pathname);
+        if (url.pathname.endsWith("/live-answers")) { turns[0].completionStatus = "accepted"; return Response.json({ sequence: 1, attemptId: 10, operationKey: "answer-1" }); }
         if (failWrite) throw new Error("Ambiguous response");
         if (retry) turns[0] = { id: 1, completionStatus: "accepted", latestAttempt: { id: 92, outcome: "accepted" } };
         else turns.push({ id: turns.length + 1, completionStatus: "accepted" });
@@ -48,8 +49,9 @@ async function fixture({ decide, maxActions = 8, busy = false, failWrite = false
   let id;
   let browserSignal;
   const browser = {
+    observeCurrent: vi.fn(async (...args) => observeCurrent ? observeCurrent(...args, turns) : null),
     observe: vi.fn(async () => ({ text: turns.length > 1 ? "A trip plan based on your reply" : "Where do you want to go?", controls: [{ ref: "visible", name: "Send" }] })),
-    act: vi.fn(async () => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
+    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
     nextStep: vi.fn(),
     close: vi.fn(),
   };
@@ -57,10 +59,10 @@ async function fixture({ decide, maxActions = 8, busy = false, failWrite = false
     createActor: async ({ prompt }) => ({ decide: async (observation, signal, decisionOptions) => {
       seen.push({ prompt, observation });
       return { action: decide ? await decide(observation, signal, decisionOptions) : turns.length === 1 ? action("click") : action("finish", { reason: "satisfied", satisfaction: 3, comment: "Good enough" }), usage: { input_tokens: 10, output_tokens: 5 } };
-    }, close: vi.fn() }),
+    }, observe: vi.fn(async (observation, signal, options) => observe ? observe(observation, signal, turns, options) : { comment: "I understand what is being checked", usage: null }), close: vi.fn() }),
   });
   cleanups.push(() => actors.close());
-  const task = await actors.create({ maxCompletions, endpoint: "A trip plan", actor: { maxActions } }); id = task.id;
+  const task = await actors.create({ maxCompletions, endpoint: "A trip plan", actor: { maxActions, ...(promptVersion ? { promptVersion } : {}) } }); id = task.id;
   const done = actors.running.get(id).done;
   return { tasks, actors, id, done, seen, browser, dispatches, turns, options, judge };
 }
@@ -598,4 +600,265 @@ it("reads historical inline completion screenshots with their original digest af
   const reopened = await new HumanTaskService(f.options).open();
   expect(await reopened.completionJudgeInput(f.id, packet.id)).toEqual(input);
   expect((await reopened.export(f.id)).bundle.session.events.find(e => e.id === packet.id).input).toEqual(input);
+});
+
+const currentCapture = revision => ({ kind: "observation", pointer: { threadId: 1, turnId: 1, attemptId: 10, revision, layerId: 100 + revision, observedAt: Date.now(), completionStatus: "running" },
+  observation: { screenshot: Buffer.from(`visible update ${revision}`).toString("base64"), text: `Working update ${revision}`, availableActions: [] } });
+
+it("perceives current updates in order without actions, records missed revisions, then uses a fresh settled view and exports evidence", async () => {
+  const reactions = [];
+  const revisions = [1, 3];
+  const f = await fixture({ busy: true,
+    observeCurrent: async () => currentCapture(revisions.shift()),
+    observe: async (observation, _signal, turns) => {
+      reactions.push(observation.text);
+      if (reactions.length === 2) turns[0].completionStatus = "accepted";
+      return { comment: `Now I know: ${observation.text}`, usage: null };
+    },
+    decide: async observation => {
+      expect(reactions).toEqual(["Working update 1", "Working update 3"]);
+      expect(observation.text).toBe("Where do you want to go?");
+      return action("finish", { reason: "satisfied", satisfaction: 3 });
+    },
+  });
+  await f.done;
+  expect(f.browser.act).not.toHaveBeenCalled();
+  const events = f.tasks.get(f.id).events;
+  expect(events.filter(event => event.kind === "actor_current_reaction")).toHaveLength(2);
+  expect(events.find(event => event.kind === "actor_current_gap")).toMatchObject({ reason: "revisions_not_observed", missingRevisions: 1, pointer: { revision: 3 } });
+  const working = events.filter(event => event.kind === "actor_observation" && event.phase === "current");
+  expect(working.map(event => event.pointer.revision)).toEqual([1, 3]);
+  expect(working.every(event => event.actionSchema === null && event.observation.availableActions.length === 0)).toBe(true);
+  expect(events.find(event => event.kind === "actor_action").sequence).toBeGreaterThan(events.findLast(event => event.kind === "actor_current_reaction").sequence);
+  const reopened = await new HumanTaskService(f.options).open();
+  const { bundle } = await reopened.export(f.id);
+  expect(bundle.actorScreenshots.filter(image => working.some(event => event.id === image.eventId))).toHaveLength(2);
+  expect(await reopened.actorScreenshot(f.id, working[0].id)).toBe(`data:image/png;base64,${currentCapture(1).observation.screenshot}`);
+});
+
+it("answers a working question before settlement and shares the ordinary action budget", async () => {
+  let observed = 0;
+  const f = await fixture({ busy: true, maxActions: 2,
+    observeCurrent: async () => ({ ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["fill", "click"] } }),
+    observe: async (_observation, _signal, turns) => {
+      observed++;
+      expect(turns[0].completionStatus).toBe("running");
+      return { comment: "I am answering the question", action: action(observed === 1 ? "fill" : "click", { ref: "visible", value: observed === 1 ? "Boston" : "" }) };
+    },
+  });
+  await f.done;
+  expect(f.browser.act).toHaveBeenCalledTimes(2);
+  expect(f.seen).toHaveLength(0);
+  const events = f.tasks.get(f.id).events;
+  expect(events.filter(event => event.kind === "actor_action" && event.phase === "current")).toHaveLength(2);
+  expect(events.find(event => event.kind === "actor_limit")).toMatchObject({ reason: "action_limit" });
+  expect(f.tasks.get(f.id).completions).toBe(1);
+});
+
+it("retains a capture race and bounds current perception independently of ordinary actions", async () => {
+  let captures = 0;
+  const f = await fixture({ busy: true, maxActions: 2,
+    observeCurrent: async () => ++captures === 1 ? { kind: "gap", pointer: currentCapture(1).pointer, reason: "presentation_changed_during_capture" } : currentCapture(2),
+  });
+  await vi.waitFor(() => expect(f.tasks.get(f.id).events.some(event => event.kind === "actor_current_limit")).toBe(true));
+  expect(f.browser.observeCurrent).toHaveBeenCalledTimes(5);
+  expect(f.seen).toHaveLength(0);
+  f.turns[0].completionStatus = "accepted";
+  await f.done;
+  expect(f.tasks.get(f.id).events.find(event => event.kind === "actor_current_gap")).toMatchObject({ reason: "presentation_changed_during_capture" });
+  expect(f.seen.length).toBeGreaterThan(0);
+});
+
+it.each(["Stop", "deadline"])("%s aborts pending perception and preserves its screenshot without dispatching an action", async kind => {
+  let reached;
+  const started = new Promise(resolve => { reached = resolve; });
+  const f = await fixture({ busy: true, timeoutMs: kind === "deadline" ? 200 : 900000, observeCurrent: async () => currentCapture(1),
+    observe: async (_observation, signal) => { reached(); return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })); },
+  });
+  await started;
+  if (kind === "Stop") await f.actors.stop(f.id); else await f.done;
+  expect(f.browser.act).not.toHaveBeenCalled();
+  expect(f.seen).toHaveLength(0);
+  expect(f.tasks.get(f.id)).toMatchObject({ status: "interrupted", termination: { reason: kind === "Stop" ? "actor_cancelled" : "actor_timeout" } });
+  expect(f.tasks.get(f.id).events.find(event => event.kind === "actor_observation")).toMatchObject({ phase: "current", observation: { screenshotArtifact: { mediaType: "image/png" } } });
+  expect(f.tasks.get(f.id).events.some(event => event.kind === "actor_current_reaction")).toBe(false);
+});
+
+it("current capture excludes stale attempts, pinned navigation and layers different from the displayed current", () => {
+  const expected = { threadId: 1, turnId: 2, submittedAt: 100, attemptId: 10 };
+  const presentation = { ...expected, graphVisible: true, layerId: 5, attemptId: 10, observedAt: 120, currentPointer: { mode: "following", revision: 2, layerId: 5 }, navigationPath: [] };
+  expect(taskActorCurrentIdentity({ expected, presentation })).toMatchObject({ revision: 2, layerId: 5 });
+  for (const changed of [{ graphVisible: false }, { attemptId: 9 }, { observedAt: 90 }, { observedAt: undefined }, { currentPointer: { ...presentation.currentPointer, mode: "pinned" } }, { layerId: 6 }]) {
+    expect(taskActorCurrentIdentity({ expected, presentation: { ...presentation, ...changed } })).toBeNull();
+  }
+});
+
+it("observes approval and resumed work at the same Current revision while deduplicating ordinary repaints", () => {
+  const expected = { threadId: 1, turnId: 2, submittedAt: 100, attemptId: 10 };
+  const presentation = { ...expected, graphVisible: true, layerId: 5, observedAt: 120, completionStatus: "running", currentPointer: { mode: "following", revision: 2, layerId: 5 } };
+  const capture = () => taskActorCurrentIdentity({ expected, presentation });
+  const running = capture();
+  presentation.observedAt++;
+  expect(taskActorCurrentUnchanged(capture(), running)).toBe(true);
+  presentation.completionStatus = "waiting_for_approval";
+  const approval = capture();
+  expect(taskActorCurrentUnchanged(approval, running)).toBe(false);
+  expect(approval).toMatchObject({ revision: running.revision, completionStatus: "waiting_for_approval" });
+  presentation.observedAt++;
+  expect(taskActorCurrentUnchanged(capture(), approval)).toBe(true);
+  presentation.completionStatus = "running";
+  expect(taskActorCurrentUnchanged(capture(), approval)).toBe(false);
+});
+
+it("native perception and actions share one restricted session but separate output schemas", async () => {
+  const inputs = []; let starts = 0;
+  const actor = await createCodexTaskActor({ runtime: { executable: "/managed/codex", environment: {} }, config: actorConfiguration(), prompt: "Ordinary user",
+    createCodex: () => ({ startThread: () => { starts++; return { run: async (input, options) => {
+      inputs.push({ input, options });
+      return { items: [], finalResponse: JSON.stringify(options.outputSchema.properties.comment && !options.outputSchema.properties.kind ? { comment: "The plan changed; I can follow why" } : action("finish", { reason: "satisfied", satisfaction: 3 })) };
+    } }; } }),
+  });
+  cleanups.push(() => actor.close());
+  expect(await actor.observe(currentCapture(1).observation)).toMatchObject({ comment: "The plan changed; I can follow why" });
+  await actor.decide({ text: "Settled response" });
+  expect(starts).toBe(1);
+  expect(inputs[0].options.outputSchema.properties).not.toHaveProperty("kind");
+  expect(inputs[0].input[0].text).toContain("remembering only earlier observations");
+  expect(inputs[1].options.outputSchema.properties.kind.enum).toContain("finish");
+  expect(inputs[1].input[0].text).not.toContain("Ordinary user");
+});
+
+it("historical direct actor configurations still wait for settlement without current perception", async () => {
+  const f = await fixture({ busy: true, promptVersion: "task-actor-v8", observeCurrent: async () => { throw new Error("Historical actor must not perceive Current"); } });
+  await vi.waitFor(() => expect(f.tasks.get(f.id).events.some(event => event.kind === "actor_started")).toBe(true));
+  f.turns[0].completionStatus = "accepted";
+  await f.done;
+  expect(f.browser.observeCurrent).not.toHaveBeenCalled();
+  expect(f.tasks.get(f.id).events.some(event => event.kind === "actor_current_reaction")).toBe(false);
+});
+
+it("cancels a pending browser capture even if the injected capture ignores its signal", async () => {
+  let reached;
+  const started = new Promise(resolve => { reached = resolve; });
+  const f = await fixture({ busy: true, observeCurrent: async () => { reached(); return new Promise(() => {}); } });
+  await started;
+  await f.actors.stop(f.id);
+  expect(f.browser.act).not.toHaveBeenCalled();
+  expect(f.tasks.get(f.id)).toMatchObject({ status: "interrupted", termination: { reason: "actor_cancelled" } });
+  expect(f.tasks.get(f.id).events.find(event => event.kind === "actor_error")).toMatchObject({ phase: "observe_current", category: "cancelled" });
+});
+
+it("working controls permit exact live questions and navigation but refuse Send, Invoke, Stop and unrelated edits", () => {
+  const document = new Window().document;
+  document.body.innerHTML = `<div class="workspace-layout"><div id="nodeLayer"><button class="graph-node" data-node="4"></button></div><div id="detailActions"><button data-review-kind="invoke-action"></button><button data-review-kind="navigate-action"></button></div><fieldset data-live-answer-scope="question"><textarea></textarea><button data-input-control-role="answer"></button><button data-input-control-role="commit"></button></fieldset><button id="closeInspector">Close</button><button id="send">Send</button><button id="stop">Stop</button><textarea id="composer"></textarea></div>`;
+  for (const selector of ["#send", "#stop", "#composer", "[data-review-kind=invoke-action]", "[data-input-control-role=commit]"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(false);
+  for (const selector of [".graph-node", "[data-review-kind=navigate-action]", "[data-input-control-role=answer]", "#closeInspector"]) expect(taskActorWorkingControlAllowed(document.querySelector(selector), "click")).toBe(true);
+  expect(taskActorWorkingControlAllowed(document.querySelector("fieldset textarea"), "fill")).toBe(true);
+  const live = document.querySelector("fieldset");
+  live.insertAdjacentHTML("beforeend", '<select><option>Boston</option></select><input type="text"><input type="checkbox"><textarea readonly></textarea><button data-input-control-role="option"></button>');
+  expect(taskActorWorkingControlAllowed(live.querySelector("select"), "select")).toBe(true);
+  expect(taskActorWorkingControlAllowed(live.querySelector("input[type=text]"), "fill")).toBe(true);
+  expect(taskActorWorkingControlAllowed(live.querySelector("[data-input-control-role=option]"), "click")).toBe(true);
+  for (const [selector, kind] of [["[data-input-control-role=answer]", "fill"], ["[data-input-control-role=answer]", "select"], ["textarea", "select"], ["select", "fill"], ["input[type=checkbox]", "fill"], ["textarea[readonly]", "fill"]]) {
+    expect(taskActorWorkingControlAllowed(live.querySelector(selector), kind)).toBe(false);
+  }
+});
+
+it("action exhaustion leaves a stage undelivered and records the limit without another admission", async () => {
+  const f = await fixture({ busy: true, maxActions: 1,
+    observeCurrent: async () => ({ ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["fill", "click"] } }),
+    observe: async (observation, _signal, turns) => {
+      if (!observation.availableActions.length) { turns[0].completionStatus = "accepted"; return { comment: "I staged a value but could not Answer", action: null }; }
+      return { comment: "I am editing", action: action("fill", { value: "Boston" }) };
+    },
+  });
+  await f.done;
+  expect(f.browser.act).toHaveBeenCalledTimes(1);
+  expect(f.dispatches).toEqual([]);
+  expect(f.tasks.get(f.id).completions).toBe(1);
+  expect(f.tasks.get(f.id).events.some(event => event.kind === "actor_limit")).toBe(true);
+  expect(f.tasks.get(f.id).events.some(event => event.liveAnswerReceipt)).toBe(false);
+});
+
+
+it.each(["repeated", "last-slot", "ambiguous"])("stops working control recovery at its boundary: %s", async scenario => {
+  const unavailable = () => Object.assign(new Error("changed control"), { code: "actor_control_unavailable", actionDispatched: false });
+  const f = await fixture({ busy: true, maxActions: scenario === "last-slot" ? 1 : 8,
+    controlErrors: scenario === "ambiguous" ? [new Error("unknown dispatch")] : [unavailable(), unavailable()],
+    observeCurrent: async () => ({ ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["click"] } }),
+    observe: async () => ({ comment: "I will answer", action: action("click") }),
+  });
+  await f.done;
+  expect(f.browser.act).toHaveBeenCalledTimes(scenario === "repeated" ? 2 : 1);
+  expect(f.browser.observeCurrent).toHaveBeenCalledTimes(scenario === "repeated" ? 2 : 1);
+  expect(f.tasks.get(f.id)).toMatchObject({ completions: 1, status: "interrupted", termination: { reason: "actor_failed" } });
+  const failures = f.tasks.get(f.id).events.filter(event => event.kind === "actor_action_failed");
+  expect(failures.map(event => event.retryAllowed)).toEqual(scenario === "ambiguous" ? [] : scenario === "last-slot" ? [false] : [true, false]);
+  expect(f.dispatches).toEqual([]);
+});
+
+it("recovers one unavailable working control from a fresh observation without replaying its intent", async () => {
+  const unavailable = Object.assign(new Error("changed control"), { code: "actor_control_stale", actionDispatched: false });
+  const f = await fixture({ busy: true, controlErrors: [unavailable],
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3 }),
+    observeCurrent: async (_expected, previous) => { expect(previous).toBeNull(); return { ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["click"] } }; },
+    observe: async () => ({ comment: "I am using the fresh control", action: action("click") }),
+  });
+  await f.done;
+  const events = f.tasks.get(f.id).events;
+  expect(events.filter(event => event.kind === "actor_action_failed")).toHaveLength(1);
+  expect(events.find(event => event.kind === "actor_action_failed").retryAllowed).toBe(true);
+  expect(events.filter(event => event.kind === "actor_action_completed")).toHaveLength(2);
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
+});
+
+
+it("a successful working action resets the one-recovery allowance", async () => {
+  const unavailable = () => Object.assign(new Error("changed control"), { code: "actor_control_unavailable", actionDispatched: false });
+  let decisions = 0;
+  const f = await fixture({ busy: true, controlErrors: [unavailable(), null, unavailable()],
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3 }),
+    observeCurrent: async () => ({ ...currentCapture(1), observation: { ...currentCapture(1).observation, availableActions: ["fill", "click"] } }),
+    observe: async () => ({ comment: "I am using the fresh control", action: action(++decisions === 4 ? "click" : "fill", { value: "Boston" }) }),
+  });
+  await f.done;
+  expect(f.tasks.get(f.id).events.filter(event => event.kind === "actor_action_failed").map(event => event.retryAllowed)).toEqual([true, true]);
+  expect(f.browser.act).toHaveBeenCalledTimes(4);
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
+});
+
+
+it("same-revision identity distinguishes pending from Delivered without tracking field values", () => {
+  const document = new Window().document;
+  document.body.innerHTML = '<div class="workspace-layout"><fieldset data-live-answer-scope="question"><input value="Private stage"><button data-input-control-role="answer">Answer</button></fieldset></div>';
+  const button = document.querySelector("button");
+  vi.spyOn(button, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 100, height: 30 });
+  vi.spyOn(document, "elementFromPoint").mockReturnValue(button);
+  const expected = { threadId: 1, turnId: 2, submittedAt: 100 };
+  const presentation = { ...expected, graphVisible: true, layerId: 5, observedAt: 120, currentPointer: { mode: "following", revision: 2, layerId: 5 } };
+  const identity = () => taskActorCurrentIdentity({ expected, presentation, document }).answerPresentation;
+  const ready = identity();
+  document.querySelector("input").value = "Changed private stage";
+  expect(identity()).toBe(ready);
+  button.disabled = true;
+  const pending = identity();
+  expect(pending).not.toBe(ready);
+  button.textContent = "Delivered";
+  expect(identity()).not.toBe(pending);
+  expect(identity()).not.toContain("private stage");
+});
+
+it("a fresh no-action reaction ends recovery before a later question races", async () => {
+  const unavailable = () => Object.assign(new Error("changed control"), { code: "actor_control_unavailable", actionDispatched: false });
+  let decisions = 0;
+  const f = await fixture({ busy: true, controlErrors: [unavailable(), unavailable()],
+    decide: () => action("finish", { reason: "satisfied", satisfaction: 3 }),
+    observeCurrent: async () => ({ ...currentCapture(decisions < 2 ? 1 : 2), observation: { ...currentCapture(1).observation, availableActions: ["click"] } }),
+    observe: async () => ({ comment: "A fresh view informs my next step", action: ++decisions === 2 ? null : action("click") }),
+  });
+  await f.done;
+  expect(f.tasks.get(f.id).events.filter(event => event.kind === "actor_action_failed").map(event => event.retryAllowed)).toEqual([true, true]);
+  expect(f.browser.act).toHaveBeenCalledTimes(3);
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
+  expect(f.tasks.get(f.id).completions).toBe(1);
 });

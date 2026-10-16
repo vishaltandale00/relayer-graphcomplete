@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "case": "interactive.everyday.europe-trip",
+  "catalogCommit": "2ae3ff3a24ea74d7f73fab5ebd5304e7ba49ffe4",
+  "sourceDigest": "3e6fc8d627cd9392e00a586f5b52327bc56cf287c074aa8c8f1c7678ed0c58f4",
+  "baseCommit": "ef61e6693513a53cf85b95cad323d2c6dc1c0de7",
+  "taskId": "human-1ce2d507-9cef-4120-9168-721c5373397b",
+  "candidate": "gpt-6-luna",
+  "harnessRevision": 16,
+  "actor": "gpt-5.6-luna",
+  "actorSetup": "setup-98dee801-7d74-4071-81b5-3b4190d3cf4c",
+  "maxCandidateCompletions": 3,
+  "candidateCompletions": 1,
+  "sessionStatus": "completed",
+  "termination": "satisfied",
+  "canonical": {
+    "root": 37,
+    "history": [
+      {
+        "revision": 0,
+        "transition": "initial",
+        "layer": null,
+        "lifecycle": "active"
+      },
+      {
+        "revision": 1,
+        "transition": "advance",
+        "layer": 15,
+        "lifecycle": "active"
+      },
+      {
+        "revision": 2,
+        "transition": "return",
+        "layer": 15,
+        "lifecycle": "succeeded"
+      }
+    ],
+    "liveAnswerReceipts": 0
+  },
+  "actorCompletedActions": 4,
+  "actorErrors": [],
+  "actorFailedActions": 0,
+  "workingObservations": 4,
+  "workingInputControlsObserved": 0,
+  "actorSatisfaction": 2,
+  "actorEndpointStatus": "incomplete",
+  "completionJudgeVerdict": "incomplete",
+  "frozenExportSha256": "sha256:e7893409ff6febba2e4e48cec93ee319ddc2d496d2ddaa2312727f65d1741640",
+  "native": [
+    {
+      "file": "rollout-2026-10-13T19-35-17-01a1379e-cf4d-7033-ae83-46d73e0c6866.jsonl",
+      "sha256": "a64beddf50dad8ef9a80ecff7c26ca17b24c7bb7fc68ff59ef00c3ceeb233113",
+      "toolCalls": 11,
+      "liveAnswerReadCalls": [],
+      "observedAuthoringFailureOutputs": [
+        {
+          "at": "2026-10-13T23:36:13.165Z",
+          "codes": [
+            "immutable_node"
+          ],
+          "rejectedNodes": 2
+        }
+      ]
+    }
+  ],
+  "scope": "Authoring counts are manual visible failure outputs, once per native output; multiple server rejection causes are listed separately. No exhaustive or statistical error-rate claim."
+}

@@ -1,0 +1,2109 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+  "sourceOverlay": "merge-live-integrity-source.json",
+  "baseCommit": "b328a51deab85ca4838a5f46d2a91a4bc313ffb3",
+  "plan": "merge-live-integrity-20261014.md#required-checkpoints",
+  "gates": [
+    {
+      "gate": "followup-native-final",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-graph-core",
+        "--lib",
+        "--test",
+        "live_answers",
+        "--",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 68.451,
+      "sourceDigest": "560107119382ed9e9aa4cf1c0a51090a434ee2bc0cd545a49522d2c35654d365",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "passed": 50,
+        "failed": 0,
+        "suites": {
+          "graphCoreLib": 42,
+          "liveAnswersIntegration": 8
+        },
+        "qualification": "Core/migration production closure unchanged since this run; only Product test fixture later corrected."
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-native-final.txt",
+        "sha256": "a69fe5770f0b4c89ddb07102a76fe66f85de3582bcb715d87d3eba359ccb4b80",
+        "bytes": 5773
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-native-final-result.json",
+        "sha256": "3b4d0aa4d5223dd5bda124c69f57c7c1c3fd6ee0694fa7949bd5b8d66e58adb1",
+        "bytes": 380
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-native-final-source.json",
+        "sha256": "bbe1a3c90fbbedd339d3863209042ff4464b95769cec2bccc00de5917b9a3520",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-product-boundary-v3",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-app-server",
+        "--lib",
+        "delivered_input_cannot_be_committed_or_selected_by_ordinary_send",
+        "--",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 50.283,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "passed": 1,
+        "failed": 0,
+        "answeredAndUnansweredVariants": true,
+        "scope": "real Product commit/GET and exact production Send/retry composer filter; not whole Send execution"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-v3.txt",
+        "sha256": "95700e81a520c5212b1d45d0d6cad7023e09964ddbf11a5416fab45e5798e60a",
+        "bytes": 1451
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-v3-result.json",
+        "sha256": "9a113b43284b73703d8c8bfc3a66935003c508ccb269ec60c99c0871a0c91e35",
+        "bytes": 418
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-v3-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-renderer-final-warm",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "test/eval-task-actor.test.mjs",
+        "test/implicit-input-send.test.mjs",
+        "test/invoke-input-bindings.test.mjs",
+        "test/live-answers.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 51.804,
+      "sourceDigest": "d0384d7d0d6a8f82aa9451fc83f5387c0f6c71ee1d41711bcb8d838b777a5eb9",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "passed": 211,
+        "failed": 0,
+        "files": 5,
+        "qualification": "Relevant JavaScript/test closure unchanged; later paths differ only in Rust and manual browser proof."
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-final-warm.txt",
+        "sha256": "7a2a963f9006b9da03d96ffe45e57fb7989b65cfba7717c515bc4cd743f990c8",
+        "bytes": 262
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-final-warm-result.json",
+        "sha256": "888942f2b40307b86fbc562f48fbe9cbff8e836138bf95be52917b649aa80da4",
+        "bytes": 517
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-final-warm-source.json",
+        "sha256": "0b092051376cb3c9102cfc65cd4f1762a20dacd1e89784406dac4938eb0d4854",
+        "bytes": 12699
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 79.828,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "runtimeAndTypeScriptBuild": "passed"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-build.txt",
+        "sha256": "12087f96385600004741a7b6e46211295f8f550137af9f98c607c0614e7d68f5",
+        "bytes": 2459
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-build-result.json",
+        "sha256": "184b4e55ca398ed840563aa3675402ed356c3830de5ac68932c4a2c29a01dd33",
+        "bytes": 273
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-build-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-annotation-capture",
+      "command": [
+        "node",
+        "--input-type=module",
+        "-e",
+        "import {runElectronProof} from \"./scripts/electron-proof-process.mjs\"; await runElectronProof({executable:\"./node_modules/.bin/electron\",script:\"scripts/capture-followup-node-annotations.mjs\",label:\"Follow-up annotation evidence\",resultVariable:\"RELAYER_ANNOTATION_EVIDENCE_RESULT\",profileVariable:\"RELAYER_ANNOTATION_EVIDENCE_PROFILE\"});"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 17.812,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "actualElectronCapture": "passed",
+        "images": 4,
+        "cleanup": "Actual parent returned exit0 after inner pass and awaited owned profile removal; bounded post-exit process/directory inventory retained separately"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-annotation-capture.txt",
+        "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+        "bytes": 1017
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-annotation-capture-result.json",
+        "sha256": "cdec431535587e8ad3093fb097a25a51bfa49aa003fb81ccf5a6bd138d0f0b20",
+        "bytes": 645
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-annotation-capture-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-social-capture",
+      "command": [
+        "npm",
+        "run",
+        "evidence:share-preview"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 2.36,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "actualElectronCapture": "passed",
+        "images": 2,
+        "dimensions": [
+          1200,
+          630
+        ]
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-social-capture.txt",
+        "sha256": "be4f0a787b094757a425fcde28d4b69176e82916ca53dab4f8dd9fccb3ce4ec7",
+        "bytes": 14188
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-social-capture-result.json",
+        "sha256": "03d0d8d78bfb204c1c34c2c43491f796e928e5150064339d4f3db63565e78db1",
+        "bytes": 288
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-social-capture-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-renderer-receipts",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/followup-annotation-evidence.test.mjs",
+        "test/desktop-social-preview-evidence.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 7.007,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "sourceBoundReceiptTests": "passed"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-renderer-receipts.txt",
+        "sha256": "978c3edda5d3529031d98a0944b3fa8cefdfda314057573f1553d260101c8bae",
+        "bytes": 253
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-renderer-receipts-result.json",
+        "sha256": "72f87daafe9aa2f2f844c6c1dc93cdbf24e9d647856a6fd254e117c42748c6ba",
+        "bytes": 423
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-renderer-receipts-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-full-check",
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 3557.883,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [
+          "test result: ok. 394 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 395.12s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.75s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.26s",
+          "test result: ok. 40 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 196.12s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 9.61s",
+          "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.26s",
+          "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.19s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.56s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.70s",
+          "test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.63s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.52s",
+          "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.05s",
+          "test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.50s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.43s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.82s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.38s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 23.66s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.63s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.38s",
+          "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.26s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.40s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.40s",
+          "test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 33.93s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.43s",
+          "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.55s",
+          "test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 12.13s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.22s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.19s",
+          "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 46.35s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 18.23s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.36s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.06s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.76s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.66s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 14.23s",
+          "test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 77.92s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.59s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ],
+        "testSummaries": [
+          "Test Files  2 failed | 324 passed | 1 skipped (327)",
+          "Tests  2 failed | 4315 passed | 3 skipped (4320)"
+        ],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "If this is a long-running test, pass a timeout value as the last argument or configure it globally with \"testTimeout\".",
+          " \u276f test/prime-managed-runtime.test.mjs:89:3",
+          "     87|   });",
+          "     88|",
+          "     89|   it(\"admits the real SHA-256 Prime recipe through the public installe\u2026",
+          "       |   ^",
+          "     90|     const root = await mkdtemp(join(tmpdir(), \"relayer-prime-recipe-\")\u2026",
+          "     91|     const installer = createManagedRuntimeInstaller({",
+          "",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/2]\u23af",
+          "",
+          " FAIL  |isolated| test/public-share-viewer.test.mjs > public share V1 reader > reads the declared 10,000-layer expansion depth and rejects a closing expand cycle",
+          "Error: Test timed out in 15000ms.",
+          "If this is a long-running test, pass a timeout value as the last argument or configure it globally with \"testTimeout\".",
+          " \u276f test/public-share-viewer.test.mjs:852:3",
+          "    850|   });",
+          "    851|",
+          "    852|   it(\"reads the declared 10,000-layer expansion depth and rejects a cl\u2026",
+          "       |   ^",
+          "    853|     const records = fixtureJsonl().trimEnd().split(\"\\n\").map(JSON.pars\u2026",
+          "    854|     const view = records[1].acceptedView;",
+          "",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[2/2]\u23af",
+          "",
+          "",
+          " Test Files  2 failed | 324 passed | 1 skipped (327)",
+          "      Tests  2 failed | 4315 passed | 3 skipped (4320)",
+          "   Start at  21:46:32",
+          "   Duration  1288.30s (transform 26.53s, setup 0ms, import 127.23s, tests 1081.18s, environment 57ms)",
+          ""
+        ],
+        "clippy": "passed",
+        "nativeWorkspace": {
+          "passed": 779,
+          "failed": 0,
+          "ignored": 0,
+          "suiteResults": 30
+        },
+        "nativeCrashFeature": {
+          "passedExecutions": 367,
+          "failed": 0,
+          "ignored": 0,
+          "suiteResults": 26,
+          "qualification": "Separate feature executions overlap workspace cases."
+        },
+        "rootAndWorkspaceTypeChecks": "passed",
+        "vitest": {
+          "passed": 4315,
+          "failed": 2,
+          "skipped": 3,
+          "filesPassed": 324,
+          "filesFailed": 2,
+          "filesSkipped": 1
+        },
+        "downstream": "Not reached by this failed command; separate exact-source tail gates passed."
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-full-check.txt",
+        "sha256": "91f09dd7d873c0e411e4714b9f208381f91c48a0cc5d30fd0298c2d55192c7bf",
+        "bytes": 141762
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-full-check-result.json",
+        "sha256": "92a3b3fc588b83a86bb08380468d7d63d63ef151d5dccb9d2f762ea0ec595bc2",
+        "bytes": 275
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-full-check-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "qualification": "A full command is successful only when native, TypeScript/workspaces, Vitest, secret-boundary, Python, Ladybug receipt and PRD tail outcomes all pass. Native suite totals include separate workspace/crash-feature executions; do not interpret their sum as unique test cases.",
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-local-failure-isolation",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/prime-managed-runtime.test.mjs",
+        "test/public-share-viewer.test.mjs",
+        "-t",
+        "admits the real SHA-256 Prime recipe through the public installer seam|reads the declared 10,000-layer expansion depth and rejects a closing expand cycle"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 27.547,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Test Files  1 failed | 1 passed (2)",
+          "Tests  1 failed | 1 passed | 143 skipped (145)"
+        ],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "",
+          " RUN  v4.1.10 /Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete",
+          "",
+          " \u276f |isolated| test/public-share-viewer.test.mjs (138 tests | 1 failed | 137 skipped) 16692ms",
+          "     \u00d7 reads the declared 10,000-layer expansion depth and rejects a closing expand cycle 16689ms",
+          "",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af Failed Tests 1 \u23af\u23af\u23af\u23af\u23af\u23af\u23af",
+          "",
+          " FAIL  |isolated| test/public-share-viewer.test.mjs > public share V1 reader > reads the declared 10,000-layer expansion depth and rejects a closing expand cycle",
+          "Error: Test timed out in 15000ms.",
+          "If this is a long-running test, pass a timeout value as the last argument or configure it globally with \"testTimeout\".",
+          " \u276f test/public-share-viewer.test.mjs:852:3",
+          "    850|   });",
+          "    851|",
+          "    852|   it(\"reads the declared 10,000-layer expansion depth and rejects a cl\u2026",
+          "       |   ^",
+          "    853|     const records = fixtureJsonl().trimEnd().split(\"\\n\").map(JSON.pars\u2026",
+          "    854|     const view = records[1].acceptedView;",
+          "",
+          "\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af\u23af[1/1]\u23af",
+          "",
+          "",
+          " Test Files  1 failed | 1 passed (2)",
+          "      Tests  1 failed | 1 passed | 143 skipped (145)",
+          "   Start at  22:08:22",
+          "   Duration  20.76s (transform 1.62s, setup 0ms, import 2.62s, tests 17.58s, environment 0ms)",
+          ""
+        ]
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-local-failure-isolation.txt",
+        "sha256": "eb05f398dcd0c3d146703b504fb195bf17639e2d776f4d0a4cf386701c3ed433",
+        "bytes": 1247
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-local-failure-isolation-result.json",
+        "sha256": "b3127fc096e07ab43d547255aad578084ba93f460d5e4106d4c5d949e84d774e",
+        "bytes": 576
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-local-failure-isolation-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-depth-direct",
+      "command": [
+        "node",
+        ".relayer/merge-live-depth-diagnostic.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 20.431,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "{\"sourceDigest\":\"e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87\",\"files\":[{\"path\":\"test/public-share-viewer.test.mjs\",\"sha256\":\"98aef53c029ec30982dff1f29aaadf382dcd94dfc45d7a5440a00c2973d3c4d8\",\"identicalToMain\":true},{\"path\":\"desktop/renderer/src/public-share-viewer/snapshot.js\",\"sha256\":\"17d6110d208162544756b8b3a2a3ed5a4b16e407b65253844ef689e2c3257c9a\",\"identicalToMain\":true},{\"path\":\"desktop/renderer/src/product-workspace/edge-shapes.js\",\"sha256\":\"eb207d003e6b7c1c5d7f257946f90da9e5613a0c927507d658964b4c69556b45\",\"identicalToMain\":true}],\"timings\":[{\"cycle\":false,\"serializationMs\":42.631417,\"parseMs\":19387.559458,\"bytes\":5249907},{\"cycle\":true,\"serializationMs\":32.305208000001585,\"parseMs\":461.2560420000009,\"bytes\":5250111}],\"qualification\":\"Direct Node diagnostic using exact test helpers and same production parser; no Vitest/HappyDOM imports. Semantic assertions preserved, no time bound or production change.\"}"
+        ]
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-depth-direct.txt",
+        "sha256": "d73b55d05a0578f4131b874999b72ae9c809dd176a2f5e76e94b262115708025",
+        "bytes": 945
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-depth-direct-result.json",
+        "sha256": "593868c6c92b940ee1b57fbaa278790d30cc0b83f6e4bb4a6dde147f9b4173b4",
+        "bytes": 298
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-depth-direct-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-secret-boundary",
+      "command": [
+        "npm",
+        "run",
+        "test:codex-secret-boundary"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 20.772,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Test Files  1 passed (1)",
+          "Tests  2 passed (2)"
+        ],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "",
+          "> relayer-graphcomplete@0.0.0 test:codex-secret-boundary",
+          "> RELAYER_RUN_CODEX_SECRET_BOUNDARY=1 vitest run packages/harness-host/test/codex-secret-provider-process.test.ts",
+          "",
+          "",
+          " RUN  v4.1.10 /Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete",
+          "",
+          "",
+          " Test Files  1 passed (1)",
+          "      Tests  2 passed (2)",
+          "   Start at  22:12:02",
+          "   Duration  11.20s (transform 1.98s, setup 0ms, import 2.59s, tests 8.20s, environment 0ms)",
+          ""
+        ],
+        "filesPassed": 1,
+        "testsPassed": 2,
+        "testsSkipped": 0
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-secret-boundary.txt",
+        "sha256": "c2c6bef2998ac0233b8b70756b702fee342526e37d98ed255fca003a5df450c2",
+        "bytes": 429
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-secret-boundary-result.json",
+        "sha256": "22a2671c0339848d0bc1585efd558ed63fafc5e66fc0db258dcd230f6c70a782",
+        "bytes": 294
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-secret-boundary-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-python",
+      "command": [
+        "env",
+        "PYTHONPATH=python/relayer-graph/src",
+        "python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "python/relayer-graph/tests"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 4.977,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Ran 99 tests in 4.426s"
+        ],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "...................................................................................................",
+          "----------------------------------------------------------------------",
+          "Ran 99 tests in 4.426s",
+          "",
+          "OK"
+        ],
+        "testsPassed": 99,
+        "failed": 0
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-python.txt",
+        "sha256": "c6a067f80849a08ad4eab20013638878361bdc7e119c0ae204634c57114898c1",
+        "bytes": 198
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-python-result.json",
+        "sha256": "dc61421ea6cf2235606ac192b325ee7f06eb42cf23cfda403684bcc6e0eb6188",
+        "bytes": 392
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-python-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-ladybug-receipts",
+      "command": [
+        "npm",
+        "run",
+        "lint:ladybug-receipt"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1.907,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "",
+          "> relayer-graphcomplete@0.0.0 lint:ladybug-receipt",
+          "> cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe",
+          "",
+          "Ladybug v0.19.1 qualification receipt lint passed: upstream artifacts NO-GO",
+          "",
+          "> relayer-graphcomplete@0.0.0 lint:ladybug-native-receipt",
+          "> node scripts/verify-ladybug-native-receipts.mjs",
+          "",
+          "Ladybug native receipt verified: 27 subtrees inventoried; no release blockers declared",
+          "",
+          "> relayer-graphcomplete@0.0.0 lint:ladybug-contract-probe",
+          "> node scripts/lint-ladybug-contract-probe.mjs",
+          "",
+          "Ladybug contract probe receipt covers 20 positive, 27 negative, 15 value, and 9 limit/budget cases; current conformance adds 3 positive and 34 negative Issue #354 cases."
+        ]
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-ladybug-receipts.txt",
+        "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+        "bytes": 927
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-ladybug-receipts-result.json",
+        "sha256": "a38c06af4736d4838e15d012fa5e0d727af4598d56640b5a09fd5b160dddaf85",
+        "bytes": 287
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-ladybug-receipts-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-prd",
+      "command": [
+        "npm",
+        "run",
+        "prd:check-readability"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 0.505,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "",
+          "> relayer-graphcomplete@0.0.0 prd:check-readability",
+          "> node docs/prd/check-readability.mjs",
+          "",
+          "PRD readability check passed. No checked sentence has more than 25 words."
+        ]
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-prd.txt",
+        "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+        "bytes": 166
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-prd-result.json",
+        "sha256": "c5603ecbfc5b9b92fa1abc6a8be195cfaf10863f09062f0030a41cdb5737c592",
+        "bytes": 288
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-prd-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-eval-web",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 194.826,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [
+          "interrupted startup: pending native child terminated and profile lock released",
+          "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+          "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+          "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+          "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+          "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+          "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+          "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+          "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+          "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+          "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+          "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+        ],
+        "finalLogExcerpt": [
+          "PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "PASS independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+          "PASS evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+          "PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+          "PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+          "PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+          "CURRENT_DECIDE_REVISIONS {\"authored\":false,\"reactions\":[1,1,1,1,2]}",
+          "CURRENT_CAPTURE_GAPS {\"authored\":false,\"gaps\":[]}",
+          "PASS current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "CURRENT_AUTHORED_NAV_STAGE opening",
+          "CURRENT_AUTHORED_NAV_STAGE selecting_current_node",
+          "CURRENT_AUTHORED_NAV_STAGE registered_control_visible",
+          "CURRENT_AUTHORED_NAV_STAGE captured",
+          "CURRENT_AUTHORED_NAV_STAGE remounting",
+          "CURRENT_AUTHORED_NAV_STAGE activating_rebound",
+          "CURRENT_AUTHORED_NAV_STAGE historical_delivered",
+          "CURRENT_DECIDE_REVISIONS {\"authored\":true,\"reactions\":[1,1,1,1,2]}",
+          "CURRENT_CAPTURE_GAPS {\"authored\":true,\"gaps\":[]}",
+          "PASS current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "PASS judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+          "PASS human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+        ],
+        "currentPointerVariants": {
+          "native": {
+            "validObservationRevisions": [
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "captureGaps": [],
+            "newHttpGuards": "terminal provider read rejected; ordinary delivered-occurrence PUT rejected without draft mutation",
+            "sdkConsumption": true,
+            "sealedInputUnchanged": true,
+            "inferenceAdmissions": 1
+          },
+          "authored": {
+            "validObservationRevisions": [
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "captureGaps": [],
+            "newHttpGuards": "terminal provider read rejected; ordinary delivered-occurrence PUT rejected without draft mutation",
+            "sdkConsumption": true,
+            "sealedInputUnchanged": true,
+            "inferenceAdmissions": 1
+          }
+        },
+        "outerTerminalReadChecks": {
+          "native": "authority_generation_expired",
+          "authored": "authority_generation_expired",
+          "qualification": "Outer proof awaits a bounded success value; wrong, skipped or failed provider assertion fails before PASS."
+        }
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-eval-web.txt",
+        "sha256": "c5937a8fd14a29c0dc48cbabd2bda11451b066a1c0e59d0cf1b70c2551fd5ee9",
+        "bytes": 5753
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-eval-web-result.json",
+        "sha256": "464282ead3666905d0d356575316d971b2766fa0152de80bc96ddbbdbaa1f32a",
+        "bytes": 282
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-eval-web-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "qualification": "Historical prior proof source; terminal HTTP assertion did not propagate reliably to the outer proof. Its HTTP-terminal claim alone is non-certifying and is superseded by integrity-eval-web-final plus a negative control. Other unchanged assertions retain their original scope.",
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-compiled-runtime",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 97.064,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Test Files  1 passed (1)",
+          "Tests  12 passed (12)"
+        ],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "",
+          "> relayer-graphcomplete@0.0.0 test:eval-compiled-runtime",
+          "> vitest run --config scripts/eval-compiled.vitest.config.mjs",
+          "",
+          "",
+          " RUN  v4.1.10 /Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete",
+          "",
+          "",
+          " Test Files  1 passed (1)",
+          "      Tests  12 passed (12)",
+          "   Start at  22:15:38",
+          "   Duration  95.75s (transform 3.96s, setup 0ms, import 5.01s, tests 90.48s, environment 0ms)",
+          ""
+        ],
+        "filesPassed": 1,
+        "testsPassed": 12,
+        "testsFailed": 0,
+        "testTimeoutMs": 15000
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-compiled-runtime.txt",
+        "sha256": "a75e806fce69752a750af317b80390ef1bec8f92bf592bcf4795bb03915be6b5",
+        "bytes": 380
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-compiled-runtime-result.json",
+        "sha256": "78f58b781132b7ba0f1ce7cc633ee0e8ffce11de6766b6e65f7e79e1d0a768fe",
+        "bytes": 294
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-compiled-runtime-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-electron-input",
+      "command": [
+        "node",
+        "scripts/run-node-input-actions-test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 35.824,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":26,\"time\":\"2026-10-15T02:17:47.826Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"navigation-start\",\"navigation\":27,\"time\":\"2026-10-15T02:17:47.838Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"target\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"inPlace\":false}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"navigation-committed\",\"navigation\":27,\"time\":\"2026-10-15T02:17:47.850Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"target\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"httpResponseCode\":200,\"httpStatusText\":\"OK\"}",
+          "Error occurred in handler for 'relayer:project-sidebar-read': Error: No handler registered for 'relayer:project-sidebar-read'",
+          "    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)",
+          "    at Session.emit (node:events:509:28)",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"load-finished\",\"navigation\":27,\"time\":\"2026-10-15T02:17:47.882Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\"}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"loaded-document\",\"navigation\":27,\"time\":\"2026-10-15T02:17:47.884Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"readyState\":\"complete\",\"title\":\"Relayer\",\"bodyChildren\":9,\"bodyLength\":21356,\"scriptSources\":[\"http://127.0.0.1:61446/theme-bootstrap.js\",\"http://127.0.0.1:61446/vendor/lucide.min.js\",\"http://127.0.0.1:61446/vendor/marked.umd.js\",\"http://127.0.0.1:61446/src/main.js\"]}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"navigation-start\",\"navigation\":28,\"time\":\"2026-10-15T02:17:48.266Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"target\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"inPlace\":true}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":28,\"time\":\"2026-10-15T02:17:48.285Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":28,\"time\":\"2026-10-15T02:17:48.289Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":28,\"time\":\"2026-10-15T02:17:48.297Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":28,\"time\":\"2026-10-15T02:17:48.305Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'",
+          "    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)",
+          "    at Session.emit (node:events:509:28)",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"navigation-start\",\"navigation\":29,\"time\":\"2026-10-15T02:17:48.523Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"target\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"inPlace\":true}",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":29,\"time\":\"2026-10-15T02:17:48.528Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'",
+          "    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)",
+          "    at Session.emit (node:events:509:28)",
+          "{\"fixture\":\"node-input\",\"diagnostic\":\"renderer-console\",\"navigation\":29,\"time\":\"2026-10-15T02:17:49.438Z\",\"url\":\"http://127.0.0.1:61446/?threadId=1&interactionId=1\",\"level\":3,\"message\":\"Applying inline style violates the following Content Security Policy directive 'style-src 'self''. Either the 'unsafe-inline' keyword, a hash ('sha256-LR9DJ079DJ/CA06VI0n4JJ2wPVn2jhfZYN/nvEK2t/g='), or a nonce ('nonce-...') is required to enable inline execution. Note that hashes do not apply to event handlers, style attributes and javascript: navigations unless the 'unsafe-hashes' keyword is present. The action has been blocked.\",\"line\":5561,\"sourceId\":\"http://127.0.0.1:61446/src/product-workspace/workspace.js\"}",
+          "Error occurred in handler for 'relayer:share-pending': Error: No handler registered for 'relayer:share-pending'",
+          "    at Session.<anonymous> (node:electron/js2c/browser_init:2:115037)",
+          "    at Session.emit (node:events:509:28)",
+          "Node-input Electron proof passed with 0 paid inference calls.",
+          "[91906:1014/221749.488800:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)",
+          "[91906:1014/221749.489078:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)",
+          "[91911:1014/221749.498357:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:395] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox.",
+          "[91911:1014/221749.499283:ERROR:gpu/command_buffer/service/shared_image/shared_image_manager.cc:395] SharedImageManager::ProduceMemory: Trying to Produce a Memory representation from a non-existent mailbox."
+        ],
+        "actualElectronInputProof": "passed",
+        "paidInferenceCalls": 0,
+        "parentExitCode": 0,
+        "parentConfirmedInnerResult": true,
+        "qualification": "Native/authored inputs, exact submitted values/reconciliation and trusted native gestures; minimal fixture logs retain missing optional IPC/CSP messages. No silent-console claim."
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-electron-input.txt",
+        "sha256": "8262c3adf54c44d710f97e89cbd4cae2f78ed4ac316ffe1a789209ea469c855c",
+        "bytes": 71805
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-electron-input-result.json",
+        "sha256": "0fe2da8bb72ccc0e2aa4e530e3b6519019e0cae6ccf8cce00b83feaa879e0ea3",
+        "bytes": 297
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-electron-input-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "qualification": "Canonical declared Electron parent invoked after fresh build and full check, avoiding a redundant rebuild. Inspect actual inner provider/input outcomes and parent final cleanup, not merely exit code.",
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-electron-stop",
+      "command": [
+        "node",
+        "scripts/run-desktop-stop-test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 10.76,
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "finalLogExcerpt": [
+          "{\"passed\":true,\"evidence\":\"/Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete/.relayer/evidence/issue-506-stop\",\"results\":[{\"provider\":\"codex\",\"duplicateClickAbortCount\":1,\"lifecycle\":\"stopped\",\"attempt\":\"cancelled\"},{\"provider\":\"prime\",\"duplicateClickAbortCount\":1,\"lifecycle\":\"stopped\",\"attempt\":\"cancelled\"}]}"
+        ],
+        "providers": [
+          {
+            "provider": "codex",
+            "duplicateClickAbortCount": 1,
+            "lifecycle": "stopped",
+            "attempt": "cancelled"
+          },
+          {
+            "provider": "prime",
+            "duplicateClickAbortCount": 1,
+            "lifecycle": "stopped",
+            "attempt": "cancelled"
+          }
+        ],
+        "parentExitCode": 0,
+        "parentConfirmedInnerResult": true,
+        "fixtureInference": true
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-electron-stop.txt",
+        "sha256": "a4ce776ad2a7e986881a12fbaa76ed042041de475ae5db88b01bc292e2e2e179",
+        "bytes": 333
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-electron-stop-result.json",
+        "sha256": "63e69738af7380336aac0eae1f52160a21acbd8dca5703805f3698cf177dce70",
+        "bytes": 290
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-electron-stop-source.json",
+        "sha256": "ec049d64602eec2f57d8825e36269399d68519cbca5acca76789e18b2c6fffc2",
+        "bytes": 12873
+      },
+      "qualification": "Canonical declared Electron parent invoked after fresh build and full check, avoiding a redundant rebuild. Inspect actual inner provider/input outcomes and parent final cleanup, not merely exit code.",
+      "pathsChangedSinceRun": [
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-eval-web-final",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 225.197,
+      "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-eval-web-final.txt",
+        "sha256": "da5df0bee028106b045ef47c0d37319c8d24a0faeeff546fbe0add9badadd1ab",
+        "bytes": 5926
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-eval-web-final-result.json",
+        "sha256": "3be80ab5a30f92e9ff3c58abc003f1ea167462a523298def70e1e2605ec48cec",
+        "bytes": 282
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-eval-web-final-source.json",
+        "sha256": "d2cd679ba4483733afda9fe6394a8086182e4fbd98fbe2ccc23a3098a5899d76",
+        "bytes": 12873
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [
+          "interrupted startup: pending native child terminated and profile lock released",
+          "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+          "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+          "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+          "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+          "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+          "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+          "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+          "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+          "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+          "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+          "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+        ],
+        "finalLogExcerpt": [
+          "PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "PASS independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+          "PASS evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+          "PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+          "PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+          "PASS actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+          "CURRENT_DECIDE_REVISIONS {\"authored\":false,\"reactions\":[1,1,1,1,2]}",
+          "CURRENT_TERMINAL_READ_REFUSED {\"authored\":false,\"code\":\"authority_generation_expired\"}",
+          "CURRENT_CAPTURE_GAPS {\"authored\":false,\"gaps\":[]}",
+          "PASS current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "CURRENT_AUTHORED_NAV_STAGE opening",
+          "CURRENT_AUTHORED_NAV_STAGE selecting_current_node",
+          "CURRENT_AUTHORED_NAV_STAGE registered_control_visible",
+          "CURRENT_AUTHORED_NAV_STAGE captured",
+          "CURRENT_AUTHORED_NAV_STAGE remounting",
+          "CURRENT_AUTHORED_NAV_STAGE activating_rebound",
+          "CURRENT_AUTHORED_NAV_STAGE historical_delivered",
+          "CURRENT_DECIDE_REVISIONS {\"authored\":true,\"reactions\":[1,1,1,1,2]}",
+          "CURRENT_TERMINAL_READ_REFUSED {\"authored\":true,\"code\":\"authority_generation_expired\"}",
+          "CURRENT_CAPTURE_GAPS {\"authored\":true,\"gaps\":[]}",
+          "PASS current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "PASS judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+          "PASS human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+        ],
+        "currentPointerVariants": {
+          "native": {
+            "validObservationRevisions": [
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "captureGaps": [],
+            "newHttpGuards": "terminal provider read rejected; ordinary delivered-occurrence PUT rejected without draft mutation",
+            "sdkConsumption": true,
+            "sealedInputUnchanged": true,
+            "inferenceAdmissions": 1
+          },
+          "authored": {
+            "validObservationRevisions": [
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "captureGaps": [],
+            "newHttpGuards": "terminal provider read rejected; ordinary delivered-occurrence PUT rejected without draft mutation",
+            "sdkConsumption": true,
+            "sealedInputUnchanged": true,
+            "inferenceAdmissions": 1
+          }
+        },
+        "outerTerminalReadChecks": {
+          "native": "authority_generation_expired",
+          "authored": "authority_generation_expired",
+          "qualification": "Outer proof awaits a bounded success value; wrong, skipped or failed provider assertion fails before PASS."
+        }
+      },
+      "pathsChangedSinceRun": [],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-terminal-negative",
+      "command": [
+        "node",
+        ".relayer/merge-live-terminal-negative.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 21.064,
+      "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-terminal-negative.txt",
+        "sha256": "7aa19777845188784f5f57f9344068aab245b03f969c7c938bee3c6ebdae279a",
+        "bytes": 688
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-terminal-negative-result.json",
+        "sha256": "1f8cedf241ae66994b65c06620613b262591f568a04542b400b97f791322f86a",
+        "bytes": 299
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-terminal-negative-source.json",
+        "sha256": "d2cd679ba4483733afda9fe6394a8086182e4fbd98fbe2ccc23a3098a5899d76",
+        "bytes": 12873
+      },
+      "innerOutcome": {
+        "path": "scripts/eval-current-actor-proof.mjs",
+        "originalSha256": "c82abcae25dd92cfa09b361028d6ead477ae4d4d0261e7a6dafb6cbcda87aa0c",
+        "mutatedSha256": "b79e5003c46d83a4303d66d8e97ddb86a02d07a81a3d7111eb6ade71c38c3460",
+        "mutation": "Expected terminal rejection code changed only in the private loader; tracked bytes unchanged.",
+        "outerProofRejected": true,
+        "variant": "native",
+        "paidInferenceCalls": 0
+      },
+      "qualification": "Private loader intentionally changes only the expected terminal error code at runtime. The inner browser proof must reject and the wrapper exits0 only after asserting that rejection. This is a negative control, not a normal fixture pass.",
+      "pathsChangedSinceRun": [],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "integrity-build-final",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 43.681,
+      "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-integrity-build-final.txt",
+        "sha256": "2e85c127369240578c1e2060e0d76f304208bc8703fa956ec26b5f8cc6ba101e",
+        "bytes": 2040
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-integrity-build-final-result.json",
+        "sha256": "ab149017ed987c25da23573a7465396567ec473f48367765776203098eeffaaa",
+        "bytes": 273
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-integrity-build-final-source.json",
+        "sha256": "d2cd679ba4483733afda9fe6394a8086182e4fbd98fbe2ccc23a3098a5899d76",
+        "bytes": 12873
+      },
+      "innerOutcome": {
+        "runtimeAndTypeScriptBuild": "passed"
+      },
+      "pathsChangedSinceRun": [],
+      "pathsRemovedSinceRun": []
+    }
+  ],
+  "retainedAttempts": [
+    {
+      "gate": "followup-renderer-red",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "test/eval-task-actor.test.mjs",
+        "-t",
+        "abandoned live edit|projects accepted delivery|locks a native live|fresh no-action"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 29.351,
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "sourceBindingCorrection": {
+        "reason": "Runner read previous immutable manifest despite added regression fixtures; prior launch sourceDigest is not the red workspace digest. Actual files were hashed before production edits.",
+        "manifest": ".relayer/merge-live-integrity-renderer-red-source.json"
+      },
+      "innerOutcome": "Initial red fixture omitted required updatedAt. Its original source metadata was stale and corrected separately; do not use alone as defect proof.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-red.txt",
+        "sha256": "d7ce1b9f2788ee9f7712ee2a27975ec46e44aca95daba22866d702f8e459b22d",
+        "bytes": 6826
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-red-result.json",
+        "sha256": "864708c434bd8db6b5e67b8d76f118c8e869d03f2ba3ed4cdeb0392d0e08dfd8",
+        "bytes": 809
+      }
+    },
+    {
+      "gate": "followup-renderer-green",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "test/eval-task-actor.test.mjs",
+        "-t",
+        "abandoned live edit|projects accepted delivery|locks a native live|fresh no-action"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 20.943,
+      "sourceDigest": "488ed5aaab5bc5dd1a5fc8313dbf0b5d263b458e422c37dc8192a6575af8e7d7",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "7 passed/2 failed: fixture draft readiness still invalid.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-green.txt",
+        "sha256": "50a60528c8b3befb11d42e92ed376b0251bc1cdcdac6707528cc5088f6f67f6f",
+        "bytes": 2298
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-green-result.json",
+        "sha256": "f166739eb459c1c39b53af1d6bcce961281ad19db2fdd7f5ee11840d7a8c36f8",
+        "bytes": 499
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-green-source.json",
+        "sha256": "2f9a84856f1c89c78d881db041b1113e3d0b839a877e6adc37107106d1ba2dcc",
+        "bytes": 12329
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations/0041_completion_scoped_live_answers.sql",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-settle-diagnostic",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "-t",
+        "abandoned live edit"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 15.232,
+      "sourceDigest": "0d9d643473248d46e7f8d73444e391c4ab3450222def3e78c9164a181b1f73f2",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "2 failed: missing updatedAt kept ordinary draft loading/Send disabled; fixture repaired.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-settle-diagnostic.txt",
+        "sha256": "f12ab7c77eaa5db0f0e63552e59893e74c0b00909d6662d3c2ab2bbf7b97458b",
+        "bytes": 3050
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-settle-diagnostic-result.json",
+        "sha256": "ee15e95a65373026a253bfa2920103b5cd901a91699b1cb10792c3832db936da",
+        "bytes": 399
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-settle-diagnostic-source.json",
+        "sha256": "e7401f262782615e4ff2dded25ea65558a0e1391411b5b719a02238210599159",
+        "bytes": 12329
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations/0041_completion_scoped_live_answers.sql",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-renderer-green-v2",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "test/eval-task-actor.test.mjs",
+        "-t",
+        "abandoned live edit|projects accepted delivery|locks a native live|fresh no-action"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 20.284,
+      "sourceDigest": "c13efac98e8bb03a803144f27e109df9792e1f5b3279d929ef06fbdfc38dae13",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "9 passed/121 filtered at intermediate source.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-green-v2.txt",
+        "sha256": "4dff4cce6143de9eaab5a9eb2a1b9aa2029365cb1fdf5934ec1bb1581b547d90",
+        "bytes": 273
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-green-v2-result.json",
+        "sha256": "9711e6869fa0734b257b5fe4374d799373bc91ce9d5dca6cddbb4c893c88824b",
+        "bytes": 499
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-green-v2-source.json",
+        "sha256": "fb1aa5aa5f9bf7e33b96744bd943d7ed61960f466de90a2bca75312f134827ff",
+        "bytes": 12329
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations/0041_completion_scoped_live_answers.sql",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-renderer-counterfactual",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--config",
+        ".relayer/merge-live-counterfactual.vitest.config.mjs",
+        "--maxWorkers=1",
+        "-t",
+        "abandoned live edit|projects accepted delivery|locks a native live"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 15.84,
+      "sourceDigest": "5b03b6d4d409ae37c1c02ebb79f07cc769b4edce65a476ecc47c326a793a38b1",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "8 failed/56 filtered with corrected fixture and exact old b328 workspace substituted. Temporary served sibling removed afterward; original bytes/identity retained privately.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-counterfactual.txt",
+        "sha256": "714dd414e96bb841dd9335a2658954e6dbcdf2eac377af32fc65abdff0182b7b",
+        "bytes": 6787
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-counterfactual-result.json",
+        "sha256": "6f01feb7f29b6e433175442e3f2798cb671b6feb969e23d615598dec0a020480",
+        "bytes": 480
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-counterfactual-source.json",
+        "sha256": "9c844c5ecc97482f581cf4d2c3cc5eb8e6eed47d7dbd2f0dfb83be0d3fc3f609",
+        "bytes": 12515
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations/0041_completion_scoped_live_answers.sql",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": [
+        "desktop/renderer/src/product-workspace/.counterfactual-live-workspace.js"
+      ]
+    },
+    {
+      "gate": "followup-cursor-red",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-graph-core",
+        "--test",
+        "live_answers",
+        "live_answer_cursors_do_not_reveal_other_completions",
+        "--",
+        "--exact",
+        "--test-threads=1"
+      ],
+      "exitCode": 101,
+      "durationSeconds": 149.844,
+      "sourceDigest": "16470c3654c95099fbfdf542476f89622731c7f762b71878f82df5755ac7e8f2",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "Real global allocator allocated (1,2) across completions instead of (1,1).",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-cursor-red.txt",
+        "sha256": "d336b4baaa52c6b3bd540536e5a73535a61902bed338e150912ffe90eaf9c82f",
+        "bytes": 1035
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-cursor-red-result.json",
+        "sha256": "238e347b31cef17c7240374077e7d8bf7cb2bd550b3685401aba01f5a116ba53",
+        "bytes": 444
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-cursor-red-source.json",
+        "sha256": "9af60c9f180b3900c563a9c8a9a653b256b1865fbc01705aed6b76269f8b1e6b",
+        "bytes": 12329
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations/0041_completion_scoped_live_answers.sql",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-warm-portfolio",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "test/eval-task-actor.test.mjs",
+        "test/implicit-input-send.test.mjs",
+        "test/invoke-input-bindings.test.mjs",
+        "test/live-answers.test.mjs"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 69.125,
+      "sourceDigest": "d14b859a9b7e9413b67db06d69f60c3acb070e711113c806d3d4b61ad19ea731",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "206 passed/1 failed in existing authored canonical-result fixture; WebCrypto readiness not guaranteed by HappyDOM completion. Assertions preserved and initial readiness wait repaired.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-warm-portfolio.txt",
+        "sha256": "1eb301359c0e75899fd6019b7465c5148e64c2c498c45c6f7aa7a2f2ddb099bb",
+        "bytes": 1436
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-warm-portfolio-result.json",
+        "sha256": "dadceab53a69c1bd779b133e83d407dd560a3619d619e0e49b55f7446ed644b4",
+        "bytes": 517
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-warm-portfolio-source.json",
+        "sha256": "bb23bff4a0af01713271eca431df2ffde5f2c80276f723c915ce89934c683c26",
+        "bytes": 12538
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-canonical-result-isolation",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "-t",
+        "uses one canonical result control"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 17.164,
+      "sourceDigest": "d14b859a9b7e9413b67db06d69f60c3acb070e711113c806d3d4b61ad19ea731",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "2 passed at unchanged failed-attempt source; does not establish original failure cause.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-canonical-result-isolation.txt",
+        "sha256": "2e8b1bcc6bd10014cd4950447db89dc06c8cc1a48959f3d7fcfa956993514526",
+        "bytes": 269
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-canonical-result-isolation-result.json",
+        "sha256": "c3eb83f07c6a37136f85456ba0ba4cba24ed95e61188b461f261b1b5083f98e3",
+        "bytes": 413
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-canonical-result-isolation-source.json",
+        "sha256": "bb23bff4a0af01713271eca431df2ffde5f2c80276f723c915ce89934c683c26",
+        "bytes": 12538
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-renderer-full-green",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/node-detail-runtime.test.mjs",
+        "test/eval-task-actor.test.mjs",
+        "test/implicit-input-send.test.mjs",
+        "test/invoke-input-bindings.test.mjs",
+        "test/live-answers.test.mjs"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 55.422,
+      "sourceDigest": "df420c420a578d910063ceb6abe30c68c3e302669d21e982fa3c37cd04d32777",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "209 passed/2 failed: new native tests attempted ordinary edits while running. Production lock preserved; fixture now stages before run or uses settled history.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-full-green.txt",
+        "sha256": "46ccb5b39137ae47c221c746c0985fb0e64730c47dd391b16791a88552defa9f",
+        "bytes": 2185
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-full-green-result.json",
+        "sha256": "ec61c5acd1ff5f6f5f26b55e4ba380c6c19f89078b19ca7d962893d273cc64b4",
+        "bytes": 517
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-renderer-full-green-source.json",
+        "sha256": "6019c4823996ad0004c5711857691d4eac59d5b9b4c45dbf404d10cba48b6e4b",
+        "bytes": 12538
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-native-green",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-graph-core",
+        "--lib",
+        "--test",
+        "live_answers",
+        "--",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 108.893,
+      "sourceDigest": "7840d41f3a2d8e7b4a88f84957d2a91f8917c596217fae06b8f75480cc6c02fa",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "49 passed at earlier source; superseded by final50-case native run.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-native-green.txt",
+        "sha256": "a3f8c85ba1f930952962fc75f2510e330318871821385e418a6e6a9ff725de05",
+        "bytes": 5666
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-native-green-result.json",
+        "sha256": "e2562d22751f244db064b658ccfee7f16f0745a79e0c78ea3ff6a8966b08389c",
+        "bytes": 381
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-native-green-source.json",
+        "sha256": "ed224faea0b93ab37da603864304b2d0066ba9fc2a919266cea97809ac8faa22",
+        "bytes": 12538
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "crates/relayer-graph-core/src/graph/database.rs",
+        "crates/relayer-graph-core/src/graph/live_answers.rs",
+        "crates/relayer-graph-core/tests/live_answers.rs",
+        "desktop/renderer/src/product-workspace/workspace.js",
+        "scripts/eval-current-actor-proof.mjs",
+        "test/node-detail-runtime.test.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-product-boundary",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-app-server",
+        "--lib",
+        "delivered_input_cannot_be_committed_or_selected_by_ordinary_send",
+        "--",
+        "--test-threads=1"
+      ],
+      "exitCode": 101,
+      "durationSeconds": 164.274,
+      "sourceDigest": "560107119382ed9e9aa4cf1c0a51090a434ee2bc0cd545a49522d2c35654d365",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "Compile failed: new test used unwrap on ApiError without Debug. Test diagnostics corrected.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary.txt",
+        "sha256": "757bc1b63473f3f82eb50a91ad2ad812dfa5c3959ccc54c2686767849f718b28",
+        "bytes": 2767
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-result.json",
+        "sha256": "6193c5e442f64f372cc51f6822300d6a2733c71e7c7b58d266c76aa9e16c9f00",
+        "bytes": 421
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-source.json",
+        "sha256": "bbe1a3c90fbbedd339d3863209042ff4464b95769cec2bccc00de5917b9a3520",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    },
+    {
+      "gate": "followup-product-boundary-v2",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-app-server",
+        "--lib",
+        "delivered_input_cannot_be_committed_or_selected_by_ordinary_send",
+        "--",
+        "--test-threads=1"
+      ],
+      "exitCode": 101,
+      "durationSeconds": 67.174,
+      "sourceDigest": "623faf7136ae432a9673ef85c7906948fad47f7b428eb255608d5b8d8ba4582f",
+      "environment": {
+        "RUST_TEST_THREADS": "1",
+        "VITEST_MAX_WORKERS": "1"
+      },
+      "innerOutcome": "Compiled, then failed before new boundary: active completion lacks ordinary canonical occurrence. Test now reconstructs a legacy stored draft only after native Return. Intermediate unused Json warning also corrected with an assertion before final run.",
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-v2.txt",
+        "sha256": "5dcf72ee4156d449fa4c743ab45c448dbf98bb6ad3cccd76d80d60147dde54aa",
+        "bytes": 2900
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-v2-result.json",
+        "sha256": "485b2dde760cea39247561a8fc803c3faae1c1a83414aac22d7a8a74a623a5cf",
+        "bytes": 420
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-followup-product-boundary-v2-source.json",
+        "sha256": "1bec9079686c5cc5df4273d1af533487b7ecfb809c0dcf8a8a1d8bd59c6c737e",
+        "bytes": 12873
+      },
+      "pathsChangedSinceRun": [
+        "crates/relayer-app-server/tests/support/completion_traces.rs",
+        "scripts/eval-current-actor-proof.mjs"
+      ],
+      "pathsRemovedSinceRun": []
+    }
+  ],
+  "artifacts": [
+    {
+      "path": ".relayer/merge-live-integrity-renderer-red-source.json",
+      "sha256": "62785ccec44b1edaa3ec4dc8f6f59d685fd31e4253e7ae0c73af806bbd532bf0",
+      "bytes": 12329
+    },
+    {
+      "path": ".relayer/merge-live-counterfactual-identity.json",
+      "sha256": "896b1d1bc594c163617ab61edea0b680bafdda604987d87230800253000bcb78",
+      "bytes": 415
+    },
+    {
+      "path": ".relayer/merge-live-counterfactual-workspace.js",
+      "sha256": "c2f0697af85c83e6e6c03d2934e8bbcdf2b7268af2c0b3b448988813ddd5d0d6",
+      "bytes": 315845
+    },
+    {
+      "path": ".relayer/merge-live-integrity-capture-cleanup.json",
+      "sha256": "cde633ac9ba154758a8ab490d4202da21202cfc2d055c6ae1db8c2c10ce5eec3",
+      "bytes": 1407
+    },
+    {
+      "path": ".relayer/merge-live-integrity-electron-cleanup.json",
+      "sha256": "66ebf24e18adb890ee2221a69428b0b271b90abe78ef660714ac2606c0ef7fcc",
+      "bytes": 1037
+    },
+    {
+      "path": ".relayer/merge-live-terminal-negative.mjs",
+      "sha256": "77967fb0ad502cf73df0ee3438e999f1c468df96a555a8ba5d6b64a883468774",
+      "bytes": 1823
+    }
+  ],
+  "qualifications": [
+    "Local whole check FAILED on two15-second Vitest timeouts; paired isolation passed Prime but depth case still FAILED. The parser/test/soleimport are byte-identical to main; direct semantics pass without proving the original time bound.",
+    "Completed independent tail/heavy gates are recorded separately; exact-head hosted check/freshness remain required after push.",
+    "No paid inference, model quality/incorporation, performance, signed release or actual Send/retry execution claim. Historical reports retain their original source binding."
+  ],
+  "captureReview": {
+    "reviewers": [
+      "root",
+      "actor_renderer_review"
+    ],
+    "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+    "verdict": "PASS visual/source binding",
+    "images": [
+      {
+        "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+        "sha256": "b4fd2ae298ebe4964c2757307b7ae9b7e20a85200876a6179d486d9a777a8e2e",
+        "bytes": 154002
+      },
+      {
+        "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+        "sha256": "fdde65dc4a972fba59faab847add6f38411bd5cca137687b9976e809ccd75af2",
+        "bytes": 154371
+      },
+      {
+        "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+        "sha256": "a7fef2a83858371a4ea6c8c3042d421eba2e2ccfbf0ce097d803da75839f915b",
+        "bytes": 169710
+      },
+      {
+        "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+        "sha256": "3eedbd97b9e13a35b32fc5e537f6582f163eb93128041e06fd06764e1408130c",
+        "bytes": 161909
+      },
+      {
+        "path": "docs/evidence/desktop-social-preview/dark.png",
+        "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+        "bytes": 62710
+      },
+      {
+        "path": "docs/evidence/desktop-social-preview/light.png",
+        "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+        "bytes": 68977
+      }
+    ],
+    "receipts": [
+      {
+        "path": "docs/evidence/followup-node-annotations/receipt.json",
+        "sha256": "3af394eca370bad6f518245ef4df19d6ce3e2fd3df7b8bf7ed40750ba588bc98",
+        "bytes": 3381
+      },
+      {
+        "path": "docs/evidence/desktop-social-preview/receipt.json",
+        "sha256": "5be41128561d049c3f5103732f9a94776f87dee0271d004ff5b0a50c52610eb7",
+        "bytes": 17657
+      }
+    ],
+    "observed": "Baseline missing add control; fixed add control, editable annotation, confirmed composer pill; both social themes legible. Actual PNGs retained.",
+    "cleanup": {
+      "observedAtUnixSeconds": 1792027007.352276,
+      "captureWindowUnixSeconds": [
+        1792026494.4009736,
+        1792026512.2129736
+      ],
+      "windowDirectoryMethod": "macOS birthtime, capture duration/end result receipt, 2-second endpoint allowance",
+      "captureWindowDirectoriesRemaining": [],
+      "captureScriptProcessesRemaining": [],
+      "fixtureWindowProcessesRemaining": [],
+      "argumentsExported": false,
+      "qualification": "Post-exit observation: no matching capture script or newly created profile/data directory remains. This is not a complete historical descendant PID inventory or proof about unrelated test processes. Parent exit/result and awaited profile removal are separately recorded by actual runner.",
+      "capturedBinaryHashes": {
+        "target/debug/relayer-graph-server": "c3cec9df3bfa392bd9bd32a6d90c3b04b920974ac3edcf2435d3eebf535156c2",
+        "target/debug/relayer-app-server": "e57f686e2fb49ae87d2229f878ff547aee181c0471c4d03f5d292f7fe82ce7b4"
+      },
+      "binaryProvenance": {
+        "buildResult": ".relayer/merge-actor-boundaries-integrity-build-result.json",
+        "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+        "sequence": "Serial pipeline: build \u2192 annotation capture/parent exit \u2192 social capture \u2192 receipt checks \u2192 full check. Capture hashes identify the binaries used then; later mutable Cargo artifacts need not retain those hashes."
+      }
+    },
+    "qualification": "Capture hashes identify capture-time binaries from the serialized build; later mutable Cargo target artifacts can differ. Post-exit inventory is bounded as recorded, not historical descendant PID proof. Final manual browser proof-only delta does not change renderer/capture inputs; the capture-time source identity remains in each receipt."
+  },
+  "baselineDepthFailure": {
+    "baselineCommit": "8c8e05694c69c40ad5f173e9613a7ef739846f41",
+    "diagnostic": {
+      "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+      "files": [
+        {
+          "path": "test/public-share-viewer.test.mjs",
+          "sha256": "98aef53c029ec30982dff1f29aaadf382dcd94dfc45d7a5440a00c2973d3c4d8",
+          "identicalToMain": true
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+          "sha256": "17d6110d208162544756b8b3a2a3ed5a4b16e407b65253844ef689e2c3257c9a",
+          "identicalToMain": true
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/edge-shapes.js",
+          "sha256": "eb207d003e6b7c1c5d7f257946f90da9e5613a0c927507d658964b4c69556b45",
+          "identicalToMain": true
+        }
+      ],
+      "timings": [
+        {
+          "cycle": false,
+          "serializationMs": 42.631417,
+          "parseMs": 19387.559458,
+          "bytes": 5249907
+        },
+        {
+          "cycle": true,
+          "serializationMs": 32.305208000001585,
+          "parseMs": 461.2560420000009,
+          "bytes": 5250111
+        }
+      ],
+      "qualification": "Direct Node diagnostic using exact test helpers and same production parser; no Vitest/HappyDOM imports. Semantic assertions preserved, no time bound or production change."
+    },
+    "artifacts": [
+      {
+        "path": ".relayer/merge-live-depth-diagnostic.json",
+        "sha256": "0847654964223e1e618e8b8d8e61a56ab883ec5fee62e89768f012c4e141705a",
+        "bytes": 1154
+      },
+      {
+        "path": ".relayer/merge-live-depth-diagnostic.mjs",
+        "sha256": "8a400d3aa3a7ba710c8ffc64557316e10ccad1ff20362078761a2b7185bcf103",
+        "bytes": 2465
+      }
+    ],
+    "reviewer": "design_authority_review",
+    "verdict": "Qualified existing local-bound failure; no PR regression established. Fresh exact-head CI must execute and pass unchanged test. A hosted failure requires diagnosis, not waiver.",
+    "qualification": "Full check and isolated depth test remain FAILED; direct semantic assertions do not prove the15-second bound. Prime case passed isolated. No timeout or parser code changed."
+  },
+  "electronCleanup": {
+    "observedAtUnixSeconds": 1792030719.410368,
+    "windows": [
+      {
+        "gate": "integrity-electron-input",
+        "start": 1792030635.1154807,
+        "end": 1792030670.9394805,
+        "prefixes": [
+          "relayer-electron-proof-",
+          "relayer-node-input-actions-"
+        ],
+        "script": "test-desktop-node-input-actions.mjs",
+        "directoriesRemaining": [],
+        "processesRemaining": []
+      },
+      {
+        "gate": "integrity-electron-stop",
+        "start": 1792030671.2702732,
+        "end": 1792030682.0302732,
+        "prefixes": [
+          "relayer-electron-proof-",
+          "relayer-stop-electron-"
+        ],
+        "script": "test-desktop-stop.mjs",
+        "directoriesRemaining": [],
+        "processesRemaining": []
+      }
+    ],
+    "qualification": "Bounded post-exit matching script or capture-time fixture/profile prefix inventory; no raw argv exported and no complete historical descendant-PID inventory claimed. Actual canonical parents separately confirmed successful inner result, child exit and awaited profile removal."
+  },
+  "qualification": "Local mapped semantic, authority, migration, renderer, browser, compiled and Electron proof is complete for the frozen source. The whole local check and isolated deep-reader budget remain FAILED as detailed; no overall local pass is claimed. Fresh exact-head hosted check and merge-freshness-status must pass before merge readiness.",
+  "finalProofOnlyDelta": {
+    "previousSourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+    "currentSourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+    "changedPath": "scripts/eval-current-actor-proof.mjs",
+    "scope": "Only manual browser proof assertion propagation changed. Full local check, build, native, renderer, compiled, Electron and capture production/input closures are unchanged. Full check retains its FAILED result and original source identity; final browser/negative/build executions bind the new source. Fresh exact-head hosted CI must run unchanged tests normally and pass."
+  }
+}

@@ -3046,6 +3046,19 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn live_answer_attempt_epoch(
+        &self,
+        interaction_id: super::InteractionId,
+        attempt_id: i64,
+    ) -> Result<Option<u64>, ProductError> {
+        self.storage
+            .live_answer_attempt_epoch(interaction_id, attempt_id)
+            .await?
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| ProductError::Invalid("Invalid live-answer authority epoch".into()))
+    }
+
     pub(crate) async fn begin_interaction_attempt(
         &self,
         receipt: BeginInteractionAttempt<'_>,

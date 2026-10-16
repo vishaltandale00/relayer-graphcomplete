@@ -5352,7 +5352,28 @@ mod tests {
         // The child writes the marker once its capture pipe is closed.
         fs::write(
             &fixture,
-            "#!/bin/sh\nperl -MPOSIX=setsid -e '$SIG{PIPE}=\"IGNORE\"; if (fork() == 0) { setsid(); open(my $w, \">\", $ENV{RELAYER_ESCAPE_FORKED}); close($w); while (syswrite(STDOUT, \"x\" x 4096)) { select(undef, undef, undef, 0.05); } open(my $f, \">\", $ENV{RELAYER_ESCAPE_MARKER}); print $f \"closed\"; exit 0; } select(undef, undef, undef, 0.005) until -e $ENV{RELAYER_ESCAPE_FORKED}; exit 0;'\n",
+            r#"#!/bin/sh
+perl -MPOSIX=setsid,WNOHANG -e '
+$SIG{PIPE}="IGNORE";
+my $pid = fork();
+defined($pid) or die "fork failed: $!\n";
+if ($pid == 0) {
+    setsid() >= 0 or die "setsid failed: $!\n";
+    open(my $w, ">", $ENV{RELAYER_ESCAPE_FORKED}) or die "fork witness failed: $!\n";
+    close($w) or die "fork witness close failed: $!\n";
+    while (syswrite(STDOUT, "x" x 4096)) { select(undef, undef, undef, 0.05); }
+    open(my $f, ">", $ENV{RELAYER_ESCAPE_MARKER}) or die "closed-pipe witness failed: $!\n";
+    print $f "closed";
+    close($f) or die "closed-pipe witness close failed: $!\n";
+    exit 0;
+}
+until (-e $ENV{RELAYER_ESCAPE_FORKED}) {
+    my $exited = waitpid($pid, WNOHANG);
+    die "escaped child exited before its fork witness\n" if $exited == $pid || $exited == -1;
+    select(undef, undef, undef, 0.005);
+}
+exit 0;'
+"#,
         )
         .unwrap();
         let mut permissions = fs::metadata(&fixture).unwrap().permissions();
@@ -5399,6 +5420,12 @@ mod tests {
             assert!(
                 result.is_ok(),
                 "parent did not observe the leader's exit within the bound: {result:?}"
+            );
+            let output = result.as_ref().unwrap();
+            assert!(
+                output.status.success,
+                "fixture startup failed: {}",
+                String::from_utf8_lossy(&output.stderr)
             );
             assert!(forked.exists(), "leader exited before the child escaped");
             // Cleanup and reader join after leader exit stay bounded.

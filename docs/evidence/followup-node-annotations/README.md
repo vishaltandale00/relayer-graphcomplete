@@ -18,11 +18,20 @@ The runner reads the real context-draft API after confirmation, verifies the ann
 After `npm run build`, with the checkout's native binaries available at `target/debug`:
 
 ```sh
-RELAYER_ANNOTATION_EVIDENCE_DIRECTORY=docs/evidence/followup-node-annotations ./node_modules/.bin/electron scripts/capture-followup-node-annotations.mjs
+RELAYER_ANNOTATION_EVIDENCE_DIRECTORY=docs/evidence/followup-node-annotations node --input-type=module -e '
+import { runElectronProof } from "./scripts/electron-proof-process.mjs";
+await runElectronProof({
+  executable: "./node_modules/.bin/electron",
+  script: "scripts/capture-followup-node-annotations.mjs",
+  label: "Follow-up annotation evidence",
+  resultVariable: "RELAYER_ANNOTATION_EVIDENCE_RESULT",
+  profileVariable: "RELAYER_ANNOTATION_EVIDENCE_PROFILE",
+});
+'
 npx vitest run test/followup-annotation-evidence.test.mjs
 ```
 
-The baseline commit must be available locally. `RELAYER_ANNOTATION_BASELINE` can select another explicit baseline for a new comparison. Regeneration changes the receipt and PNG hashes; inspect the images before committing.
+The baseline commit must be available locally. `RELAYER_ANNOTATION_BASELINE` can select another explicit baseline for a new comparison. Regeneration changes the receipt and PNG hashes; inspect the images before committing. The parent owns Chromium storage through process exit and requires a positive result written after service/fixture cleanup. The capture permits 60 seconds for service startup; it does not certify standard startup latency.
 
 ## Checkpoint mapping and limits
 

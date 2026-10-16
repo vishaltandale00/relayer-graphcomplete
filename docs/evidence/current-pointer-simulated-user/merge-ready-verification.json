@@ -1,0 +1,580 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "87c0e33be5432ff15ba9ad7841c02fe5b4e548691cb2f6264c077b7db91b0249",
+  "immutableMainCommit": "8c8e05694c69c40ad5f173e9613a7ef739846f41",
+  "plan": "README.md#merge-preparation-and-participant-response-window-2026-10-14",
+  "sourceBindingQualification": "Rust/TypeScript inputs stayed fixed throughout whole-check v2. Final74-path runtime/proof source was frozen before JavaScript imports (private binding receipt). CI owner map and two planner cases were subsequently updated and independently passed89tests. Final76-path manifest includes them. Documentation/evidence edits are not executable changes.",
+  "gates": [
+    {
+      "gate": "isolation-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/first-message-composer-integration.test.mjs",
+        "test/eval-app-integration.test.mjs",
+        "test/invoke-input-product-integration.test.mjs",
+        "test/public-share-viewer.test.mjs",
+        "-t",
+        "promotes new claude-basic|executes the exact Lantern quartet|seals connected inputs|reads the declared 10,000-layer"
+      ],
+      "durationSeconds": 142.098,
+      "log": {
+        "path": ".relayer/merge-ready-isolation-final.txt",
+        "sha256": "327ad3409b4f55dedf323760e418de4934984d828434349db53ef386ab1f5e0e",
+        "bytes": 275
+      },
+      "innerSummaries": [
+        "Test Files  4 passed (4)",
+        "Tests  6 passed | 159 skipped (165)"
+      ]
+    },
+    {
+      "gate": "eval-web-qualified",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "durationSeconds": 199.899,
+      "log": {
+        "path": ".relayer/merge-ready-eval-web-qualified.txt",
+        "sha256": "22dd025a62874535c4ef435d2f9bd13e37fb58de9804c070e023e34d092ed1e8",
+        "bytes": 5212
+      },
+      "completedChapters": [
+        "interrupted startup: pending native child terminated and profile lock released",
+        "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+        "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+        "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+        "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+        "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+        "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+        "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+        "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+        "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+        "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+        "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+        "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+        "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+      ]
+    },
+    {
+      "gate": "build-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "durationSeconds": 31.452,
+      "log": {
+        "path": ".relayer/merge-ready-build-final.txt",
+        "sha256": "2eeecd3a49dcd2f1d395cb5b4f07e6ec3ae776a915d792933d11b524453929b6",
+        "bytes": 2040
+      }
+    },
+    {
+      "gate": "secret-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "npm",
+        "run",
+        "test:codex-secret-boundary"
+      ],
+      "durationSeconds": 17.233,
+      "log": {
+        "path": ".relayer/merge-ready-secret-final.txt",
+        "sha256": "d9afec711bf59d710cf603e5d1473820ba83968d218359a69acb16e17c71bb24",
+        "bytes": 429
+      },
+      "innerSummaries": [
+        "Test Files  1 passed (1)",
+        "Tests  2 passed (2)"
+      ]
+    },
+    {
+      "gate": "python-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "/opt/homebrew/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "python/relayer-graph/tests"
+      ],
+      "durationSeconds": 4.106,
+      "log": {
+        "path": ".relayer/merge-ready-python-final.txt",
+        "sha256": "652a769ee1e2c5913adf096b88e233d5afe69b5c40b7b979670c28d05b93c64e",
+        "bytes": 196
+      }
+    },
+    {
+      "gate": "receipts-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "npm",
+        "run",
+        "lint:ladybug-receipt"
+      ],
+      "durationSeconds": 2.483,
+      "log": {
+        "path": ".relayer/merge-ready-receipts-final.txt",
+        "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+        "bytes": 927
+      }
+    },
+    {
+      "gate": "readability-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "npm",
+        "run",
+        "prd:check-readability"
+      ],
+      "durationSeconds": 0.489,
+      "log": {
+        "path": ".relayer/merge-ready-readability-final.txt",
+        "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+        "bytes": 166
+      }
+    },
+    {
+      "gate": "closure-isolation-final",
+      "status": "failed",
+      "exitCode": 1,
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/evidence-capture-integrity.test.mjs",
+        "-t",
+        "executes a sealed private Homebrew Node closure"
+      ],
+      "durationSeconds": 38.939,
+      "log": {
+        "path": ".relayer/merge-ready-closure-isolation-final.txt",
+        "sha256": "7f7fbacb2d11d64a194a75803894f6b9583d7b529717fdca35c782e67b224fd9",
+        "bytes": 11966
+      },
+      "innerSummaries": [
+        "Test Files  1 failed (1)",
+        "Tests  1 failed | 129 skipped (130)"
+      ],
+      "qualification": "Unchanged main-owned macOS security fixture exceeded its30s case bound. Later unchanged retry also exceeded30s; standalone and original instrumented case completed all security assertions. Timing cause remains unknown; no bounds/source were changed. Instrumented success does not certify uninstrumented timing."
+    },
+    {
+      "gate": "calibration-isolation-final",
+      "status": "passed",
+      "exitCode": 0,
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "packages/eval-runner/test/calibration-autonomous-cases.test.ts",
+        "-t",
+        "accepts one known-good implementation for every coding verifier"
+      ],
+      "durationSeconds": 17.27,
+      "log": {
+        "path": ".relayer/merge-ready-calibration-isolation-final.txt",
+        "sha256": "382e19e2db036a4435b418df2b372aacf30ad295e7d295075d76052db16743cf",
+        "bytes": 269
+      },
+      "innerSummaries": [
+        "Test Files  1 passed (1)",
+        "Tests  1 passed | 8 skipped (9)"
+      ]
+    },
+    {
+      "gate": "npm run check (second whole command)",
+      "status": "failed",
+      "exitCode": 1,
+      "completed": {
+        "nativeWorkspaceAndDocTests": 771,
+        "crashFeatureAndDocTests": 361,
+        "formatClippyBuildPackagesTypeScriptWorkspaceChecks": "passed",
+        "vitest": {
+          "passed": 4268,
+          "failed": 6,
+          "skipped": 3,
+          "filesPassed": 320,
+          "filesFailed": 6,
+          "filesSkipped": 1
+        }
+      },
+      "failures": [
+        {
+          "case": "Homebrew private Node closure",
+          "boundary": "30-second case deadline"
+        },
+        {
+          "case": "calibration known-good verifier coverage",
+          "boundary": "20-second case deadline"
+        },
+        {
+          "case": "Lantern quartet",
+          "boundary": "60-second completion wait; two passed, third running, fourth queued; execution errors null"
+        },
+        {
+          "case": "Claude V3 follow-up/invoke pins",
+          "boundary": "20-second case deadline"
+        },
+        {
+          "case": "Invoke connected inputs",
+          "boundary": "20-second case deadline"
+        },
+        {
+          "case": "10,000-layer share reader",
+          "boundary": "15-second case deadline"
+        }
+      ],
+      "qualification": "Five affected cases subsequently passed unmodified in exact isolation (plus other Claude pins). The unchanged main-owned Homebrew closure case exceeded its30s bound again in isolation; diagnostic invocations completed all assertions, including instrumented original Vitest at23.36s. Causes remain unknown. This command remains failed. Later continuation gates ran explicitly.",
+      "log": {
+        "path": ".relayer/merge-ready-check-v2.txt",
+        "sha256": "ee93b662a9d03a4fe197abb36e9332978d0076f87679c44d5f7af36aaaa75bc4",
+        "bytes": 144505
+      }
+    },
+    {
+      "gate": "warm prompt/config/host tests",
+      "status": "passed",
+      "tests": 330,
+      "files": 6,
+      "qualification": "Merged runtime/guidance before subsequent proof-runner/CI-only changes; those prompt/config/host dependencies stayed unchanged.",
+      "log": {
+        "path": ".relayer/merge-ready-warm.txt",
+        "sha256": "2bd5d0431f8b11fd8b6a070fdc97d2f03e0e1dc97808bad6604df3c2f3f0e2e7",
+        "bytes": 261
+      }
+    },
+    {
+      "gate": "delayed Answer exact delivered JS/Python journeys",
+      "status": "passed",
+      "tests": 2,
+      "qualification": "Real accepted answer sent 1.5 seconds after actual wait starts. Separate short fixture-only empty branch; exact fresh-client finalization.",
+      "log": {
+        "path": ".relayer/merge-ready-answer-green.txt",
+        "sha256": "a7bf9cade586bfbb16b5cda894f80b736718d5eb0e1deffc68a3cc4299764ebe",
+        "bytes": 269
+      }
+    },
+    {
+      "gate": "browser bootstrap adversarial fixtures",
+      "status": "passed",
+      "tests": 2,
+      "log": {
+        "path": ".relayer/merge-ready-browser-bootstrap-green.txt",
+        "sha256": "785bdf6588ce6176c76f12812b9fab1a79f4399c42dde817ef942667abd65761",
+        "bytes": 251
+      }
+    },
+    {
+      "gate": "Electron process and reset fixtures",
+      "status": "passed",
+      "tests": 7,
+      "qualification": "Warm run before final kill-error diagnostics refinement; final code also passed these tests in the default suite.",
+      "log": {
+        "path": ".relayer/merge-ready-electron-process-tests-v2.txt",
+        "sha256": "26b459ba4cee953f68c06c5d538f55d8f14e6da417645c68b68d0bb6e226f7c0",
+        "bytes": 255
+      }
+    },
+    {
+      "gate": "CI owner-map production planner",
+      "status": "passed",
+      "tests": 89,
+      "qualification": "Separately executed final CI mapping/tests after whole-check JavaScript phase began.",
+      "log": {
+        "path": ".relayer/merge-ready-ci-mapping.txt",
+        "sha256": "12396cacc9430e4f18adc2286be0345c8cffb17c39949fac017b333e4a0d0b61",
+        "bytes": 1283
+      }
+    },
+    {
+      "gate": "compiled runtime",
+      "status": "passed",
+      "exitCode": 0,
+      "tests": 12,
+      "qualification": "Earlier merged-workspace execution; later changes were proof scripts/helpers/tests/CI mapping and evidence. Compiled-runtime production dependencies stayed unchanged.",
+      "log": {
+        "path": ".relayer/merge-ready-compiled-runtime.txt",
+        "sha256": "752f218ea920ba236a0a5c6c4365579ae5d784f5e428fa1e9a3d081b35921506",
+        "bytes": 380
+      }
+    },
+    {
+      "gate": "managed Prime macOS ARM64",
+      "status": "passed",
+      "exitCode": 0,
+      "ready": true,
+      "qualification": "Actual macOS ARM64 recipe and combined configuration/Python identities verified; these dependencies stayed unchanged.",
+      "log": {
+        "path": ".relayer/merge-ready-prime-managed.txt",
+        "sha256": "4efd0cb42cd73700cec2895b8ffc4b92849416dee617a664356c9e6d5b2ba66d",
+        "bytes": 382
+      }
+    },
+    {
+      "gate": "actual Electron Input canonical parent",
+      "status": "passed",
+      "exitCode": 0,
+      "paidInferenceCalls": 0,
+      "qualification": "Final positive cleanup receipt, zero process exit without signal, profile retained through exit then removed; final production/proof source.",
+      "log": {
+        "path": ".relayer/merge-ready-desktop-input-qualified.txt",
+        "sha256": "4e7a441bab39686f328e8bf9fa1881742b2e191a7296f67ccd928580e3c5835b",
+        "bytes": 72997
+      }
+    },
+    {
+      "gate": "actual Electron Codex/Prime Stop canonical parent",
+      "status": "passed",
+      "exitCode": 0,
+      "providers": [
+        {
+          "provider": "codex",
+          "duplicateClickAbortCount": 1,
+          "lifecycle": "stopped",
+          "attempt": "cancelled"
+        },
+        {
+          "provider": "prime",
+          "duplicateClickAbortCount": 1,
+          "lifecycle": "stopped",
+          "attempt": "cancelled"
+        }
+      ],
+      "qualification": "Final positive cleanup receipt and zero process exit; last-window ownership fix included.",
+      "log": {
+        "path": ".relayer/merge-ready-desktop-stop-final-v2.txt",
+        "sha256": "5fa77b821be93252a021525a8f454d4d1fa38f5b6327bd1050fe2265cbd9b725",
+        "bytes": 344
+      }
+    }
+  ],
+  "retainedAttempts": [
+    {
+      "attempt": "first whole check",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Five deadline failures: provider aggregate video, artifact pages, Lantern, Invoke input and deep share; native/TS completed. This command remains failed.",
+      "log": {
+        "path": ".relayer/merge-ready-check.txt",
+        "sha256": "5fe523af6183135ce19998d62c5fc38f94bcb6a5a486d893a9cd2631d08bd020",
+        "bytes": 143386
+      }
+    },
+    {
+      "attempt": "initial exact isolation",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Four cases passed; provider onboarding wait failed before the single-navigation repair.",
+      "log": {
+        "path": ".relayer/merge-ready-isolation.txt",
+        "sha256": "e6094756ecf94bc75b9279156e72ad23a812a6d40f69570cf3b58d3d9232da9f",
+        "bytes": 1953
+      }
+    },
+    {
+      "attempt": "initial Eval web",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Settings persistence timeout.",
+      "log": {
+        "path": ".relayer/merge-ready-eval-web.txt",
+        "sha256": "a213860bb10216d5be57c7c910ff8233668394cb85fbbd12f35310d5a082e9bf",
+        "bytes": 1194
+      }
+    },
+    {
+      "attempt": "settings diagnostic",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Settings persistence failed; no page error explained it.",
+      "log": {
+        "path": ".relayer/merge-ready-eval-web-diagnostic.txt",
+        "sha256": "81705ae37142697e9cbd2435726341fd60a8036b0aae0cdb0568c20eb0311090",
+        "bytes": 1127
+      }
+    },
+    {
+      "attempt": "settings instrumentation",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Carousel eventually settled/persisted; later actor runtime_failure remains unexplained.",
+      "log": {
+        "path": ".relayer/merge-ready-eval-web-diagnostic-v2.txt",
+        "sha256": "d5d391476fa9a992f8e4a13a556bb7a822adf92c18c404ee39d31628116b0f5c",
+        "bytes": 2960
+      }
+    },
+    {
+      "attempt": "actor aggregate diagnostic",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Reached decision seven of eight before old outer30s wait expired; cleanup AbortError. Does not establish every historical timeout cause.",
+      "log": {
+        "path": ".relayer/merge-ready-eval-web-diagnostic-v3.txt",
+        "sha256": "4fc16ef3934110918b7c07ef6033b085c017700c65a4c1d58ef2e11157bd59ed",
+        "bytes": 4560
+      }
+    },
+    {
+      "attempt": "intermediate full Eval web",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Accepted ordinary input PUT assertion failed; exact diagnostic and subsequent complete plain portfolio passed. Earlier cause unknown.",
+      "log": {
+        "path": ".relayer/merge-ready-eval-web-final.txt",
+        "sha256": "2826638f481ad296cdf1f8be937c74fe3321dde6603922b1c5e747abd12ddb13",
+        "bytes": 4784
+      }
+    },
+    {
+      "attempt": "provider old aggregate bound",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Single-navigation capture progressed through main scenes and variants before the old120s aggregate bound expired.",
+      "log": {
+        "path": ".relayer/merge-ready-provider-single-boot.txt",
+        "sha256": "adce4ced547085f86fb37c7e41ec21d2bce7958089c724f8bdb18c9b979da028",
+        "bytes": 2304
+      }
+    },
+    {
+      "attempt": "second unchanged Homebrew isolation",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Original macOS case exceeded30s again (44.49s); security assertion failure not reported.",
+      "log": {
+        "path": ".relayer/merge-ready-closure-isolation-confirmed.txt",
+        "sha256": "3798f6db96ba75e3db5fc2372dd66d638c62658ca8b2b50459e9ef7e520f8f66",
+        "bytes": 11966
+      }
+    },
+    {
+      "attempt": "initial Electron Input",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Scenario assertions printed success but process did not exit; gate failed.",
+      "log": {
+        "path": ".relayer/merge-ready-desktop-input.txt",
+        "sha256": "4ffbaad080388fad9dce32a44216baa8f8c02804947f9930b63346c5abfa70f9",
+        "bytes": 73632
+      }
+    },
+    {
+      "attempt": "initial Electron Stop",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Scenario assertions printed success but process hung; owned process was interrupted. Gate failed.",
+      "log": {
+        "path": ".relayer/merge-ready-desktop-stop.txt",
+        "sha256": "fd036c8d9adf6f382a8667c57cdd5fdd8ad31c56eaf289e47cdf959e17033fa1",
+        "bytes": 497
+      }
+    },
+    {
+      "attempt": "Electron cleanup diagnostic",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Fixture removals succeeded and app.exit was entered/returned; removed-profile Chromium cache write observed. Later retention diagnostic passed, without proving every earlier cause.",
+      "log": {
+        "path": ".relayer/merge-ready-input-cleanup-diagnostic.txt",
+        "sha256": "0ce4ff4cb40bc4bb7b110e600e748c8324fe7387d927b2efd572b2bcb2ffdb46",
+        "bytes": 85718
+      }
+    },
+    {
+      "attempt": "intermediate canonical Stop",
+      "result": "failed/intermediate diagnostic",
+      "detail": "Parent refused zero exit with only provisional failure receipt; fixed explicit last-window lifetime before final pass.",
+      "log": {
+        "path": ".relayer/merge-ready-desktop-stop-final.txt",
+        "sha256": "9009490d65ba36e184903314457c4244c557d0aa2b8c096ac030fd41087349c0",
+        "bytes": 1026
+      }
+    }
+  ],
+  "redProofs": [
+    {
+      "boundary": "old one-second delivered wait misses a real late answer in both SDKs",
+      "log": {
+        "path": ".relayer/merge-ready-answer-red-v2.txt",
+        "sha256": "8dff7d3dfd0a2bc7144d073042f10e662d74ed354da353b2690c0ef6b81c611f",
+        "bytes": 2086
+      }
+    },
+    {
+      "boundary": "old double navigation loses onboarding before attachment, normal/forced-colors",
+      "log": {
+        "path": ".relayer/merge-ready-browser-bootstrap-red.txt",
+        "sha256": "9ae14036b27a7d3d4871790dd4f266d3005902ea52bf9c864f030d2cff4c9057",
+        "bytes": 3049
+      }
+    }
+  ],
+  "closureDiagnostics": [
+    {
+      "log": {
+        "path": ".relayer/merge-ready-closure-stage-diagnostic.txt",
+        "sha256": "658fe00cc8c3d25b657d16c8ae670e1e93c1bfba62e6a12704c720c22c7999c0",
+        "bytes": 12722
+      },
+      "status": "passed diagnostic",
+      "exitCode": 0,
+      "dependencies": 24,
+      "files": 25,
+      "bytes": 116105408,
+      "sealedAtMs": 11419,
+      "dependencyChecksAtMs": 11813,
+      "sandboxReturnedAtMs": 21563,
+      "sandboxStatus": 0,
+      "cleanupAtMs": 21583,
+      "qualification": "Standalone diagnostic copies production discovery/sealing/sandbox scenario with equivalent Node assertions; does not certify original Vitest timing."
+    },
+    {
+      "log": {
+        "path": ".relayer/merge-ready-closure-vitest-diagnostic.txt",
+        "sha256": "383337d6bcc8b82db85d60f5c993fbe9039f078b491f30e2104ad3b719c0d69f",
+        "bytes": 10927
+      },
+      "status": "passed instrumented original case",
+      "exitCode": 0,
+      "testDurationMs": 23360,
+      "originalCaseBoundMs": 30000,
+      "qualification": "Original Vitest assertions and bound retained; only stage logging/publication callback added temporarily. Success console stage details were hidden by reporter. Wrapper restored byte-exact original fixtureSHAf99d56ff4fe0f2ce70fd55c13240e8f9e28bb95170295f0270b17bb21ff8837f. Does not certify uninstrumented timing."
+    }
+  ],
+  "liveResults": "merge-ready-live-results.json",
+  "limits": [
+    "Failed full commands remain failed; exact case passes do not prove failure causes or portfolio performance.",
+    "No statistical improvement, calibrated graph quality, task endpoint attainment or standard startup/TTFG proof.",
+    "No Preview/Stable release context: no signed, notarized, release-candidate or unavailable-platform proof claimed.",
+    "Historical source-bound renderer/social/annotation evidence remains historical for unchanged seams.",
+    "Private raw logs are retained; published hashes bind the inner outcomes reviewed here without publishing capabilities or hidden briefs."
+  ],
+  "hostedCI": "Separate exact-head requirement; inspect PR check and merge-freshness-status. This local record does not pre-certify hosted CI."
+}

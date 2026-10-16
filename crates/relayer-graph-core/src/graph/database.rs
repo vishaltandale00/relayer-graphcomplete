@@ -1139,6 +1139,13 @@ impl GraphDatabase {
             )
             .await?;
         let mut connection = self.storage.acquire().await?;
+        let delivered: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM live_answers WHERE completion_id=?1 AND presenting_layer_id=?2 AND action_id=?3)")
+            .bind(occurrence.presenting_interaction_node_id.value())
+            .bind(occurrence.presenting_layer_id.value()).bind(occurrence.action_id.value())
+            .fetch_one(&mut *connection).await?;
+        if delivered {
+            return Ok((input, false, false));
+        }
         let consumers: Vec<(Option<bool>, bool)> = sqlx::query_as(
             "SELECT a.reusable,EXISTS(SELECT 1 FROM durable_invocations calls WHERE calls.source_action_id=a.id)
              FROM actions a JOIN invoke_input_bindings bindings ON bindings.invoke_action_id=a.id
@@ -1172,7 +1179,7 @@ impl GraphDatabase {
             return Err(GraphError::validation(
                 "input_consumers_exhausted",
                 "value",
-                "This Input belongs only to Invokes whose single calls are already frozen. Open their history or recover the existing call.",
+                "This Input already has a delivered answer or belongs only to frozen calls. Its accepted value remains in history.",
             ));
         }
         Ok(input)
