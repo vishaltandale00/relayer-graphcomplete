@@ -53,11 +53,11 @@ import {
   RECURSIVE_COMPLETE_EVAL_CASE_ID,
   recursiveGraphMemoryEvalCase,
   RECURSIVE_GRAPH_MEMORY_CASE_ID,
-  RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
+  RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR,
   selectEvalPermissionProfile,
   validateEvalChecksV1,
 } from "@relayer/eval-runner";
-import { loadHarnessConfigurations } from "@relayer/harness-host";
+import { loadHarnessConfigurations, resolveGraphCapabilityProfile } from "@relayer/harness-host";
 import {
   defaultFamilyRecoveryError,
   firstAvailableSelection,
@@ -147,10 +147,13 @@ export const evalCases = Object.freeze([
   })),
 ]);
 
-// Ablation presets pair a search-off control against a search-on treatment. The
-// query-v1 ablation retired once the product harnesses adopted search by default,
-// which left each pair comparing a configuration to itself.
+// Ablation presets hold one case constant while changing one product capability.
+// The graph-search on/off ablation retired once search became the configuration default.
 const evalAblations = Object.freeze([]);
+
+// Search is a default harness capability, so qualification follows the cases whose
+// evidence depends on search rather than every configuration that may search.
+const graphSearchEvalCaseIds = new Set([graphMemoryEvalCaseId, RECURSIVE_GRAPH_MEMORY_CASE_ID]);
 
 export function resolveEvalCasePrompts(definition, testRunId) {
   if (!definition) throw new Error("Cannot resolve prompts for an unknown Eval case.");
@@ -354,7 +357,7 @@ function recursiveGraphMemoryConfigurationIdentity(configuration) {
   const normalized = copy(configuration);
   delete normalized.name;
   delete normalized.complete;
-  delete normalized.graphCapabilityProfile;
+  normalized.graphCapabilityProfile = resolveGraphCapabilityProfile(configuration);
   return canonicalJson(normalized);
 }
 
@@ -1007,6 +1010,8 @@ export class EvalService {
     annotationSnapshotLoader = null,
     platform = process.platform,
     targetKey = null,
+    // Must match the runtime's adapter so Eval plans record the configuration that ran.
+    adaptConfiguration = (configuration) => configuration,
     semanticChildDiscoveryClock = realDiscoveryClock,
   }) {
     this.stateFile = stateFile;
@@ -1046,6 +1051,7 @@ export class EvalService {
     this.annotationSnapshotLoader = annotationSnapshotLoader;
     this.platform = platform;
     this.targetKey = targetKey;
+    this.adaptConfiguration = adaptConfiguration;
     this.semanticChildDiscoveryClock = semanticChildDiscoveryClock;
     this.runs = [];
     this.configurations = new Map();
@@ -1054,7 +1060,8 @@ export class EvalService {
   }
 
   async open() {
-    this.configurations = await loadHarnessConfigurations(this.configurationPaths);
+    this.configurations = new Map([...await loadHarnessConfigurations(this.configurationPaths)]
+      .map(([name, configuration]) => [name, this.adaptConfiguration(configuration)]));
     await rm(join(dirname(this.stateFile), "import-staging"), { recursive: true, force: true });
     try {
       const persisted = JSON.parse(await readFile(this.stateFile, "utf8"));
@@ -1141,7 +1148,7 @@ export class EvalService {
           : { available: true, unavailableReason: null }),
         complete: copy(configuration.complete ?? { agentAuthored: false }),
         settings: copy(configuration.settings),
-        graphCapabilityProfile: copy(configuration.graphCapabilityProfile ?? { search: "disabled" }),
+        graphCapabilityProfile: copy(resolveGraphCapabilityProfile(configuration)),
       })),
       ablations: copy(evalAblations.map((ablation) => ({
         ...ablation,
@@ -1390,12 +1397,8 @@ export class EvalService {
     if (incompatibleJudgeCase) {
       throw new Error("Input round-trip cases require a compatible simulated-user judge configuration.");
     }
-    const selectsGraphSearch = Array.isArray(harnessConfigurationNames)
-      && harnessConfigurationNames.some((name) => (
-        this.configurations.get(name)?.graphCapabilityProfile?.search === "query-v1"
-      ));
-    if (selectsGraphSearch && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
-      throw new Error("Graph-search Eval treatments are qualified only for macOS Apple Silicon.");
+    if (testCaseIds.some((id) => graphSearchEvalCaseIds.has(id)) && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
+      throw new Error("Graph-search Eval cases are qualified only for macOS Apple Silicon.");
     }
     if ((testCaseIds.includes(NODE_DETAIL_EVAL_CASE_ID)
       || (Array.isArray(harnessConfigurationNames)
@@ -1434,18 +1437,16 @@ export class EvalService {
     if (testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID)) {
       const definition = this.cases.find((item) => item.id === RECURSIVE_GRAPH_MEMORY_CASE_ID);
       if (!sameJson(testCaseIds, [RECURSIVE_GRAPH_MEMORY_CASE_ID])
-        || !sameJson(harnessConfigurationNames, RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET)) {
-        throw new Error(`The recursive graph-memory experiment must run alone with its exact ordered Codex quartet: ${RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.join(", ")}.`);
+        || !sameJson(harnessConfigurationNames, RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR)) {
+        throw new Error(`The recursive graph-memory experiment must run alone with its exact ordered Codex pair: ${RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR.join(", ")}.`);
       }
-      const configurations = RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.map((name) => this.configurations.get(name));
+      const configurations = RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR.map((name) => this.configurations.get(name));
       const factors = configurations.map((configuration) => ({
-        search: configuration?.graphCapabilityProfile?.search,
+        search: configuration === undefined ? undefined : resolveGraphCapabilityProfile(configuration).search,
         agentAuthored: configuration?.complete?.agentAuthored,
       }));
       const expectedFactors = [
-        { search: "disabled", agentAuthored: false },
         { search: "query-v1", agentAuthored: false },
-        { search: "disabled", agentAuthored: true },
         { search: "query-v1", agentAuthored: true },
       ];
       if (configurations.some((configuration) => configuration === undefined)
@@ -1455,7 +1456,7 @@ export class EvalService {
           recursiveGraphMemoryConfigurationIdentity(configuration)
             !== recursiveGraphMemoryConfigurationIdentity(configurations[0])
         ))) {
-        throw new Error("The recursive graph-memory quartet must be one normalized Codex 2x2 varying only graph search and agent-authored Complete.");
+        throw new Error("The recursive graph-memory pair must be one normalized, search-enabled Codex configuration varying only agent-authored Complete.");
       }
       const rootProviderExecutions = resolveEvalCasePrompts(definition, "authorization").length
         * configurations.length;
@@ -1566,17 +1567,18 @@ export class EvalService {
         variedField: "personalPresentationVersion",
         passed: null,
       } : testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID) ? {
-        kind: "graph-search-recursion-2x2",
+        kind: "graph-memory-recursion-pair",
         temporalRuntimeFeatures: copy(RECURSIVE_TEMPORAL_FEATURES),
         controlledFields: [
           "task",
           "implementation",
           "settings",
+          "graphCapabilityProfile",
           "permissionBindings",
           "providerModelSelection",
           "temporalRuntimeFeatures",
         ],
-        variedFields: ["graphCapabilityProfile.search", "complete.agentAuthored"],
+        variedField: "complete.agentAuthored",
         passed: null,
       } : null,
       executions: plans.map((plan) => {
@@ -2098,7 +2100,7 @@ export class EvalService {
       this.#finalizeRecursiveComparison(run);
       await this.#changed();
     }
-    if (run.comparison?.kind === "graph-search-recursion-2x2") {
+    if (run.comparison?.kind === "graph-memory-recursion-pair") {
       this.#finalizeRecursiveGraphMemoryComparison(run);
       await this.#changed();
     }
@@ -2154,10 +2156,10 @@ export class EvalService {
     const executions = run.executions.filter(({ testCaseId }) => testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID);
     const control = executions[0];
     const workspaceThreadIds = executions.flatMap((execution) => execution.threadIds || []);
-    const controlled = executions.length === RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.length
-      && sameJson(executions.map(({ harnessConfigurationName }) => harnessConfigurationName), RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET)
+    const controlled = executions.length === RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR.length
+      && sameJson(executions.map(({ harnessConfigurationName }) => harnessConfigurationName), RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR)
       && executions.every((execution) => execution.threadIds?.length === 1)
-      && new Set(workspaceThreadIds.map(String)).size === RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET.length
+      && new Set(workspaceThreadIds.map(String)).size === RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR.length
       && executions.every((execution) => sameJson(execution.modelResolution, control?.modelResolution))
       && executions.every((execution) => sameJson(
         execution.turns?.map(({ prompt }) => prompt),
@@ -2176,11 +2178,11 @@ export class EvalService {
         control?.turns?.map(({ effectivePermissionReceipt }) => effectivePermissionReceipt),
       ));
     const check = {
-      name: "graph-search-recursion:controlled-2x2",
+      name: "graph-memory-recursion:controlled-pair",
       passed: controlled,
       detail: controlled
-        ? "All four cells used the exact ordered factor matrix, one pinned provider/model resolution, and identical task and permission inputs."
-        : "The four-cell experiment drifted outside its controlled factor, provider, task, model, or permission inputs.",
+        ? "Both cells used the exact ordered recursion pair, one pinned provider/model resolution, and identical task and permission inputs."
+        : "The recursion pair drifted outside its controlled factor, provider, task, model, or permission inputs.",
     };
     for (const execution of executions) {
       execution.checks.push(copy(check));
@@ -2511,8 +2513,8 @@ export class EvalService {
     const definition = this.cases.find((item) => item.id === testCaseId);
     const configuration = this.configurations.get(harnessConfigurationName);
     if (!definition || !configuration) throw new Error("Choose a known case and harness.");
-    if (configuration.graphCapabilityProfile?.search === "query-v1" && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
-      throw new Error("Graph-search Eval is qualified only for macOS Apple Silicon.");
+    if (graphSearchEvalCaseIds.has(testCaseId) && this.targetKey !== GRAPH_SEARCH_EVAL_TARGET) {
+      throw new Error("Graph-search Eval cases are qualified only for macOS Apple Silicon.");
     }
     const interactive = external?.boundCase.snapshot.interactive;
     if (external) {
@@ -2523,7 +2525,11 @@ export class EvalService {
     const execution = {
       id: sessionId, testRunId: sessionId, testCaseId,
       harnessConfigurationName, harnessConfiguration: copy(configuration),
-      harnessConfigurationDigest: sha256(canonicalJson(configuration)),
+      // Hash the resolved search profile so an omitted profile's default stays part of the identity.
+      harnessConfigurationDigest: sha256(canonicalJson({
+        ...configuration,
+        graphCapabilityProfile: resolveGraphCapabilityProfile(configuration),
+      })),
       caseSnapshotDigest: definition.caseSnapshotDigest || null,
       caseSnapshot: copy(definition.caseSnapshot || null), threadIds: [],
     };

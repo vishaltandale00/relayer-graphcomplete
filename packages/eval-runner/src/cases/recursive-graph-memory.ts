@@ -1,9 +1,8 @@
 export const RECURSIVE_GRAPH_MEMORY_CASE_ID = "empty-project.recursive-graph-memory.launch-readiness";
 
-export const RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET = Object.freeze([
-  "codex-eval-lantern-search-disabled-recursion-disabled",
+// Both cells keep graph search enabled; only agent-authored recursion varies.
+export const RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR = Object.freeze([
   "codex-eval-lantern-search-query-v1-recursion-disabled",
-  "codex-eval-lantern-search-disabled-recursion-enabled",
   "codex-eval-lantern-search-query-v1-recursion-enabled",
 ]);
 
@@ -35,10 +34,10 @@ export const recursiveGraphMemoryPrompts = Object.freeze([
 
 export const recursiveGraphMemoryEvalCase = Object.freeze({
   id: RECURSIVE_GRAPH_MEMORY_CASE_ID,
-  name: "Lantern launch readiness · search × recursion",
-  description: "The same three natural turns compare graph search off/on and agent-authored recursion off/on in a controlled Codex 2×2.",
+  name: "Lantern launch readiness · recursion",
+  description: "The same three natural turns compare agent-authored recursion off/on in a controlled, search-enabled Codex pair.",
   defaultSelected: false,
-  requiredHarnessConfigurationNames: RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
+  requiredHarnessConfigurationNames: RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR,
   prompts: recursiveGraphMemoryPrompts,
   requiredChecks: Object.freeze(["agent-authored-complete", "follow-up-graph-search"]),
 });

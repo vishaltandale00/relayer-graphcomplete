@@ -58,28 +58,26 @@ describe("Eval dashboard run presentation", () => {
     });
   });
 
-  it("isolates the four-cell recursive graph-memory experiment and authorizes twelve roots plus model-controlled children", () => {
-    const quartet = [
-      "codex-eval-lantern-search-disabled-recursion-disabled",
+  it("isolates the two-cell recursive graph-memory experiment and authorizes six roots plus model-controlled children", () => {
+    const pair = [
       "codex-eval-lantern-search-query-v1-recursion-disabled",
-      "codex-eval-lantern-search-disabled-recursion-enabled",
       "codex-eval-lantern-search-query-v1-recursion-enabled",
     ];
     expect(isolateRecursiveCompleteSelection(
       ["empty-project.task-system.single-turn", "empty-project.recursive-graph-memory.launch-readiness"],
       ["codex-basic"],
-      quartet.map((name) => ({ name })),
+      pair.map((name) => ({ name })),
     )).toEqual({
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
-      harnessConfigurationNames: quartet,
+      harnessConfigurationNames: pair,
     });
     const selection = {
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
-      harnessConfigurationNames: quartet,
+      harnessConfigurationNames: pair,
       judgeConfigurationName: "deterministic-graph-contract",
     };
     expect(authorizeRecursiveCompleteSelection(selection, (message) => {
-      expect(message).toContain("twelve paid/live Codex root turns");
+      expect(message).toContain("six paid/live Codex root turns");
       expect(message).toContain("additional model-controlled paid child executions");
       return true;
     })).toEqual({
@@ -87,7 +85,7 @@ describe("Eval dashboard run presentation", () => {
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
-        rootProviderExecutions: 12,
+        rootProviderExecutions: 6,
         agentAuthoredChildren: true,
       },
     });
@@ -95,7 +93,7 @@ describe("Eval dashboard run presentation", () => {
     expect(isolateRecursiveCompleteSelection(
       ["empty-project.recursive-graph-memory.launch-readiness"],
       [],
-      quartet.slice(0, 3).map((name) => ({ name })),
+      pair.slice(0, 1).map((name) => ({ name })),
     )).toEqual({
       testCaseIds: ["empty-project.recursive-graph-memory.launch-readiness"],
       harnessConfigurationNames: [],
@@ -167,7 +165,7 @@ describe("Eval dashboard run presentation", () => {
     const execution = {
       id: "lantern",
       lifecycle: { status: "complete" },
-      checks: [{ name: "graph-search-disabled", passed: true, detail: "No search was observed." }],
+      checks: [{ name: "prior-work-search", passed: true, detail: "Search recovered the prior root." }],
       outcomeGrade: {
         status: "unjudged",
         qualified: null,
@@ -186,7 +184,7 @@ describe("Eval dashboard run presentation", () => {
         criteria: [{ id: "prior-retention" }],
       },
       mechanism: {
-        checks: [{ id: "graph-search-disabled", passed: true, detail: "No search was observed." }],
+        checks: [{ id: "prior-work-search", passed: true, detail: "Search recovered the prior root." }],
       },
     });
   });

@@ -75,7 +75,7 @@ async function authorChild(context, observed) {
   await graph.returnCurrent(layer, advanced.revision, "red-team-return");
 }
 
-async function authorRoot(context, turn, searchEnabled, recursionEnabled, observed) {
+async function authorRoot(context, turn, recursionEnabled, observed) {
   const graph = new RelayerGraphClient(context.graph.acquireCapability());
   const titles = ["Offline recovery covenant", "Constrained recovery revision", "Red-team stop condition"];
   const details = [
@@ -86,9 +86,8 @@ async function authorRoot(context, turn, searchEnabled, recursionEnabled, observ
   const priorTopics = turn === 2
     ? [titles[0]]
     : turn === 3 ? [titles[0], titles[1]] : [];
-  const priorLayers = searchEnabled
-    ? await Promise.all(priorTopics.map((topic) => findPriorLayer(graph, topic)))
-    : [];
+  // Both Lantern cells grant search, so every follow-up recovers its prior roots.
+  const priorLayers = await Promise.all(priorTopics.map((topic) => findPriorLayer(graph, topic)));
   const node = new NodeObject("box", titles[turn - 1], details[turn - 1], "concept", `lantern-turn-${turn}`);
   await graph.submitNode(node);
   const layer = new LayerObject([node], [], centered(node), `lantern-layer-${turn}`);
@@ -131,7 +130,6 @@ async function authorRoot(context, turn, searchEnabled, recursionEnabled, observ
 export function lantern2x2FixtureFactory(observed) {
   return (factoryContext) => {
     let turn = 0;
-    const searchEnabled = factoryContext.configuration.graphCapabilityProfile?.search === "query-v1";
     const recursionEnabled = factoryContext.configuration.complete?.agentAuthored === true;
     return {
       supportsInvokedComplete: true,
@@ -145,7 +143,7 @@ export function lantern2x2FixtureFactory(observed) {
         if (!invoked) turn += 1;
         const execution = invoked
           ? authorChild(context, observed)
-          : authorRoot(context, turn, searchEnabled, recursionEnabled, observed);
+          : authorRoot(context, turn, recursionEnabled, observed);
         return nativeExecutionHandle(execution, undefined, Promise.resolve({
           schemaVersion: 1,
           provider: "codex",

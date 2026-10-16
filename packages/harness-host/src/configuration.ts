@@ -115,8 +115,13 @@ function parseGraphCapabilityProfile(value: unknown): GraphCapabilityProfile | u
   return { search: value.search, ...(value.preview === "enabled" ? { preview: "enabled" as const } : {}) };
 }
 
+/** Omission grants bounded `query-v1` search; a configuration opts out with an explicit `disabled`. */
 export function resolveGraphCapabilityProfile(configuration: HarnessConfiguration): GraphCapabilityProfile {
-  return configuration.graphCapabilityProfile ?? { search: "disabled" };
+  return configuration.graphCapabilityProfile ?? { search: "query-v1" };
+}
+
+export function grantsGraphSearch(configuration: HarnessConfiguration): boolean {
+  return resolveGraphCapabilityProfile(configuration).search === "query-v1";
 }
 
 function parseModelRules(value: unknown): HarnessModelRules | undefined {

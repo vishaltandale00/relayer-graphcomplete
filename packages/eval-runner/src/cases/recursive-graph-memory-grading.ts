@@ -22,7 +22,6 @@ interface RecursiveChild {
 
 export interface RecursiveGraphMemoryGradingExecution {
   readonly harnessConfiguration?: {
-    readonly graphCapabilityProfile?: { readonly search?: string };
     readonly complete?: { readonly agentAuthored?: boolean };
   };
   readonly turns: readonly { readonly candidateTrace?: { readonly completionBrokerAvailable?: boolean } }[];
@@ -43,7 +42,6 @@ export async function gradeRecursiveGraphMemoryExecution(input: {
   const outputs = productTurns.map((interaction) => interaction.completionOutput!);
   const roots = outputs.map((output) => output.rootLayer.layer.id);
   const priorTopics = ["Offline recovery covenant", "Constrained recovery revision"];
-  const searchEnabled = execution.harnessConfiguration?.graphCapabilityProfile?.search === "query-v1";
   const recursionEnabled = execution.harnessConfiguration?.complete?.agentAuthored === true;
   const turns = productTurns.map((interaction, index) => {
     const output = outputs[index]!;
@@ -90,13 +88,11 @@ export async function gradeRecursiveGraphMemoryExecution(input: {
     const matchedSearches = evidenceByRoot.map(({ search }) => search).filter((event) => event !== undefined);
     const exactSearchSet = matchedSearches.length === searches.length && new Set(matchedSearches).size === searches.length;
     const searchedLayerIds = evidenceByRoot.flatMap(({ search }) => search?.searchLayerIds ?? []);
-    if (searchEnabled) {
-      checks.push({ name: "prior-work-search", passed: exactSearchSet && evidenceByRoot.every(({ search }) => search !== undefined), detail: `Follow-up ${index} must use bounded parameterized search to recover ${requiredPriorRoots.length} required prior accepted root${requiredPriorRoots.length === 1 ? "" : "s"}.` }, {
-        name: "prior-work-references", passed: evidenceByRoot.every(({ acceptedReference, referenceEvent }) => acceptedReference !== undefined && referenceEvent !== undefined), detail: "Every required searched root must remain attached to the accepted follow-up as typed supporting context.",
-      }, {
-        name: "search-reference-submit-order", passed: acknowledgement !== undefined && evidenceByRoot.every(({ search, referenceEvent }) => search !== undefined && referenceEvent !== undefined && search.sequence < referenceEvent.sequence && referenceEvent.sequence < acknowledgement.sequence), detail: "Candidate Trace must show successful search before the matching accepted references and final acknowledgement.",
-      });
-    } else checks.push({ name: "graph-search-disabled", passed: searches.length === 0, detail: `Search is disabled for this cell; observed ${searches.length} successful graph-search operation${searches.length === 1 ? "" : "s"}.` });
+    checks.push({ name: "prior-work-search", passed: exactSearchSet && evidenceByRoot.every(({ search }) => search !== undefined), detail: `Follow-up ${index} must use bounded parameterized search to recover ${requiredPriorRoots.length} required prior accepted root${requiredPriorRoots.length === 1 ? "" : "s"}.` }, {
+      name: "prior-work-references", passed: evidenceByRoot.every(({ acceptedReference, referenceEvent }) => acceptedReference !== undefined && referenceEvent !== undefined), detail: "Every required searched root must remain attached to the accepted follow-up as typed supporting context.",
+    }, {
+      name: "search-reference-submit-order", passed: acknowledgement !== undefined && evidenceByRoot.every(({ search, referenceEvent }) => search !== undefined && referenceEvent !== undefined && search.sequence < referenceEvent.sequence && referenceEvent.sequence < acknowledgement.sequence), detail: "Candidate Trace must show successful search before the matching accepted references and final acknowledgement.",
+    });
 
     if (index === 2) {
       const allChildren = execution.semanticChildren ?? [];
