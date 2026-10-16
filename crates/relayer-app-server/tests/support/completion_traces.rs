@@ -852,6 +852,7 @@ impl World {
             environment_inspector: crate::environment::EnvironmentInspector::new(),
             completion_brokers: CompletionBrokerRegistry::new(Some("http://broker".into())),
             completion_observations: CompletionObservations::default(),
+            node_runs: Default::default(),
         };
         let seeded = if bound {
             // Prepared and bound exactly as complete_prepared_child prepares it.

@@ -3,20 +3,20 @@
   "captureScriptSha256": "36e64e0a6c8daf7889f0fd98cef297157c30c4b99e39fe9daaf2e48c365bfc8b",
   "paidInferenceCalls": 0,
   "baselineCommit": "70d2d5fad590b75c7903358a0f4805026647cd76",
-  "sourceHead": "7929bf9aafbdf3d670c24a7aa1c2686980cbacb3",
+  "sourceHead": "4648b568aa467eff94391b10eba4bc722d608761",
   "renderer": {
     "path": "desktop/renderer/src/product-workspace/workspace.js",
     "baselineSha256": "1d0d87f3e93bf4127a6dcb8467c47c22c7331a81b9fc3528a93933457e38c76c",
-    "fixedSha256": "f2d8ff5b1dbaaeba65f896d6978c3602913a78192446634ac5274f62cd2534d5"
+    "fixedSha256": "59abcfb14256dfe3d72c4e479ed78f9b5de8cc6c1c1b1d2500590d70a2a21ac8"
   },
   "binaries": {
-    "target/debug/relayer-graph-server": "a9fc7a64db62977abe7d1e678be025706db48fa6b09565e16b7918a254f9cd29",
-    "target/debug/relayer-app-server": "0a76251493533ea76a826a3dfad1a12283a41f27a8c10f081500d45947d216fc"
+    "target/debug/relayer-graph-server": "34584989e0b99242edd04546d275b33ac97f6efddad6ff7e03ed96fcbed7bdb2",
+    "target/debug/relayer-app-server": "382b5c321fcc4b272d65a59b4e85c9907def1d925e00f5e80f27edbda4cf3968"
   },
   "checkpoints": [
     {
       "name": "A-before-missing-plus",
-      "imageSha256": "0c33d08d5b5ed0f9f9f06c589d7452a561b928500c9391c93d8b3325e86d22b9",
+      "imageSha256": "39d109321f0099186a8939f4d95d774f6d0aa6b004684711024b19f8ff27f410",
       "renderer": "baseline",
       "title": "Incoming queue",
       "hidden": true,
@@ -24,7 +24,7 @@
     },
     {
       "name": "B-after-plus-visible",
-      "imageSha256": "8225336c09aef6bfa859adb597762151aa79d8524fb910e39c1beb19baadae3d",
+      "imageSha256": "0a89a6f127457b9979d1fede80d513d09f502a8a4593c8045dfe562a0d581c91",
       "renderer": "fixed",
       "title": "Incoming queue",
       "hidden": false,
@@ -32,13 +32,13 @@
     },
     {
       "name": "C-after-editor",
-      "imageSha256": "94ce41d10b74a51d9b224f0e31ab4ffcdc28d11083b017f62ef4836451fecdb0",
+      "imageSha256": "14da3c9b601db43cf42cd20547ebe0c1e40ca254c1248c5a23e8433475181516",
       "renderer": "fixed",
       "editableDuringGeneration": true
     },
     {
       "name": "D-after-confirmed",
-      "imageSha256": "51537e956cec53c64cf253ef77e89a31443f37f819473f4721787a0d6765b93e",
+      "imageSha256": "1c5a626f0c58cba9ca150e01ccfc4fa0440d9f1ad9c17064810feff089253a43",
       "renderer": "fixed",
       "durableCanonicalConfirmation": true
     },
@@ -62,12 +62,12 @@
     "pendingInteractionId": 3,
     "pendingStatus": "running"
   },
-  "servedRendererSha256": "f2d8ff5b1dbaaeba65f896d6978c3602913a78192446634ac5274f62cd2534d5",
+  "servedRendererSha256": "59abcfb14256dfe3d72c4e479ed78f9b5de8cc6c1c1b1d2500590d70a2a21ac8",
   "confirmedState": {
     "drafts": [],
     "confirmations": [
       {
-        "draftId": "7b01f51e-2c35-4adc-b9c0-018bc0e7a7b6",
+        "draftId": "8f426e6b-0f9d-4089-bcfd-161000fd660c",
         "threadId": 1,
         "target": {
           "nodeId": 34,
@@ -85,7 +85,7 @@
         "annotation": "Keep worker capacity visible while prioritizing work.",
         "draftRevision": 1,
         "confirmationRevision": 1,
-        "confirmedAt": "1792127921445"
+        "confirmedAt": "1792116349163"
       }
     ]
   },

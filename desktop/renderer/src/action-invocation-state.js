@@ -1,4 +1,4 @@
-const PENDING_COMPLETION_STATUSES = new Set(["not_started", "running", "submitted"]);
+const PENDING_COMPLETION_STATUSES = new Set(["not_started", "queued", "running", "submitted"]);
 
 export function isDurableActionInvocation(call) {
   return call.durable === true || (call.durable == null && call.reusable === true);

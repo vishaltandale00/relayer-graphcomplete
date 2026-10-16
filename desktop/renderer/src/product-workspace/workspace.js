@@ -214,6 +214,7 @@ const GRAPH_FIT_PADDING = 48;
 const GRAPH_FIT_MAX_ZOOM = 1.25;
 const PENDING_COMPLETION_STATUSES = new Set([
   "not_started",
+  "queued",
   "running",
   "submitted",
   "waiting_for_approval",
@@ -454,6 +455,8 @@ export function turnStatusPresentation(status) {
   if (status === "waiting_for_approval") {
     return { kind: "approval", label: "Needs approval" };
   }
+  // A run queued behind another on its node (#718) starts once that run settles.
+  if (status === "queued") return { kind: "running", label: "Queued" };
   if (["not_started", "running", "submitted"].includes(status)) {
     return { kind: "running", label: status === "not_started" ? "Waiting" : "Running" };
   }
@@ -3772,7 +3775,8 @@ export function createProductWorkspace({
       const stopping = pendingStops.has(run.id) || (run.stopRequested && !run.stopError);
       const error = stopErrors.get(run.id) || run.stopError;
       const phase = error
-        || (stopping ? "Stopping…" : run.completionStatus === "waiting_for_approval" ? "Needs approval" : "Running");
+        || (stopping ? "Stopping…" : run.completionStatus === "waiting_for_approval" ? "Needs approval"
+          : run.completionStatus === "queued" ? "Queued" : "Running");
       const text = label ? `${label} · ${phase}` : phase;
       const [status, stop] = row.children;
       if (status.textContent !== text) status.textContent = text;

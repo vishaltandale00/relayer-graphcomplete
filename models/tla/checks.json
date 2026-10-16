@@ -219,6 +219,15 @@
       "RepairRevalidates": "TRUE",
       "UpgradeEvaluates": "TRUE",
       "RecipeChangeMarksDue": "TRUE"
+    },
+    "node-queue-today": {
+      "SameNode": "3",
+      "OtherNode": "1",
+      "MaxRestarts": "1",
+      "AtomicAdmission": "TRUE",
+      "ReleaseOnSettle": "TRUE",
+      "ContextAtStart": "TRUE",
+      "StartupInterruptsQueued": "TRUE"
     }
   },
   "checks": [
@@ -3011,6 +3020,122 @@
         "violated": "NoCrossProviderRestore"
       },
       "finding": "Witness, not a bug: readiness is per harness, so an evaluation not started for a provider (another provider's Repair, or the automatic one) makes its shared route ready too."
+    },
+    {
+      "id": "node-queue-safety",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "invariants": [
+        "TypeOK",
+        "OneRunPerNode",
+        "QueuedHasRunAhead"
+      ],
+      "properties": [
+        "QueuedNeverStartsWhileActive",
+        "QueuedStartInOrder",
+        "QueuedRunSeesRunAhead"
+      ],
+      "expect": "pass",
+      "finding": "Two runs on one node never run at once, and a queued run never starts while another run on its node is active. Queued runs start in the order they were created, and each reads the thread when it starts, so it sees the accepted result of the run ahead. Across a restart, no run waits on a node nothing holds."
+    },
+    {
+      "id": "node-queue-concurrency",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "invariants": [
+        "NeverTwoNodesAtOnce"
+      ],
+      "expect": {
+        "violated": "NeverTwoNodesAtOnce"
+      },
+      "finding": "Reachability: runs on different nodes run at once. The trace shows a run on each node running together."
+    },
+    {
+      "id": "node-queue-liveness",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "MaxRestarts": "0"
+      },
+      "fair": true,
+      "properties": [
+        "QueuedRunsStart"
+      ],
+      "expect": "pass",
+      "finding": "Without a restart, every queued run the user does not stop starts, whether the run ahead of it was accepted, failed or stopped."
+    },
+    {
+      "id": "node-queue-restart-liveness",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "fair": true,
+      "properties": [
+        "QueuedRunsLeaveTheQueue"
+      ],
+      "expect": "pass",
+      "finding": "Across a restart, every queued run leaves the queue: it starts, is stopped, or is interrupted at startup, where invoking its action again resumes it."
+    },
+    {
+      "id": "node-queue-race-reverted",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "AtomicAdmission": "FALSE"
+      },
+      "invariants": [
+        "OneRunPerNode"
+      ],
+      "expect": {
+        "violated": "OneRunPerNode"
+      },
+      "finding": "Without the queue's lock, two sends racing to one node both see it free and both start."
+    },
+    {
+      "id": "node-queue-release-reverted",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "ReleaseOnSettle": "FALSE"
+      },
+      "fair": true,
+      "properties": [
+        "QueuedRunsStart"
+      ],
+      "expect": {
+        "violated": "QueuedRunsStart"
+      },
+      "finding": "Before decision 4 (#716), a run that failed or was stopped kept its node, so the runs queued behind it never started."
+    },
+    {
+      "id": "node-queue-context-reverted",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "ContextAtStart": "FALSE"
+      },
+      "properties": [
+        "QueuedRunSeesRunAhead"
+      ],
+      "expect": {
+        "violated": "QueuedRunSeesRunAhead"
+      },
+      "finding": "Before decision 3 (#716), a queued run's context was read when it was sent, so it missed the accepted result of the run ahead of it."
+    },
+    {
+      "id": "node-queue-restart-reverted",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "StartupInterruptsQueued": "FALSE"
+      },
+      "invariants": [
+        "QueuedHasRunAhead"
+      ],
+      "expect": {
+        "violated": "QueuedHasRunAhead"
+      },
+      "finding": "Without the startup step, a run queued at a restart stays queued behind a run that no longer exists, and nothing ever starts it."
     }
   ]
 }

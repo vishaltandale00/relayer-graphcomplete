@@ -1,3 +1,4 @@
+import { expectStructureExample } from "./fixtures/structure-example-checks.mjs";
 import { mkdtemp, writeFile, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -92,7 +93,7 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
     const freshTurn = await acceptedTurn(session, fresh.id, 0);
     const freshTrace = await runtime.exportCandidateTrace(freshTurn.id, join(directory, 'fresh-trace'));
     expect(freshTrace.personalPresentationVersionKey).toBe(promotedVersion);
-    expect(freshTurn.completionOutput.rootLayer.nodes).toHaveLength(1);
+    await expectStructureExample(freshTurn.completionOutput.rootLayer, layerId => request(session, `/api/threads/${fresh.id}/interactions/${freshTurn.id}/layers/${layerId}`));
     expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail).toBeDefined();
     expect(freshTurn.completionOutput.rootLayer.nodes[0].title).toBe('Result');
     expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail.mounts).toHaveLength(1);

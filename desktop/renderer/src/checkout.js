@@ -36,7 +36,7 @@ function renderBaseOptions(inspection, choice, query = "") {
     ? `Showing ${BASE_RESULT_LIMIT} of ${matches.length} matching branches. Search to narrow the list.`
     : "";
 }
-const activeStatuses = new Set(["not_started", "preparing", "running", "submitted", "waiting_for_approval"]);
+const activeStatuses = new Set(["not_started", "preparing", "queued", "running", "submitted", "waiting_for_approval"]);
 async function refreshSharedCheckout(scope) {
   if (!productApiAvailable || !scope.path) return;
   const checkoutRoot = scope.checkoutRoot;

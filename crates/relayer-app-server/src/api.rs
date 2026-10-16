@@ -9,6 +9,7 @@ mod input_operator_sessions;
 mod interaction_graph;
 mod live_answers;
 mod model_settings;
+mod node_runs;
 mod projects;
 mod state;
 pub(crate) mod threads;
@@ -65,6 +66,8 @@ pub(crate) struct ApiState {
     pub(crate) environment_inspector: crate::environment::EnvironmentInspector,
     pub(crate) completion_brokers: CompletionBrokerRegistry,
     pub(crate) completion_observations: CompletionObservations,
+    /// Which run holds each node; runs on one node start in order (#718).
+    pub(crate) node_runs: node_runs::NodeRunQueue,
 }
 
 pub(crate) struct ApiRuntime {
@@ -128,6 +131,7 @@ pub(crate) fn router(
         environment_inspector: crate::environment::EnvironmentInspector::new(),
         completion_brokers,
         completion_observations: CompletionObservations::default(),
+        node_runs: node_runs::NodeRunQueue::default(),
     };
     if state.runtime.is_some() {
         let recovery_state = state.clone();
