@@ -302,18 +302,14 @@ describe("product workspace keyboard behavior", () => {
     expect(threadHasPendingInputMutation(inputPending, "thread-a")).toBe(false);
   });
 
-  it("keeps submitted text history compact while disclosing the exact full value accessibly", async () => {
+  it("keeps submitted input history to bounded one-line rows that open to the exact full value", async () => {
     const exact = `First line\n${"x".repeat(160)}`;
     const presentation = submittedInputHistoryPresentation({
       action: { prompt: "Deployment rationale" },
       value: { text: exact },
     });
 
-    expect(presentation).toMatchObject({
-      kind: "disclosure",
-      fullValue: exact,
-      ariaLabel: "Show full submitted value for Deployment rationale",
-    });
+    expect(presentation.fullValue).toBe(exact);
     expect([...presentation.compactValue]).toHaveLength(80);
     expect(presentation.compactValue.endsWith("…")).toBe(true);
 
@@ -337,7 +333,6 @@ describe("product workspace keyboard behavior", () => {
       action: { prompt: "Large rationale" },
       value: { text: huge },
     })).toMatchObject({
-      kind: "disclosure",
       compactValue: `${"😀".repeat(79)}…`,
       fullValue: huge,
     });
@@ -345,11 +340,12 @@ describe("product workspace keyboard behavior", () => {
     expect(submittedInputHistoryPresentation({
       action: { prompt: "Release channel" },
       value: { selected: [{ key: "preview", label: "Preview" }] },
-    })).toEqual({ kind: "plain", compactValue: "Preview" });
+    })).toEqual({ compactValue: "Preview", fullValue: "Preview" });
 
     const styles = await readFile(new URL("../desktop/renderer/styles.css", import.meta.url), "utf8");
-    expect(styles).toContain(".interaction-input-history-disclosure>summary{max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
-    expect(styles).toContain(".interaction-input-history-disclosure>p{max-width:240px;max-height:160px;overflow:auto;white-space:pre-wrap");
+    expect(styles).toContain(".interaction-input-history-list{max-height:8em;overflow-y:auto");
+    expect(styles).toContain(".interaction-input-history-item>summary>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap");
+    expect(styles).toContain(".interaction-input-history-item[open]>summary>span{white-space:pre-wrap");
   });
 
   it("projects durable confirmations into grouped composer contexts with exact identities", () => {

@@ -949,14 +949,13 @@ async function run() {
   const acceptedThread = await waitForAcceptedInteractions(thread.id, 3);
   await waitFor("ready response preserves explicit browsing", () => evaluate(`!document.querySelector('#openReadyResult').classList.contains('hidden') && document.querySelector('#detailTitle').textContent === 'Selection guard'`));
   await click("#openReadyResult");
-  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1 && Boolean(document.querySelector('.interaction-input-history-disclosure'))"));
-  const disclosure = await evaluate(`(() => { const d = document.querySelector('.interaction-input-history-disclosure'); const summary = d?.querySelector('summary'); return { tag: d?.tagName, open: d?.open, summaryTag: summary?.tagName, summary: summary?.textContent, summaryName: summary?.getAttribute('aria-label'), summaryWidth: summary?.getBoundingClientRect().width, full: d?.querySelector('p')?.textContent }; })()`);
+  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1"));
+  const historyRow = `[...document.querySelectorAll('#interactionInputHistory .interaction-input-history-item')].find((row) => row.querySelector('summary>span:last-child')?.textContent === ${JSON.stringify(submittedTextValue)})`;
+  const disclosure = await evaluate(`(() => { const row = ${historyRow}; const summary = row?.querySelector('summary'); const [prompt, value] = summary ? summary.children : []; const list = row?.closest('.interaction-input-history-list'); return { tag: row?.tagName, open: row?.open, summaryTag: summary?.tagName, prompt: prompt?.textContent, valueOneLine: value ? value.scrollWidth > value.clientWidth && getComputedStyle(value).whiteSpace === 'nowrap' : false, listScrolls: list ? getComputedStyle(list).overflowY === 'auto' && getComputedStyle(list).maxHeight !== 'none' : false }; })()`);
   if (disclosure.tag !== "DETAILS" || disclosure.open || disclosure.summaryTag !== "SUMMARY"
-    || [...disclosure.summary].length !== 80 || disclosure.full !== submittedTextValue
-    || disclosure.summaryName !== "Show full submitted value for Name the governing constraint"
-    || disclosure.summaryWidth > 241) throw new Error(`Submitted long input disclosure is wrong: ${JSON.stringify(disclosure)}`);
-  await evaluate("document.querySelector('.interaction-input-history-disclosure>summary').click()");
-  await waitFor("submitted input full text opens", () => evaluate("document.querySelector('.interaction-input-history-disclosure').open"));
+    || disclosure.prompt !== "Name the governing constraint" || !disclosure.valueOneLine || !disclosure.listScrolls) throw new Error(`Submitted long input history row is wrong: ${JSON.stringify(disclosure)}`);
+  await evaluate(`${historyRow}.querySelector('summary').click()`);
+  await waitFor("submitted input full text opens", () => evaluate(`(() => { const row = ${historyRow}; return row.open && getComputedStyle(row.querySelector('summary>span:last-child')).whiteSpace === 'pre-wrap'; })()`));
 
   const authoredTurnId = acceptedThread.interactions[0].id;
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1`);

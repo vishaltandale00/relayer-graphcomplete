@@ -1599,24 +1599,14 @@ export function compactSubmittedText(value, limit = 80) {
 }
 
 export function submittedInputHistoryPresentation(input) {
-  const prompt = input?.action?.prompt || "Input";
   if (typeof input?.value?.text === "string") {
     const fullValue = input.value.text;
-    const compactValue = compactSubmittedText(fullValue);
-    if (fullValue !== compactValue) {
-      return Object.freeze({
-        kind: "disclosure",
-        compactValue,
-        fullValue,
-        ariaLabel: `Show full submitted value for ${prompt}`,
-      });
-    }
-    return Object.freeze({ kind: "plain", compactValue });
+    return Object.freeze({ compactValue: compactSubmittedText(fullValue), fullValue });
   }
   const compactValue = Array.isArray(input?.value?.selected)
     ? input.value.selected.map((option) => option.label).join(", ")
     : (input?.value?.selectedKeys || []).join(", ");
-  return Object.freeze({ kind: "plain", compactValue });
+  return Object.freeze({ compactValue, fullValue: compactValue });
 }
 
 // History state is supplied by the renderer integration so Product and Eval use the same
@@ -4578,33 +4568,20 @@ export function createProductWorkspace({
       return;
     }
     const heading = graphDocument.createElement("strong");
-    heading.textContent = "Submitted inputs";
+    heading.textContent = `Submitted inputs · ${inputs.length}`;
     const list = graphDocument.createElement("div");
     list.className = "interaction-input-history-list";
     inputs.forEach((input) => {
-      const item = graphDocument.createElement("section");
+      // One line per input; opening the row wraps the full question and answer in place.
+      const item = graphDocument.createElement("details");
       item.className = "interaction-input-history-item";
-      const prompt = graphDocument.createElement("strong");
+      const summary = graphDocument.createElement("summary");
+      const prompt = graphDocument.createElement("span");
       prompt.textContent = input.action?.prompt || "Input";
-      const presentation = submittedInputHistoryPresentation(input);
-      const value = presentation.kind === "disclosure"
-        ? (() => {
-            const disclosure = graphDocument.createElement("details");
-            disclosure.className = "interaction-input-history-disclosure";
-            const summary = graphDocument.createElement("summary");
-            summary.textContent = presentation.compactValue;
-            summary.setAttribute("aria-label", presentation.ariaLabel);
-            const full = graphDocument.createElement("p");
-            full.textContent = presentation.fullValue;
-            disclosure.append(summary, full);
-            return disclosure;
-          })()
-        : (() => {
-            const text = graphDocument.createElement("span");
-            text.textContent = presentation.compactValue;
-            return text;
-          })();
-      item.append(prompt, value);
+      const value = graphDocument.createElement("span");
+      value.textContent = submittedInputHistoryPresentation(input).fullValue;
+      summary.append(prompt, value);
+      item.append(summary);
       list.append(item);
     });
     host.replaceChildren(heading, list);
