@@ -69,6 +69,32 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
+    /// Marks a message with no input identity that was executing when Relayer stopped as
+    /// interrupted, such as a thread's first message. Resume runs it again on the graph
+    /// interaction it is bound to, or prepares it if it was not bound yet, so no second user
+    /// message is created. A run with a Stop, submitted answers or an invoke origin is left to
+    /// its own recovery.
+    pub(crate) async fn interrupt_unidentified_message(
+        &self,
+        interaction_id: InteractionId,
+        note: &str,
+    ) -> Result<bool, StorageError> {
+        let result = sqlx::query(
+            "UPDATE interactions SET completion_status='interrupted',completion_error=?1
+             WHERE id=?2 AND input_identity IS NULL AND input_digest IS NULL
+               AND completion_status IN ('running','submitted','waiting_for_approval')
+               AND NOT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=interactions.id)
+               AND NOT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=interactions.id)
+               AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=interactions.id)
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(note)
+        .bind(interaction_id.value())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     /// The paused and interrupted runs on run `run`'s node, in creation order, or `None` when
     /// `run` is not a node run.
     pub(crate) async fn restart_chain(

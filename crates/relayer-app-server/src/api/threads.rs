@@ -5909,9 +5909,17 @@ async fn prepare_interaction(
         .product
         .prepared_invocation_node(interaction.id)
         .await?;
+    // A message with no input identity that is already bound, one a restart interrupted
+    // (#722), runs again on that same graph interaction: preparing it afresh would create a
+    // second user message.
+    let reused_graph_node = interaction.graph_node_id.filter(|_| {
+        invocation.is_none() && durable_input.is_none() && prepared_graph_node.is_none()
+    });
     let prepared = loop {
         binding_attempt += 1;
-        let preparation = if prepared_graph_node.is_some() {
+        let preparation = if let Some(node) = reused_graph_node {
+            runtime.prepare_existing(&command, node).await
+        } else if prepared_graph_node.is_some() {
             runtime.prepare_bound(&command, prepared_graph_node).await
         } else {
             runtime.prepare(&command).await
@@ -5956,7 +5964,9 @@ async fn prepare_interaction(
             Ok(true) => break prepared,
             Ok(false) => {
                 let current = state.product.get_interaction(interaction.id).await?;
-                let matches_existing_binding = (invocation.is_some() || durable_input.is_some())
+                let matches_existing_binding = (invocation.is_some()
+                    || durable_input.is_some()
+                    || reused_graph_node.is_some())
                     && current.completion_status == "submitted"
                     && current.graph_node_id == Some(prepared.graph_node_id)
                     && current.harness_configuration_name.as_deref()

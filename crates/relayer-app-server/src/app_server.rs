@@ -86,6 +86,7 @@ async fn reconcile_interrupted_interaction(
         storage.invocation_graph_source(interaction.id).await
     }
     .map_err(StartupReconciliationError::retryable)?;
+    let has_invocation = invocation.is_some();
     let durable_input = storage
         .interaction_input(interaction.id)
         .await
@@ -392,7 +393,20 @@ async fn reconcile_interrupted_interaction(
                     )));
                 }
             }
+        } else if !has_invocation {
+            // A message with no input identity, such as a thread's first message, reruns on
+            // this same graph interaction when the user resumes it (#722).
+            storage
+                .interrupt_unidentified_message(interaction.id, crate::storage::RESTART_INTERRUPTED)
+                .await
+                .map_err(StartupReconciliationError::retryable)?;
         }
+    } else if !has_invocation && durable_input.is_none() && !agent_child {
+        // Not bound yet: Resume prepares it, as its first start would have.
+        storage
+            .interrupt_unidentified_message(interaction.id, crate::storage::RESTART_INTERRUPTED)
+            .await
+            .map_err(StartupReconciliationError::retryable)?;
     }
     Ok(())
 }

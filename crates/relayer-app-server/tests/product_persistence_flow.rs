@@ -6428,8 +6428,8 @@ async fn a_retry_waits_for_capacity_like_any_human_started_run() {
 
 /// PAUSE-002 (#722, PRD 8.2): a restart stops every run where it was, and nothing starts on
 /// its own, across a second restart too. A run that was executing is interrupted when it can
-/// run again on its own interaction, an invoke or an identified send; a plain message fails as
-/// before. A run that was queued, behind its node or for capacity, is paused. Resume starts a
+/// run again on its own interaction: an invoke, an identified send, or a plain message with no
+/// input identity (owner decision, 2026-10-16). A run that was queued, behind its node or for capacity, is paused. Resume starts a
 /// node's chain from its head, in order, on the same interaction nodes, and re-queues the rest.
 /// Discard ends a run stopped with its text, stopping its graph current first. Resume all
 /// starts what is left.
@@ -6445,7 +6445,7 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
     let plain = fixture.send("A plain message").await["id"]
         .as_i64()
         .unwrap();
-    fixture.started(plain).await;
+    let plain_node = fixture.started(plain).await["graph"]["nodeId"].clone();
     let (status, identified) = app_post(
         &fixture.app,
         &format!("/api/threads/{thread_id}/interactions"),
@@ -6477,7 +6477,7 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
             fixture.started_runs().is_empty(),
             "a run started on its own"
         );
-        for run in [head, identified, other] {
+        for run in [head, plain, identified, other] {
             let interaction = fixture.interaction(run).await;
             assert_eq!(
                 interaction["completionStatus"], "interrupted",
@@ -6496,18 +6496,10 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
             assert!(interaction.get("queueReason").is_none());
         }
         assert_eq!(fixture.interaction(second).await["runNodeId"], 7);
-        let failed = fixture.interaction(plain).await;
-        assert_eq!(failed["completionStatus"], "failed");
-        assert!(
-            failed["completionError"]
-                .as_str()
-                .unwrap()
-                .contains("Send a follow-up")
-        );
         // Paused and interrupted runs are not active: the thread shows no run and can be
         // archived, and its list entry counts them.
         let summary = fixture.thread_summary().await;
-        assert_eq!(summary["pausedRuns"], 6, "{summary}");
+        assert_eq!(summary["pausedRuns"], 7, "{summary}");
         assert!(summary.get("activity").is_none(), "{summary}");
         assert_eq!(summary["archiveBlocked"], false);
     }
@@ -6545,6 +6537,13 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
         identified_node
     );
     assert_eq!(fixture.interaction_count().await, turns_before);
+    // So does the plain message, which has no input identity: it reruns on its graph node.
+    let (status, _) = fixture.run_action(plain, "resume").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fixture.started(plain).await["graph"]["nodeId"], plain_node);
+    assert_eq!(fixture.interaction_count().await, turns_before);
+    fixture.settle(plain, true);
+    fixture.settled(plain, "accepted").await;
 
     // The chain keeps same-node order, whatever each run's outcome.
     fixture.settle(head, true);
@@ -6601,11 +6600,11 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
     fixture.settled(waiting, "accepted").await;
     assert_eq!(
         fixture.started_runs(),
-        [head, identified, second, third, waiting]
+        [head, identified, plain, second, third, waiting]
     );
     assert_eq!(fixture.thread_summary().await["pausedRuns"], 0);
     // A run that is not paused neither resumes nor is discarded.
-    let (status, _) = fixture.run_action(plain, "resume").await;
+    let (status, _) = fixture.run_action(other, "resume").await;
     assert_eq!(status, StatusCode::CONFLICT);
     fixture.finish();
 }
@@ -6687,6 +6686,108 @@ async fn a_resume_whose_head_cannot_start_pauses_the_rest_again() {
     fixture.started(third).await;
     fixture.settle(third, true);
     fixture.settled(third, "accepted").await;
+    fixture.finish();
+}
+
+/// PAUSE-004 (#722, owner decision 2026-10-16): a thread's first message has no input identity,
+/// yet a restart while it runs never just fails it. It is interrupted, and Resume runs it
+/// exactly once more, on its own graph interaction node, with no second user message.
+#[tokio::test]
+async fn a_restart_interrupts_a_threads_first_message_and_resume_reruns_it_once() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let settings = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(api_request("GET", "/api/model-settings", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family_id = settings["families"][0]["id"].as_i64().unwrap();
+    let (status, thread) = app_post(
+        &fixture.app,
+        "/api/threads",
+        json!({
+            "title": "First message",
+            "initialMessage": "Start a new plan",
+            "harnessId": "codex-basic",
+            "modelSelection": {"familyId": family_id, "providerId": "codex", "modelId": "test-model"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{thread}");
+    let thread_id = thread["id"].as_i64().unwrap();
+    let first = thread["rootInteractionId"].as_i64().unwrap();
+    let first_node = fixture.started(first).await["graph"]["nodeId"].clone();
+    let state_of = |app: Router| async move {
+        response_json(
+            app.oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+        )
+        .await
+    };
+    let first_of = |state: &Value| {
+        state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == first)
+            .unwrap()
+            .clone()
+    };
+
+    // Two restarts in a row leave it interrupted, and nothing reruns it on its own.
+    for _ in 0..2 {
+        fixture.restart().await;
+        let state = state_of(fixture.app.clone()).await;
+        let interrupted = first_of(&state);
+        assert_eq!(
+            interrupted["completionStatus"], "interrupted",
+            "{interrupted}"
+        );
+        assert!(
+            interrupted["completionError"]
+                .as_str()
+                .unwrap()
+                .contains("Resume runs it again")
+        );
+        assert_eq!(state["interactions"].as_array().unwrap().len(), 1);
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(fixture.started_runs().is_empty());
+    }
+
+    let uri = format!("/api/threads/{thread_id}/interactions/{first}/resume");
+    let (status, resumed) = app_post(&fixture.app, &uri, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    assert_eq!(fixture.started(first).await["graph"]["nodeId"], first_node);
+    // A second click starts nothing more.
+    let (status, _) = app_post(&fixture.app, &uri, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(fixture.started_runs(), [first]);
+    fixture.settle(first, true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = state_of(fixture.app.clone()).await;
+        if first_of(&state)["completionStatus"] == "accepted" {
+            assert_eq!(state["interactions"].as_array().unwrap().len(), 1);
+            assert_eq!(first_of(&state)["graphNodeId"], first_node);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the first message never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     fixture.finish();
 }
 
