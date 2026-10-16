@@ -128,13 +128,13 @@ export class RelayerGraphClient {
     return this.request<InteractionInput>("/api/graph/input");
   }
 
-  async getHistory(options: { readonly beforeNodeId?: GraphId; readonly limit?: number } = {}): Promise<import("./types.js").CompletionHistoryPage> {
+  async getHistory(options: { readonly beforeNodeId?: GraphId; readonly limit?: number } = {}, signal?: AbortSignal): Promise<import("./types.js").CompletionHistoryPage> {
     const { beforeNodeId, limit = 20 } = options;
     if (beforeNodeId !== undefined && (!Number.isSafeInteger(beforeNodeId) || beforeNodeId < 1)) throw new TypeError("Invalid history cursor");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new TypeError("Invalid history limit");
     const query = new URLSearchParams({ limit: String(limit) });
     if (beforeNodeId !== undefined) query.set("beforeNodeId", String(beforeNodeId));
-    return this.request(`/api/graph/history?${query}`);
+    return this.request(`/api/graph/history?${query}`, signal === undefined ? {} : { signal });
   }
 
   /** Historical contracts and answers are data; they never grant this completion authority. */

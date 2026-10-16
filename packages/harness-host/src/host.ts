@@ -1395,7 +1395,8 @@ export class HarnessHost {
         }
         selectedAccess = accessLease.access;
       }
-      const graphHistory = origin.kind === "root" ? await graph.getHistory({ limit: 8 }) : undefined;
+      const graphHistory = origin.kind === "root" ? await graph.getHistory({ limit: 8 }, signal) : undefined;
+      if (origin.kind === "root") signal.throwIfAborted();
       // A turn cancelled and force-stopped before its native work starts ends as a cancellation.
       if (forceSignal.aborted) throw signal.reason;
       harnessStarted = true;

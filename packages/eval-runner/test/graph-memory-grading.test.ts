@@ -171,6 +171,16 @@ describe("graph-memory grading through the exported production seam", () => {
     const result = await s.grade();
     expect(result.turns[1]!.checks.find(check => check.name === "typed-reference-target")?.passed).toBe(false);
   });
+
+  it.each(["removed", "replaced"])("fails search coverage when the audited reference is %s before Return", async boundary => {
+    const s = scenario();
+    if (boundary === "removed") Reflect.set(s.second.rootLayer, "actions", []);
+    else Reflect.set(s.second.rootLayer.actions[0]!, "targetLayerId", 999);
+    const result = await s.grade();
+    expect(result.turns[1]!.checks.find(check => check.name === "typed-reference-target")?.passed).toBe(false);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("failed");
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.checks.find(check => check.name === "typed-reference-target")?.passed).toBe(false);
+  });
 });
 
 describe("graph-memory section recognition", () => {

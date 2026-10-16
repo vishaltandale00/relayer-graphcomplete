@@ -48,7 +48,7 @@ export async function gradeGraphMemoryExecution(input: {
   const searchChecks = checkGraphMemorySecondTurn(second, first, evidence, interactions[1]!.graphNodeId, {
     requireDraftDecoy: deterministicFixture,
     searchRequestMode: graphMemorySearchRequestMode(implementation),
-  }).filter(check => ["search-returned-prior-root", "search-request-contract", "draft-decoy-hidden", "ack-search-submit-order"].includes(check.name));
+  }).filter(check => ["search-returned-prior-root", "search-request-contract", "draft-decoy-hidden", "typed-reference-target", "ack-search-submit-order"].includes(check.name));
   const searchAttempts = secondEvents.filter(event => event.method === "POST" && event.path === "/api/graph/search");
   searchChecks.push({
     name: "search-attempts-succeeded",
