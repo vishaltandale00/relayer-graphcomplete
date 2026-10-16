@@ -2,6 +2,7 @@ import { isImageIcon } from "@relayer/graph-client";
 import type { CompletionOutput } from "@relayer/graph-client";
 import type { HarnessConfiguration } from "@relayer/harness-host";
 import { isNaturalGraphMemoryQueryShape } from "./natural-graph-memory-query.js";
+import { graphMemorySections } from "./graph-memory-sections.js";
 import {
   graphMemorySearchBudget,
   graphMemorySearchQuery,
@@ -44,6 +45,8 @@ export interface GraphMemoryAuditEvent {
   readonly errorCodes?: readonly string[];
   readonly completionNodeId?: number;
   readonly completionRootLayerId?: number;
+  readonly transitionKind?: "advance" | "return" | "stop";
+  readonly completionLifecycle?: "active" | "succeeded" | "stopped" | "failed";
   readonly searchLayerIds?: readonly number[];
   readonly resultTruncated?: boolean;
   readonly queryContractVersion?: number;
@@ -123,19 +126,24 @@ export function checkGraphMemoryFirstTurn(
   output: CompletionOutput,
   expectedInteractionNodeId = output.nodeId,
 ): EvalCheck[] {
-  const matching = output.rootLayer.nodes.filter((node) => node.title === graphMemorySearchTitle);
-  const graphHasNoMachineMarker = output.rootLayer.nodes.every((node) => (
-    !node.title.includes("GRAPH_MEMORY_ANCHOR:")
-    && !node.detail.includes("GRAPH_MEMORY_ANCHOR:")
-  ));
+  const sections = graphMemorySections(output, graphMemorySearchTitle);
   return [
     ...checkBasicOutput(output, expectedInteractionNodeId),
     {
       name: "natural-memory-search-target",
-      passed: matching.length === 1 && graphHasNoMachineMarker,
-      detail: `The first accepted root contains one human-readable ${graphMemorySearchTitle} search target and no machine marker in visible content.`,
+      passed: sections.count === 1 && !sections.hasMachineMarker,
+      detail: `The first accepted root contains one ${graphMemorySearchTitle} Node title or semantic HTML heading and no machine marker in its content. CSS visibility is reviewed separately.`,
     },
   ];
+}
+
+function isReturnAcknowledgement(event: GraphMemoryAuditEvent, output: CompletionOutput): boolean {
+  return event.method === "POST" && event.status >= 200 && event.status < 300
+    && event.completionNodeId === output.nodeId
+    && event.completionRootLayerId === output.rootLayer.layer.id
+    && (event.path === "/api/graph/submit"
+      || (event.path === "/api/graph/current/transitions"
+        && event.transitionKind === "return" && event.completionLifecycle === "succeeded"));
 }
 
 export function readGraphMemoryEvidence(
@@ -144,13 +152,7 @@ export function readGraphMemoryEvidence(
   auditEvents: readonly GraphMemoryAuditEvent[],
   secondTurnStartSequence: number,
 ): GraphMemoryEvidence {
-  const firstSubmit = auditEvents.find((event) => (
-    event.method === "POST"
-    && event.path === "/api/graph/submit"
-    && event.status >= 200
-    && event.status < 300
-    && event.completionNodeId === firstOutput.nodeId
-  ));
+  const firstSubmit = auditEvents.find((event) => isReturnAcknowledgement(event, firstOutput));
   const search = auditEvents.find((event) => (
     event.method === "POST" && event.path === "/api/graph/search" && event.status >= 200 && event.status < 300
     && event.sequence > secondTurnStartSequence
@@ -231,14 +233,7 @@ export function checkGraphMemorySecondTurn(
     && action.targetLayerId === priorLayerId
     && output.rootLayer.nodes.some((node) => node.id === action.sourceNodeId)
   ));
-  const firstSubmit = evidence.auditEvents.find((event) => (
-    event.method === "POST"
-    && event.path === "/api/graph/submit"
-    && event.status >= 200
-    && event.status < 300
-    && event.completionNodeId === firstOutput.nodeId
-    && event.completionRootLayerId === priorLayerId
-  ));
+  const firstSubmit = evidence.auditEvents.find((event) => isReturnAcknowledgement(event, firstOutput));
   const successfulSearches = evidence.auditEvents.filter((event) => (
     event.method === "POST"
     && event.path === "/api/graph/search"
@@ -246,14 +241,7 @@ export function checkGraphMemorySecondTurn(
     && event.status < 300
     && event.sequence > evidence.secondTurnStartSequence
   ));
-  const secondSubmit = evidence.auditEvents.find((event) => (
-    event.method === "POST"
-    && event.path === "/api/graph/submit"
-    && event.status >= 200
-    && event.status < 300
-    && event.completionNodeId === output.nodeId
-    && event.completionRootLayerId === output.rootLayer.layer.id
-  ));
+  const secondSubmit = evidence.auditEvents.find((event) => isReturnAcknowledgement(event, output));
   const search = successfulSearches[0];
   const draftDecoyDiscard = evidence.draftDecoyLayerId === undefined ? undefined : evidence.auditEvents.find((event) => (
     event.method === "POST"
@@ -287,7 +275,7 @@ export function checkGraphMemorySecondTurn(
       passed: successfulSearches.length === 1
         && (searchRequestMode === "exact"
           ? matchesRequiredGraphMemorySearch(evidence.searchRequest)
-          : matchesNaturalGraphMemorySearch(evidence.searchRequest)),
+          : matchesNaturalGraphMemorySearch(evidence.searchRequest, firstOutput)),
       detail: searchRequestMode === "exact"
         ? "The deterministic fixture used the exact admitted conformance query, natural topic parameter, and bounded budget."
         : "The provider formulated one bounded parameterized query for the natural topic without a machine marker.",
@@ -309,7 +297,7 @@ export function checkGraphMemorySecondTurn(
     {
       name: "ack-search-submit-order",
       passed: ordered,
-      detail: "Server response order proves first submit acknowledgement before second-turn search, the matching reference action, and second submit acknowledgement.",
+      detail: "Server response order proves the first exact Return acknowledgement before second-turn search, the matching reference action, and the second exact Return acknowledgement (legacy submit or successful temporal Return).",
     },
   ];
 }
@@ -334,6 +322,7 @@ function matchesRequiredGraphMemorySearch(
 
 function matchesNaturalGraphMemorySearch(
   request: GraphMemoryEvidence["searchRequest"],
+  firstOutput: CompletionOutput,
 ): boolean {
   if (request?.queryContractVersion !== 1 || typeof request.query !== "string"
     || request.target !== undefined
@@ -344,10 +333,13 @@ function matchesNaturalGraphMemorySearch(
     || (request.budget !== undefined && !matchesNaturalGraphMemoryBudget(request.budget))) return false;
   const parameterName = parameterKeys[0]!;
   const parameter = request.parameters[parameterName];
+  const sections = graphMemorySections(firstOutput, graphMemorySearchTitle);
   return isRecord(parameter)
     && Object.keys(parameter).length === 2
     && parameter.type === "string"
-    && parameter.value === graphMemorySearchTitle
+    && typeof parameter.value === "string"
+    && sections.count === 1 && !sections.hasMachineMarker
+    && sections.nodeTitles.includes(parameter.value)
     && isNaturalGraphMemoryQueryShape(request.query, parameterName, "i")
     && !JSON.stringify({ query: request.query, parameters: request.parameters }).includes("GRAPH_MEMORY_ANCHOR:");
 }
