@@ -17,7 +17,7 @@ it("stops every run from the thread menu and archives once they have stopped", a
   const thread = { id: 10, title: "Busy chat", harnessId: "fixture", activity: "running", archiveBlocked: true };
   const message = (id, completionStatus, extra = {}) => ({ id, threadId: 10, sequence: id, text: `Message ${id}`, completionStatus, ...extra });
   const state = {
-    status: "running", currentInteractionId: 3, capabilities: { stopRuns: true },
+    status: "running", currentInteractionId: 3, capabilities: { stopRuns: true }, invocationInventoryAvailable: true,
     conversationCompatibility: { threadId: 10, status: "unrestricted", harnessId: "fixture" },
     interactions: [
       message(1, "accepted", { graphNodeId: 901, completionOutput: { rootLayer: layer } }),
@@ -56,6 +56,18 @@ it("stops every run from the thread menu and archives once they have stopped", a
     expect(stopAll.textContent).toBe("Stop all runs (3)");
     expect(stopAllAndArchive.classList.contains("hidden")).toBe(false);
     expect(stopAllAndArchive.disabled).toBe(false);
+
+    // Without the authoritative invocation inventory, an agent's child cannot be told from a
+    // message, so neither Stop all nor the prompt card's Stop is offered.
+    state.invocationInventoryAvailable = false;
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(stopAll.classList.contains("hidden")).toBe(true);
+    expect(window.document.querySelector("#interactionRunStop").classList.contains("hidden")).toBe(true);
+    state.invocationInventoryAvailable = true;
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(window.document.querySelector("#interactionRunStop").classList.contains("hidden")).toBe(false);
 
     stopAllAndArchive.click();
     await vi.waitFor(() => expect(stopped.sort()).toEqual([2, 3, 4]));

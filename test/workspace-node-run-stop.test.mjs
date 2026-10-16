@@ -22,7 +22,7 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
   const thread = { id: 10, title: "Learning plan", harnessId: "fixture" };
   const run = (id, completionStatus, queueReason) => ({ id, threadId: 10, sequence: id, text: "Invoked", completionStatus, queueReason });
   const state = {
-    status: "accepted", currentInteractionId: 1, capabilities: { stopRuns: true },
+    status: "accepted", currentInteractionId: 1, capabilities: { stopRuns: true }, invocationInventoryAvailable: true,
     conversationCompatibility: { threadId: 10, status: "unrestricted", harnessId: "fixture" },
     interactions: [
       { id: 1, graphNodeId: 901, threadId: 10, sequence: 1, text: "Compare approaches", completionStatus: "accepted", completionOutput: { rootLayer: layer } },

@@ -21,7 +21,7 @@ it("sends a plain message, an annotation and an answer while earlier runs are ac
   const turn = (id, completionStatus, extra = {}) => ({ id, threadId: 3, sequence: id, text: `Turn ${id}`, completionStatus, ...extra });
   const state = {
     conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" },
-    status: "accepted", currentInteractionId: 5, capabilities: { stopRuns: true },
+    status: "accepted", currentInteractionId: 5, capabilities: { stopRuns: true }, invocationInventoryAvailable: true,
     // The thread's first answer is accepted; a later message still runs.
     interactions: [turn(5, "accepted", { graphNodeId: 50, completionOutput: { rootLayer: layer } }), turn(6, "running")],
     visibleLayer: layer, nodes: layer.nodes, actions, projects: [], permissionProfiles: [],
@@ -152,7 +152,7 @@ it("brings back the annotations of an earlier message that failed while a later 
   const turn = (id, completionStatus, extra = {}) => ({ id, threadId: 3, sequence: id, text: `Turn ${id}`, completionStatus, ...extra });
   const state = {
     conversationCompatibility: { threadId: 3, status: "unrestricted", harnessId: "fixture" },
-    status: "running", currentInteractionId: 7, capabilities: { stopRuns: true },
+    status: "running", currentInteractionId: 7, capabilities: { stopRuns: true }, invocationInventoryAvailable: true,
     interactions: [turn(5, "accepted", { graphNodeId: 50, completionOutput: { rootLayer: layer } }), turn(6, "running"), turn(7, "running")],
     visibleLayer: layer, nodes: layer.nodes, actions: [], projects: [], permissionProfiles: [],
     modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] },

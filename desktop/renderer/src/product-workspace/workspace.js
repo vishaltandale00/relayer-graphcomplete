@@ -2196,8 +2196,11 @@ export function createProductWorkspace({
   const archiveAvailable = mode === "interactive" && typeof onArchiveThread === "function";
   // Thread messages, node runs and invokes run in parallel (#719), so the thread menu can stop
   // them all at once (#721): it stops every running run and removes every queued one.
+  // Without the authoritative invocation inventory an agent's child cannot be told from a
+  // message, so nothing offers to stop it: Stop all fails closed.
   const stopAllAvailable = () => mode === "interactive" && getThread()?.imported !== true
-    && getState().capabilities?.stopRuns === true && typeof onStopInteraction === "function";
+    && getState().capabilities?.stopRuns === true && getState().invocationInventoryAvailable === true
+    && typeof onStopInteraction === "function";
   const runsToStop = (thread = getThread()) => thread
     ? threadActiveRuns(humanTurns(getState(), thread), getState().actionInvocations || [])
     : [];
@@ -3049,8 +3052,10 @@ export function createProductWorkspace({
   const pendingStops = new Set();
   const stopErrors = new Map();
   // Runs are stopped on their own interaction nodes, never from the composer (#719).
+  // Fails closed without the authoritative invocation inventory, which tells an agent's child,
+  // which the product never stops, from a message.
   const stopsAvailable = () => mode === "interactive" && getThread()?.imported !== true
-    && getState().capabilities?.stopRuns === true;
+    && getState().capabilities?.stopRuns === true && getState().invocationInventoryAvailable === true;
   const contextDraftSendWarning = $("#contextDraftSendWarning");
   const cancelContextDraftSend = $("#cancelContextDraftSend");
   const confirmContextDraftSend = $("#confirmContextDraftSend");
