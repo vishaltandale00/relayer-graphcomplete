@@ -1374,6 +1374,15 @@ describe("product workspace keyboard behavior", () => {
       ],
       actionInvocations: [{ resultInteractionId: 2, agentInvoked: true }],
     }, { id: 10 })).toBe("accepted");
+    // Nor does a run the user started from an invoke action: it runs in a fresh session.
+    expect(composerStatusForThread({
+      status: "running",
+      interactions: [
+        { id: 1, threadId: 10, sequence: 1, completionStatus: "accepted" },
+        { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
+      ],
+      actionInvocations: [{ resultInteractionId: 2, agentInvoked: false }],
+    }, { id: 10 })).toBe("accepted");
   });
 
   it("scopes restored and user-authored drafts across A to B to A switches", () => {

@@ -658,6 +658,41 @@ describe("ClaudeBasicHarness", () => {
     expect(calls[2]?.options.resume).toBe("root-session");
   });
 
+  it("starts a fresh root run in its own session and shows it the thread's history", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits", {
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    }), {
+      query: sequentialSdkQuery([
+        [{ type: "result", subtype: "success", result: "fresh", session_id: "fresh-session" }],
+        [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
+      ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
+    });
+    const access = managedAccess();
+
+    await harness.complete({
+      ...runContext(access),
+      nativeSession: "fresh",
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
+    });
+    expect(calls[0]?.options.resume).toBeUndefined();
+    expect(String(calls[0]?.prompt)).toContain('"interactionNodeId": 1');
+    expect(String(calls[0]?.prompt)).toContain("await graph.getNode(interactionNodeId)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(String(calls[0]?.prompt)).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
+    expect(harness.state()).toEqual({
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(access));
+    expect(calls[1]?.options.resume).toBe("root-session");
+  });
+
   it("rejects an invoked completion that succeeds without a durable session identity", async () => {
     const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
       query: sdkQuery([
@@ -672,8 +707,8 @@ describe("ClaudeBasicHarness", () => {
 
     const execution = harness.complete(context);
 
-    await expect(execution).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
-    await expect(execution.attached).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
+    await expect(execution).rejects.toThrow("Claude fresh or invoked completion did not expose a durable native session identity");
+    await expect(execution.attached).rejects.toThrow("Claude fresh or invoked completion did not expose a durable native session identity");
   });
 
   it.each([

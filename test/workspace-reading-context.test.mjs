@@ -47,7 +47,11 @@ async function setup({ post, readLayer, invokePost, readSource, readSourceLayer,
   return { setState(next) { current = next; } };
 }
 
+// What the guided tutorial answers when an invoke succeeds. Only a tutorial waiting for the
+// result makes the reader follow it (#717); every other invoke keeps the reader on the source.
+let tutorialAwaits = null;
 beforeEach(async () => {
+  tutorialAwaits = null;
   vi.resetModules();
   vi.useFakeTimers();
   Object.assign(globalThis, {
@@ -60,7 +64,7 @@ beforeEach(async () => {
   vi.doMock("../desktop/renderer/src/api.js", () => ({ request: (...args) => requestImplementation(...args) }));
   vi.doMock("../desktop/renderer/src/graph.js", () => ({ renderThread: vi.fn() }));
   vi.doMock("../desktop/renderer/src/navigation.js", () => ({ renderScopeMenu: vi.fn(), renderSidebar: vi.fn(), setMainView: vi.fn(), setSettingsTab: vi.fn() }));
-  vi.doMock("../desktop/renderer/src/onboarding-tutorial.js", () => ({ onboardingTutorialController: () => ({ followupSubmitted: vi.fn(), actionSucceeded: vi.fn() }) }));
+  vi.doMock("../desktop/renderer/src/onboarding-tutorial.js", () => ({ onboardingTutorialController: () => ({ followupSubmitted: vi.fn(), actionSucceeded: vi.fn(() => tutorialAwaits) }) }));
   controller = { ...await import("../desktop/renderer/src/state.js"), ...await import("../desktop/renderer/src/threads.js") };
 });
 afterEach(() => {
@@ -237,6 +241,8 @@ describe("follow-up reading context at the production thread controller", () => 
   });
 
 
+  // The thread tracks one pending turn, for its message turns. Invoked runs run beside each other,
+  // so an invoked result stays on its source node and in the turn list instead of a ready prompt.
   it("keeps an invoked result discoverable after browsing during its POST", async () => {
     const invokePost = deferred();
     const fixture = await setup({ invokePost });
@@ -257,8 +263,8 @@ describe("follow-up reading context at the production thread controller", () => 
     await invoking;
     await controller.refreshState(10);
     expect(controller.viewState.currentInteractionId).toBe(3);
-    expect(controller.appState.pendingTurn?.readyLayer).toEqual(resultLayer);
-    await controller.openReadyResult();
+    expect(controller.appState.pendingTurn ?? null).toBeNull();
+    controller.selectTurnById(2);
     expect(controller.viewState.currentInteractionId).toBe(2);
   });
 
@@ -266,6 +272,8 @@ describe("follow-up reading context at the production thread controller", () => 
   it.each(["automatic", "delayed", "browsed", "recovered", "reserved", "unavailable", "source-current"])("retains the exact invoking Node through Current, Returned, source click and history (%s)", async (mode) => {
     const browsed = mode === "browsed";
     const reserved = ["reserved", "unavailable"].includes(mode);
+    // Invokes follow their result only for the guided tutorial waiting for it.
+    tutorialAwaits = { phase: "awaiting-accepted-response", threadId: 10, interactionId: 2 };
     const invokePost = deferred();
     const second = layer(202, [22]);
     const root = {

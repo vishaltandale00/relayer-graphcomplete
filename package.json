@@ -74,6 +74,7 @@
     "desktop:dev:prime": "node scripts/run-prime-desktop.mjs",
     "eval-app:dev": "node desktop/eval-main/index.mjs",
     "live:recursive-complete": "npm run build && node scripts/run-recursive-live-run.mjs",
+    "live:parallel-invoke": "npm run build && node scripts/run-parallel-invoke-live-run.mjs",
     "eval:input-roundtrip:live": "RELAYER_EVAL_AUTORUN_INPUT_ROUNDTRIP=1 node desktop/eval-main/index.mjs",
     "lint:ladybug-receipt": "cargo fmt --manifest-path docs/evidence/issue-261-ladybug-probe/Cargo.toml -- --check && rustfmt --edition 2021 --check docs/evidence/issue-261-ladybug-probe/source-build-probe/src/main.rs && node scripts/lint-ladybug-qualification-receipt.mjs && npm run lint:ladybug-native-receipt && npm run lint:ladybug-contract-probe",
     "lint:ladybug-native-receipt": "node scripts/verify-ladybug-native-receipts.mjs",

@@ -6,6 +6,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
+import { isDeepStrictEqual } from "node:util";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { flushAuthoringErrors, GraphApiError, RelayerGraphClient, type GraphCapability, type GraphId } from "@relayer/graph-client";
@@ -54,6 +55,7 @@ import type {
   HarnessSessionRegistration,
   HarnessSessionState,
   HarnessCompletionTraceContext,
+  HarnessThreadHistoryEntry,
   HarnessCompletionBrokerScope,
   HarnessExecutionAccess,
   HarnessExecutionAccessBroker,
@@ -111,6 +113,11 @@ interface LiveSession {
     readonly controller: AbortController;
   }>;
   invokedCompletionRuns: Map<GraphId, InvokedCompletionRun>;
+  /**
+   * Fresh root runs by completion, which bypass `tail`. A duplicate delivery of one joins its
+   * run instead of starting another; close waits for them here.
+   */
+  freshRootRuns: Map<GraphId, { readonly binding: string; readonly run: Promise<HarnessCompleteResult> }>;
   activeHumanRootCompletionId?: GraphId;
   currentPolicyRevision?: number;
   currentPolicyIdentity?: string;
@@ -182,6 +189,7 @@ const HARNESS_CLOSE_SESSION_TIMEOUT_MS = 5_000;
 export const CANCELLED_TURN_FORCE_STOP_MS = 2 * 60_000;
 /** How long the host waits for a force-stopped turn to settle before releasing its access. */
 export const FORCE_STOPPED_TURN_SETTLE_MS = 10_000;
+const UNOBSERVED_CHILD_APPROVAL_RATIONALE = "No product interaction records this child, so nobody can review its approval request.";
 const FORCE_STOPPED_TURN_MESSAGE = "The turn did not stop within two minutes of cancellation, so it was force-stopped.";
 
 export type HarnessEffectBoundary = "none" | "partial_output" | "graph_write" | "tool_effect" | "unknown";
@@ -526,6 +534,13 @@ export class HarnessHost {
   private async registerSession(descriptor: HarnessSessionRegistration): Promise<void> {
     if (this.closed) throw new Error("Harness host is closed");
     const live = this.sessions.get(descriptor.threadId);
+    // The product registers the session before every run. An unchanged registration only
+    // retries persistence, so it must not wait for the root turn queued on the session: a fresh
+    // root run would otherwise wait for that turn to finish.
+    if (live !== undefined && sameRegistration(live.descriptor, descriptor)) {
+      await this.persist();
+      return;
+    }
     if (live !== undefined) {
       await this.withSessionLock(live, async () => {
         if (!canResumeHarnessExecutionConfiguration(live.descriptor.configuration, descriptor.configuration)
@@ -616,6 +631,7 @@ export class HarnessHost {
       tail: Promise.resolve(),
       activeCompletions: new Map(),
       invokedCompletionRuns: new Map(),
+      freshRootRuns: new Map(),
     });
     this.saved.set(descriptor.threadId, persistedDescriptor(persisted));
     this.legacySaved.delete(descriptor.threadId);
@@ -697,6 +713,26 @@ export class HarnessHost {
       ...(completionBroker === undefined ? {} : { completionBroker }),
       origin: { kind: "root" },
     } as const;
+    // A fresh root never touches the thread's native root session, so it runs beside the
+    // root turns queued on it.
+    if (traceContext?.nativeSession === "fresh") {
+      // A retried or duplicated delivery of the same prepared run joins it: it must not start
+      // a second paid run, nor take over the first one's cancellation.
+      const binding = freshRootBinding(capability, traceContext, model, attemptAdmissionId, executionLeaseId);
+      const existing = session.freshRootRuns.get(capability.nodeId);
+      if (existing !== undefined) {
+        if (existing.binding !== binding) throw new Error("Fresh root completion is already active under a different graph binding");
+        return existing.run;
+      }
+      const run = this.runCompletion(runInput) as Promise<HarnessCompleteResult>;
+      const entry = { binding, run };
+      session.freshRootRuns.set(capability.nodeId, entry);
+      const forget = () => {
+        if (session.freshRootRuns.get(capability.nodeId) === entry) session.freshRootRuns.delete(capability.nodeId);
+      };
+      void run.then(forget, forget);
+      return run;
+    }
     return this.withSessionLock(session, () => this.runCompletion(runInput));
   }
 
@@ -876,9 +912,17 @@ export class HarnessHost {
     forceController.signal.addEventListener("abort", recordForcedState, { once: true });
     const detachSignal = forwardAbort(input.signal, controller);
     const completeCallId = randomUUID();
-    const approvals = session.approvals.beginCompletion({ interactionId, completeCallId });
+    // Approvals are keyed by product interaction, the stream its product observer reads. A
+    // root's interactionId is one; an agent's child carries its own product row in the trace
+    // context. A child the product never recorded has no observer, so its requests end at once.
+    const approvalInteractionId = input.origin.kind === "root" ? interactionId : input.traceContext?.productInteractionId;
+    const approvals = approvalInteractionId === undefined
+      ? session.approvals.beginUnobservedCompletion({ interactionId, completeCallId }, UNOBSERVED_CHILD_APPROVAL_RATIONALE)
+      : session.approvals.beginCompletion({ interactionId: approvalInteractionId, completeCallId });
     session.activeCompletions.set(capability.nodeId, { completeCallId, interactionId, controller });
-    if (input.origin.kind === "root") session.activeHumanRootCompletionId = capability.nodeId;
+    if (input.origin.kind === "root" && input.traceContext?.nativeSession !== "fresh") {
+      session.activeHumanRootCompletionId = capability.nodeId;
+    }
     const abortApprovals = () => session.approvals.endCompletion(
       completeCallId,
       "aborted",
@@ -1215,13 +1259,17 @@ export class HarnessHost {
     abandonCompletion?: () => void,
     forceSignal: AbortSignal = new AbortController().signal,
   ): Promise<HarnessCompleteResult | HarnessInvokedCompletionObservation> {
+    // The configuration this run was admitted with. A registration that changes the session
+    // while it runs, which never waits for fresh roots or invoked children, cannot widen or
+    // narrow what this run may do.
+    const descriptor = session.descriptor;
     const graph = new RelayerGraphClient(capability);
     const interactionNodeId = capability.nodeId;
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);
       onNativeExecution?.(undefined);
       if (origin.kind === "invoke") return { completionId: interactionNodeId };
-      return { threadId, configurationName: session.descriptor.configuration.name, output, trace: disabledTraceDescriptor() };
+      return { threadId, configurationName: descriptor.configuration.name, output, trace: disabledTraceDescriptor() };
     } catch (error) {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
     }
@@ -1253,7 +1301,7 @@ export class HarnessHost {
       }
       if (session.harness.supportsInvokedComplete !== true) {
         throw new HarnessExecutionFailure(
-          `Harness ${session.descriptor.configuration.name} does not support agent-invoked Complete`,
+          `Harness ${descriptor.configuration.name} does not support agent-invoked Complete`,
           "configuration",
           "none",
         );
@@ -1274,8 +1322,8 @@ export class HarnessHost {
       ...(traceContext?.personalPresentationVersionKey === undefined ? {} : {
         personalPresentationVersionKey: traceContext.personalPresentationVersionKey,
       }),
-      implementation: session.descriptor.configuration.implementation,
-      configurationName: session.descriptor.configuration.name,
+      implementation: descriptor.configuration.implementation,
+      configurationName: descriptor.configuration.name,
       support,
     });
     const traceSink = trace?.sink ?? createNoopHarnessTraceSink();
@@ -1287,7 +1335,7 @@ export class HarnessHost {
     // renderer, get a preview folder. Its presence is what enables previews.
     // Created last before the try, so the finally below always removes it.
     const previewDirectory = this.options.draftPreviews !== undefined
-      && resolveGraphCapabilityProfile(session.descriptor.configuration).preview === "enabled"
+      && resolveGraphCapabilityProfile(descriptor.configuration).preview === "enabled"
       ? await mkdtemp(join(tmpdir(), "relayer-graph-previews-"))
       : undefined;
     // The host owns the turn folder lifetime; clients may only create children.
@@ -1301,7 +1349,7 @@ export class HarnessHost {
     });
     if (previewDirectory !== undefined) {
       this.previewTraces.set(interactionNodeId, traceSink);
-      this.previewFolders.set(interactionNodeId, session.descriptor.workingDirectory);
+      this.previewFolders.set(interactionNodeId, descriptor.workingDirectory);
     }
     const observedTrace = new EffectObservingTraceSink(traceSink);
     let completionError: HarnessExecutionFailure | undefined;
@@ -1316,7 +1364,7 @@ export class HarnessHost {
     let forceStoppedNativeOutcome: { readonly kind: ForceStoppedNativeOutcome; readonly detail?: string } | undefined;
     try {
       await mkdir(programDirectory, { mode: 0o700 });
-      const acceptedContracts = session.descriptor.configuration.executionAccessContracts;
+      const acceptedContracts = descriptor.configuration.executionAccessContracts;
       if (executionLeaseId !== undefined) {
         const pending = this.pendingExecutionAccess.get(executionLeaseId);
         if (pending === undefined || pending.state !== "admitted" || pending.releaseRequested
@@ -1374,6 +1422,8 @@ export class HarnessHost {
         requireNativeContinuity: traceContext?.requireNativeContinuity === true,
         ...(traceContext?.threadIconSelection === undefined ? {} : { threadIconSelection: traceContext.threadIconSelection }),
         ...(traceContext?.nativeHistoryAnchor === undefined ? {} : { nativeHistoryAnchor: traceContext.nativeHistoryAnchor }),
+        ...(traceContext?.nativeSession === undefined ? {} : { nativeSession: traceContext.nativeSession }),
+        ...(traceContext?.threadHistory === undefined ? {} : { threadHistory: traceContext.threadHistory }),
         inputGraph: interaction,
         interactionInput: await withArtifactNoteScreenshots(interactionInput, this.options.artifactNotesDirectory, programDirectory),
         ...(personalPresentation === undefined ? {} : { personalPresentation }),
@@ -1454,7 +1504,7 @@ export class HarnessHost {
       try {
         const output = await graph.getCompletionOutput(interactionNodeId);
         const traceDescriptor = await sealTrace(trace, "partial", errorMessage(completionError));
-        return { threadId, configurationName: session.descriptor.configuration.name, output, trace: traceDescriptor };
+        return { threadId, configurationName: descriptor.configuration.name, output, trace: traceDescriptor };
       } catch (error) {
         if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) {
           completionError = new HarnessExecutionFailure(
@@ -1500,7 +1550,7 @@ export class HarnessHost {
     try {
       const output = await graph.getCompletionOutput(interactionNodeId);
       const traceDescriptor = await sealTrace(trace, "complete");
-      return { threadId, configurationName: session.descriptor.configuration.name, output, trace: traceDescriptor };
+      return { threadId, configurationName: descriptor.configuration.name, output, trace: traceDescriptor };
     } catch (error) {
       if (error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found") {
         const completionMissing = new Error("Harness ended its turn without accepting a graph completion.", { cause: error });
@@ -1540,8 +1590,8 @@ export class HarnessHost {
     return true;
   }
 
-  approvalEvents(threadId: number, after = 0): HarnessApprovalSnapshot {
-    return this.approvalSession(threadId).snapshot(after);
+  approvalEvents(threadId: number, interactionId: number, after = 0): HarnessApprovalSnapshot {
+    return this.approvalSession(threadId).snapshot(interactionId, after);
   }
 
   decideApproval(threadId: number, requestId: string, input: unknown): HarnessApprovalResolution {
@@ -1584,9 +1634,10 @@ export class HarnessHost {
     }
     await Promise.all([...this.sessions.entries()].map(async ([threadId, session]) => {
       try {
-        const invokedRuns = Promise.allSettled(
-          [...session.invokedCompletionRuns.values()].map(({ run }) => run),
-        )
+        const invokedRuns = Promise.allSettled([
+          ...[...session.invokedCompletionRuns.values()].map(({ run }) => run),
+          ...[...session.freshRootRuns.values()].map(({ run }) => run),
+        ])
           .then(() => undefined);
         await waitForHarnessSessionClose(
           Promise.all([session.tail, invokedRuns]).then(() => undefined),
@@ -2088,7 +2139,9 @@ async function route(host: HarnessHost, options: HarnessHostOptions, request: In
       if (threadId === undefined) return reply(response, 400, { error: "invalid_thread_id" });
       const cursor = url.searchParams.get("after");
       const after = cursor === null ? 0 : Number(cursor);
-      return reply(response, 200, host.approvalEvents(threadId, after));
+      const interactionId = Number(url.searchParams.get("interactionId"));
+      if (!Number.isSafeInteger(interactionId) || interactionId < 1) return reply(response, 400, { error: "invalid_interaction_id" });
+      return reply(response, 200, host.approvalEvents(threadId, interactionId, after));
     }
     const match = /^\/sessions\/([^/]+)\/complete$/.exec(url.pathname);
     if (request.method === "POST" && match?.[1] !== undefined) {
@@ -3314,7 +3367,11 @@ function isNativeExecutionHandle(value: Promise<void> | NativeExecutionHandle): 
 function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
   if (!isRecord(value) || value.traceContext === undefined) return undefined;
   if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
-  const { productInteractionId, personalPresentationVersionId, personalPresentationVersionKey, requireNativeContinuity, nativeHistoryAnchor, threadIconSelection } = value.traceContext;
+  const { productInteractionId, personalPresentationVersionId, personalPresentationVersionKey, requireNativeContinuity, nativeHistoryAnchor, threadIconSelection, nativeSession, threadHistory } = value.traceContext;
+  if (nativeSession !== undefined && nativeSession !== "fresh") throw new Error("Invalid native session mode");
+  if (nativeSession === "fresh" && requireNativeContinuity === true) throw new Error("A fresh native session cannot require native continuity");
+  if (threadHistory !== undefined && nativeSession !== "fresh") throw new Error("Thread history is sent only with a fresh native session");
+  const history = threadHistory === undefined ? undefined : readThreadHistory(threadHistory);
   if (threadIconSelection !== undefined && (!isRecord(threadIconSelection) || threadIconSelection.eligible !== true || Object.keys(threadIconSelection).length !== 1)) throw new Error("Invalid thread icon selection eligibility");
   if (nativeHistoryAnchor != null && (!isRecord(nativeHistoryAnchor) || !Number.isSafeInteger(nativeHistoryAnchor.interactionNodeId) || Number(nativeHistoryAnchor.interactionNodeId) < 1 || typeof nativeHistoryAnchor.message !== "string")) throw new Error("Invalid native history anchor");
   if (requireNativeContinuity !== undefined && typeof requireNativeContinuity !== "boolean") throw new Error("Invalid native continuity requirement");
@@ -3338,9 +3395,36 @@ function readTraceContext(value: unknown): HarnessCompletionTraceContext | undef
     ...(requireNativeContinuity === undefined ? {} : { requireNativeContinuity }),
     ...(threadIconSelection === undefined ? {} : { threadIconSelection: { eligible: true as const } }),
     ...(nativeHistoryAnchor == null ? {} : { nativeHistoryAnchor: nativeHistoryAnchor as { interactionNodeId: number; message: string } }),
+    ...(nativeSession === undefined ? {} : { nativeSession }),
+    ...(history === undefined ? {} : { threadHistory: history }),
     ...(personalPresentationVersionId === undefined ? {} : { personalPresentationVersionId }),
     ...(personalPresentationVersionKey === undefined ? {} : { personalPresentationVersionKey }),
   };
+}
+
+function sameRegistration(live: HarnessSessionDescriptor, registration: HarnessSessionRegistration): boolean {
+  const { state: _state, ...registered } = live;
+  return isDeepStrictEqual(registered, registration);
+}
+
+function readThreadHistory(value: unknown): readonly HarnessThreadHistoryEntry[] {
+  if (!Array.isArray(value)) throw new Error("Thread history must be an array");
+  return Object.freeze(value.map((entry: unknown) => {
+    if (!isRecord(entry)) throw new Error("Invalid thread history entry");
+    const { interactionNodeId, responseLayerId } = entry;
+    const unknown = Object.keys(entry).filter((key) => !["interactionNodeId", "responseLayerId"].includes(key));
+    if (unknown.length > 0) throw new Error(`Thread history entry contains unsupported fields: ${unknown.join(", ")}`);
+    if (!Number.isSafeInteger(interactionNodeId) || (interactionNodeId as number) < 1) {
+      throw new Error("Invalid thread history entry");
+    }
+    if (responseLayerId !== undefined && (!Number.isSafeInteger(responseLayerId) || (responseLayerId as number) < 1)) {
+      throw new Error("Invalid thread history response layer");
+    }
+    return Object.freeze({
+      interactionNodeId: interactionNodeId as number,
+      ...(responseLayerId === undefined ? {} : { responseLayerId: responseLayerId as number }),
+    });
+  }));
 }
 
 function disabledTraceDescriptor(): HarnessTraceDescriptor {
@@ -3406,6 +3490,25 @@ function validateCompletionOrigin(
     || !Number.isSafeInteger(origin.actionId) || (origin.actionId as number) < 1) {
     throw new Error("Harness invoked completion contains invalid trusted origin provenance");
   }
+}
+
+/** What makes two fresh-root deliveries the same run: one completion, attempt and lease. */
+function freshRootBinding(
+  capability: GraphCapability,
+  traceContext: HarnessCompletionTraceContext,
+  model: InteractionModelSelection | undefined,
+  attemptAdmissionId: string | undefined,
+  executionLeaseId: string | undefined,
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify({
+      completionId: capability.nodeId,
+      productInteractionId: traceContext.productInteractionId,
+      attemptAdmissionId: attemptAdmissionId ?? null,
+      executionLeaseId: executionLeaseId ?? null,
+      model: model === undefined ? undefined : { providerId: model.providerId, adapterId: model.adapterId, modelId: model.modelId },
+    }))
+    .digest("hex");
 }
 
 function graphInvocationDigest(

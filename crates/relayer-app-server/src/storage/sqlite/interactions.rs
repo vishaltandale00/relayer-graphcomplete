@@ -3,11 +3,16 @@ use super::{
 };
 use crate::product::{
     AcceptedInteractionCompletion, Interaction, InteractionId, InteractionModelSelection,
-    ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadId, ValidateModelSelectionCommand,
+    ModelFamilyId, PreparedInteractionBinding, ProviderId, ThreadHistoryEntry, ThreadId,
+    ValidateModelSelectionCommand,
 };
 use crate::storage::{NewInteractionInput, StorageError};
 use sqlx::{Row, SqliteConnection, sqlite::SqliteRow};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+/// The most earlier turns a fresh run is pointed at. Each is a pair of graph ids, so the prompt
+/// stays small however long the thread grows; older turns are found by searching the thread.
+pub(crate) const FRESH_RUN_HISTORY_LIMIT: i64 = 50;
 
 impl SqliteProductStore {
     pub(crate) async fn get_interaction_by_input_identity(
@@ -241,6 +246,50 @@ impl SqliteProductStore {
             .transpose()
     }
 
+    /// Thread ?1's latest accepted human turns created before interaction ?2, oldest first, at
+    /// most [`FRESH_RUN_HISTORY_LIMIT`]. Older turns stay in the thread's graph, where the run can
+    /// search for them. An agent's child belongs to its parent's work, not to the conversation.
+    pub(crate) async fn accepted_thread_history(
+        &self,
+        thread_id: ThreadId,
+        excluding: InteractionId,
+    ) -> Result<Vec<ThreadHistoryEntry>, StorageError> {
+        let mut rows: Vec<(i64, Option<String>)> = sqlx::query_as(
+            "SELECT turn.graph_node_id,turn.completion_output_json FROM interactions turn WHERE turn.thread_id=?1 AND turn.sequence<(SELECT sequence FROM interactions WHERE id=?2) AND turn.completion_status='accepted' AND turn.graph_node_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT ?3",
+        )
+        .bind(thread_id.value())
+        .bind(excluding.value())
+        .bind(FRESH_RUN_HISTORY_LIMIT)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.reverse();
+        Ok(rows
+            .into_iter()
+            .map(|(interaction_node_id, output)| ThreadHistoryEntry {
+                interaction_node_id,
+                response_layer_id: output
+                    .and_then(|json| serde_json::from_str::<serde_json::Value>(&json).ok())
+                    .and_then(|output| output["rootLayer"]["layer"]["id"].as_i64()),
+            })
+            .collect())
+    }
+
+    /// Whether interaction ?1 is a run an invoke action started. This is the admission gate's own
+    /// test (`MESSAGE_TURN_IN_PROGRESS`), so a run the gate admits beside a message turn always
+    /// starts a fresh native session.
+    pub(crate) async fn is_invoked_run(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, StorageError> {
+        sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=?1)",
+        )
+        .bind(interaction_id.value())
+        .fetch_one(&self.pool)
+        .await
+        .map_err(Into::into)
+    }
+
     #[cfg(test)]
     pub(crate) async fn list_interactions(
         &self,
@@ -265,7 +314,7 @@ impl SqliteProductStore {
                 .fetch_one(&mut *transaction)
                 .await?;
         if enforce_single_active_interaction {
-            let interaction_in_progress: bool = sqlx::query_scalar(super::HUMAN_TURN_IN_PROGRESS)
+            let interaction_in_progress: bool = sqlx::query_scalar(super::MESSAGE_TURN_IN_PROGRESS)
                 .bind(thread_id.value())
                 .fetch_one(&mut *transaction)
                 .await?;
@@ -674,7 +723,7 @@ impl SqliteProductStore {
         .await?;
         catalog::validate_model_selection_on(&mut transaction, &command).await?;
         let result = sqlx::query(
-            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL,input_identity=?6,input_digest=?7 WHERE id=?8 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence)",
+            "UPDATE interactions SET text=?1,model_provider_id=?2,provider_model_id=?3,model_family_id=?4,completion_status='submitted',harness_configuration_name=?5,harness_configuration_digest=NULL,effective_execution_digest=NULL,effective_permission_receipt_json=NULL,completion_output_json=NULL,completion_error=NULL,input_identity=?6,input_digest=?7 WHERE id=?8 AND completion_status='not_started' AND NOT EXISTS(SELECT 1 FROM interactions later WHERE later.thread_id=interactions.thread_id AND later.sequence>interactions.sequence AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=later.id))",
         )
         .bind(input.text)
         .bind(model_selection.provider_id.as_str())
@@ -1536,10 +1585,11 @@ mod tests {
         store.pool.close().await;
     }
 
-    /// Only human root turns count toward a thread's one active turn: a user's message and
-    /// a user's invoke action do; a child an agent launched does not.
+    /// Only message turns hold the thread, because they resume its native root session. A run
+    /// started by an invoke action starts fresh: a user's invoke and an agent's child both run
+    /// beside message turns.
     #[tokio::test]
-    async fn only_human_turns_hold_the_thread() {
+    async fn only_message_turns_hold_the_thread() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-human-turn-gate-")
             .tempdir()
@@ -1629,8 +1679,17 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
-        let held = store
+        let after_action = store
             .insert_interaction(thread.id, "After the action", None, true, true)
+            .await
+            .unwrap_or_else(|error| panic!("a user's running invoke held the thread: {error}"));
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(after_action.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        let held = store
+            .insert_interaction(thread.id, "Second message", None, true, true)
             .await
             .err()
             .unwrap();
@@ -1643,6 +1702,132 @@ mod tests {
             .request_interaction_stop(thread.id, invoked.id)
             .await
             .unwrap();
+        store.pool.close().await;
+    }
+
+    /// A fresh run is pointed at its thread's accepted human turns, in order, with each turn's
+    /// returned layer, and reads them through the graph. Unfinished turns, the run itself, and an agent's children are not part of
+    /// the thread's conversation.
+    #[tokio::test]
+    async fn accepted_thread_history_lists_accepted_human_turns_in_order() {
+        let temporary = tempfile::Builder::new()
+            .prefix("relayer-thread-history-")
+            .tempdir()
+            .unwrap();
+        let store = SqliteProductStore::open(&temporary.path().join("product.sqlite3"))
+            .await
+            .unwrap();
+        seed_test_models(&store).await;
+        let model = selection("first-model");
+        let thread = store
+            .insert_thread_with_initial_interaction(NewThreadRecord {
+                icon_selection_eligible: true,
+                title: "History",
+                project_id: None,
+                initial_message: "Compare the options",
+                harness_configuration_name: "codex-basic",
+                permission_profile_id: "auto",
+                model_selection: Some(&model),
+                timestamp: "1",
+            })
+            .await
+            .unwrap();
+        sqlx::query(
+            "UPDATE interactions SET completion_status='accepted',graph_node_id=701,harness_configuration_name='codex-basic',completion_output_json=?2 WHERE id=?1",
+        )
+        .bind(thread.root_interaction_id.value())
+        .bind(r#"{"nodeId":701,"rootLayer":{"layer":{"id":702}}}"#)
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        let child = match store
+            .insert_recursive_action_invocation(thread.root_interaction_id, 41, "Child work")
+            .await
+            .unwrap()
+        {
+            crate::storage::ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                interaction
+            }
+            _ => panic!("the child is new"),
+        };
+        let invoked = match store
+            .insert_action_invocation(thread.root_interaction_id, 42, "Use the second option")
+            .await
+            .unwrap()
+        {
+            crate::storage::ActionInvocationInsertOutcome::Created { interaction, .. } => {
+                interaction
+            }
+            _ => panic!("the invoke's result is new"),
+        };
+        let running = store
+            .insert_interaction(thread.id, "Still running", None, true, false)
+            .await
+            .unwrap();
+        for (interaction, node) in [(child.id, 711), (invoked.id, 721)] {
+            sqlx::query(
+                "UPDATE interactions SET completion_status='accepted',graph_node_id=?2 WHERE id=?1",
+            )
+            .bind(interaction.value())
+            .bind(node)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+
+        let history = store
+            .accepted_thread_history(thread.id, running.id)
+            .await
+            .unwrap();
+        assert_eq!(
+            history,
+            [
+                ThreadHistoryEntry {
+                    interaction_node_id: 701,
+                    response_layer_id: Some(702),
+                },
+                ThreadHistoryEntry {
+                    interaction_node_id: 721,
+                    response_layer_id: None,
+                },
+            ]
+        );
+        let without_invoked = store
+            .accepted_thread_history(thread.id, invoked.id)
+            .await
+            .unwrap();
+        assert_eq!(without_invoked.len(), 1);
+
+        // However long the thread, a fresh run is pointed at only its latest turns, oldest first.
+        for index in 0..=FRESH_RUN_HISTORY_LIMIT {
+            sqlx::query(
+                "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id,graph_node_id) VALUES (?1,?2,'Later','9','accepted','auto',?3)",
+            )
+            .bind(thread.id.value())
+            .bind(100 + index)
+            .bind(1_000 + index)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        }
+        let newest = sqlx::query(
+            "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,999,'Newest','9','running','auto')",
+        )
+        .bind(thread.id.value())
+        .execute(&store.pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        let bounded = store
+            .accepted_thread_history(thread.id, InteractionId::from_database(newest))
+            .await
+            .unwrap();
+        assert_eq!(bounded.len(), FRESH_RUN_HISTORY_LIMIT as usize);
+        assert_eq!(bounded[0].interaction_node_id, 1_001);
+        assert_eq!(
+            bounded.last().unwrap().interaction_node_id,
+            1_000 + FRESH_RUN_HISTORY_LIMIT
+        );
         store.pool.close().await;
     }
 

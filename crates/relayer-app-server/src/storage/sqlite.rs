@@ -1,3 +1,16 @@
+/// Whether `$result` names a user's invocation result whose preparation failed before anything
+/// ran and waits for its action's Retry. Such a reservation is not running. One predicate serves
+/// the Retry path and the thread's live state, so they never disagree.
+macro_rules! recoverable_user_preparation {
+    ($result:literal) => {
+        concat!(
+            "EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id JOIN invocation_input_submission_receipts receipt ON receipt.result_interaction_id=result.id WHERE result.id=",
+            $result,
+            " AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND result.graph_node_id IS NULL AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM completion_executions e WHERE e.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND (a.outcome!='model_failed' OR a.effect_boundary!='none')) AND (result.completion_status IN ('not_started','submitted') OR result.completion_status='failed' AND ai.prepared_graph_node_id IS NOT NULL AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND a.outcome='model_failed' AND a.effect_boundary='none')))"
+        )
+    };
+}
+
 mod action_invocations;
 mod annotations;
 mod approvals;
@@ -27,14 +40,14 @@ use tokio::sync::Mutex;
 
 pub(crate) use personal_presentation::PersonalPresentationPin;
 
-/// Whether thread ?1 has a human turn in progress: a user's message or a user's invoke action.
-/// A child an agent launched runs beside human turns and never holds the thread; only its
-/// parent agent controls it.
 /// The model selection of thread ?1's latest human turn, which a new turn inherits. A child an
 /// agent launched is not a human turn, so its selection is never inherited.
 const LATEST_HUMAN_TURN_MODEL: &str = "SELECT turn.model_provider_id,turn.provider_model_id,turn.model_family_id FROM interactions turn WHERE turn.thread_id=?1 AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT 1";
 
-const HUMAN_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1))";
+/// Whether thread ?1 has a message turn in progress. Message turns resume the thread's native
+/// root session, so they still run one at a time. A run started by an invoke action, whether a
+/// user clicked it or an agent launched it, starts a fresh session and runs beside them.
+const MESSAGE_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=turn.id))";
 
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {
