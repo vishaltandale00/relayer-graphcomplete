@@ -153,6 +153,24 @@ function isReturnAcknowledgement(event: GraphMemoryAuditEvent, output: Completio
         && event.transitionKind === "return" && event.completionLifecycle === "succeeded"));
 }
 
+function acceptedReferenceWrites(
+  output: CompletionOutput,
+  priorLayerId: number,
+  auditEvents: readonly GraphMemoryAuditEvent[],
+  secondTurnStartSequence: number,
+): readonly GraphMemoryAuditEvent[] {
+  return auditEvents.filter(event => event.method === "POST"
+    && event.path === "/api/graph/actions" && event.status >= 200 && event.status < 300
+    && event.sequence > secondTurnStartSequence
+    && output.rootLayer.actions.some(action => action.id === event.recordId
+      && action.state === "accepted" && action.kind === "navigate" && action.relation === "reference"
+      && action.sourceLayerId === output.rootLayer.layer.id && action.targetLayerId === priorLayerId
+      && output.rootLayer.nodes.some(node => node.id === action.sourceNodeId)
+      && event.actionKind === action.kind && event.actionRelation === action.relation
+      && event.actionSourceNodeId === action.sourceNodeId && event.actionSourceLayerId === action.sourceLayerId
+      && event.actionTargetLayerId === action.targetLayerId));
+}
+
 export function readGraphMemoryEvidence(
   firstOutput: CompletionOutput,
   secondOutput: CompletionOutput,
@@ -165,16 +183,11 @@ export function readGraphMemoryEvidence(
     && event.sequence > secondTurnStartSequence
   ));
   const searchedLayerIds = search?.searchLayerIds ?? [];
-  const reference = auditEvents.find((event) => (
-    event.method === "POST"
-    && event.path === "/api/graph/actions"
-    && event.status >= 200
-    && event.status < 300
-    && event.actionKind === "navigate"
-    && event.actionRelation === "reference"
-    && event.actionTargetLayerId === firstOutput.rootLayer.layer.id
-    && event.actionSourceLayerId === secondOutput.rootLayer.layer.id
-  ));
+  const finalReturn = auditEvents.find(event => isReturnAcknowledgement(event, secondOutput)
+    && event.sequence > secondTurnStartSequence);
+  const references = acceptedReferenceWrites(secondOutput, firstOutput.rootLayer.layer.id, auditEvents, secondTurnStartSequence);
+  const reference = references.find(event => search !== undefined && event.sequence > search.sequence
+    && finalReturn !== undefined && event.sequence < finalReturn.sequence) ?? references[0];
   const draftDecoy = search === undefined ? undefined : auditEvents.filter((event) => (
     event.method === "POST"
     && event.path === "/api/graph/layers"
@@ -218,16 +231,7 @@ export function checkGraphMemoryRetrieval(
     && event.sequence <= evidence.secondTurnStartSequence);
   const finalReturn = evidence.auditEvents.find(event => isReturnAcknowledgement(event, output)
     && event.sequence > evidence.secondTurnStartSequence);
-  const reference = evidence.auditEvents.find(event => event.method === "POST"
-    && event.path === "/api/graph/actions" && event.status >= 200 && event.status < 300
-    && event.sequence > evidence.secondTurnStartSequence
-    && output.rootLayer.actions.some(action => action.id === event.recordId
-      && action.state === "accepted" && action.kind === "navigate" && action.relation === "reference"
-      && action.sourceLayerId === output.rootLayer.layer.id && action.targetLayerId === priorLayerId
-      && output.rootLayer.nodes.some(node => node.id === action.sourceNodeId)
-      && event.actionKind === action.kind && event.actionRelation === action.relation
-      && event.actionSourceNodeId === action.sourceNodeId && event.actionSourceLayerId === action.sourceLayerId
-      && event.actionTargetLayerId === action.targetLayerId));
+  const references = acceptedReferenceWrites(output, priorLayerId, evidence.auditEvents, evidence.secondTurnStartSequence);
   const sectionNodes = graphMemorySections(firstOutput, graphMemorySearchTitle).count === 1
     ? firstOutput.rootLayer.nodes.filter(node => graphMemorySections({
       ...firstOutput, rootLayer: { ...firstOutput.rootLayer, nodes: [node] },
@@ -240,7 +244,8 @@ export function checkGraphMemoryRetrieval(
   const retrieval = evidence.auditEvents.find(event => event.status >= 200 && event.status < 300
     && event.sequence > evidence.secondTurnStartSequence
     && firstReturn !== undefined && event.sequence > firstReturn.sequence
-    && reference !== undefined && event.sequence < reference.sequence
+    && references.some(reference => event.sequence < reference.sequence
+      && finalReturn !== undefined && reference.sequence < finalReturn.sequence)
     && ((event.method === "GET" && readPaths.has(event.path))
       || (event.method === "POST" && event.path === "/api/graph/search"
         && event.searchLayerIds?.includes(priorLayerId))));
@@ -248,10 +253,9 @@ export function checkGraphMemoryRetrieval(
     ...checkBasicOutput(output, expectedInteractionNodeId),
     { name: "prior-context-retrieved", passed: retrieval !== undefined,
       detail: "A scoped read or typed search result recovered the original accepted explanation during the follow-up." },
-    { name: "typed-reference-target", passed: reference !== undefined,
+    { name: "typed-reference-target", passed: references.length > 0,
       detail: "The new accepted root contains the audited typed reference to this execution's exact original root." },
-    { name: "ack-retrieval-return-order", passed: retrieval !== undefined && reference !== undefined
-        && finalReturn !== undefined && reference.sequence < finalReturn.sequence,
+    { name: "ack-retrieval-return-order", passed: retrieval !== undefined,
       detail: "Exact first Return, follow-up retrieval, matching reference and exact final Return are ordered in the server audit." },
   ];
 }
@@ -282,15 +286,8 @@ export function checkGraphMemorySecondTurn(
     ];
   }
   const priorLayerId = firstOutput.rootLayer.layer.id;
-  const acceptedReference = output.rootLayer.actions.find((action) => (
-    action.id === evidence.referenceActionId
-    && action.state === "accepted"
-    && action.kind === "navigate"
-    && action.relation === "reference"
-    && action.sourceLayerId === output.rootLayer.layer.id
-    && action.targetLayerId === priorLayerId
-    && output.rootLayer.nodes.some((node) => node.id === action.sourceNodeId)
-  ));
+  const acceptedReference = acceptedReferenceWrites(output, priorLayerId, evidence.auditEvents, evidence.secondTurnStartSequence)
+    .find(event => event.recordId === evidence.referenceActionId && event.sequence === evidence.referenceActionSequence);
   const firstSubmit = evidence.auditEvents.find((event) => isReturnAcknowledgement(event, firstOutput));
   const successfulSearches = evidence.auditEvents.filter((event) => (
     event.method === "POST"

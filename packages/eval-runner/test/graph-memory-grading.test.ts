@@ -61,6 +61,35 @@ describe("graph-memory grading through the exported production seam", () => {
       capability: "graph-search", status: "not_exercised", attempts: 0,
     }]);
   });
+
+  it.each(["reissued stable action", "replaced draft action", "later duplicate write"])("accepts an ordered reference witness despite a %s", async boundary => {
+    const s = scenario();
+    const reference = s.secondEvents[1]!;
+    if (boundary === "later duplicate write") s.secondEvents.push({ ...reference, sequence: 50 });
+    else s.secondEvents.unshift({ ...reference, sequence: 15, ...(boundary === "replaced draft action" ? { recordId: 999 } : {}) });
+    const result = await s.grade();
+    expect(result.turns.flatMap(turn => turn.checks).filter(check => !check.passed)).toEqual([]);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("passed");
+    expect(result.turns[1]!.evidence?.referenceActionSequence).toBe(30);
+  });
+
+  it.each(["no repair", "repair after Return"])("rejects a pre-retrieval reference with %s", async boundary => {
+    const s = scenario();
+    const reference = { ...s.secondEvents[1]! };
+    Object.assign(s.secondEvents[1]!, { sequence: 15 });
+    if (boundary === "repair after Return") s.secondEvents.push({ ...reference, sequence: 50 });
+    const result = await s.grade();
+    expect(result.turns[1]!.checks.find(check => check.name === "ack-retrieval-return-order")?.passed).toBe(false);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("failed");
+  });
+
+  it("requires complete audited reference provenance for search coverage", async () => {
+    const s = scenario();
+    Object.assign(s.secondEvents[1]!, { actionSourceNodeId: 999 });
+    const result = await s.grade();
+    expect(result.turns[1]!.checks.find(check => check.name === "typed-reference-target")?.passed).toBe(false);
+    expect(result.turns[1]!.capabilityCoverage?.[0]?.status).toBe("failed");
+  });
   it.each([[true, true], [false, false], [true, false], [false, true]])("accepts exact HTML target and successful search with temporal acknowledgements %s/%s", async (first, second) => {
     const result = await scenario(first, second).grade();
     expect(result.turns.flatMap(turn => turn.checks).filter(check => !check.passed)).toEqual([]);
