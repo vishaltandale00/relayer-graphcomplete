@@ -445,7 +445,20 @@ impl InteractionExecutionService {
             stop_before_native_execution(execution, &thread, &interaction, prepared, attempt).await;
             return;
         }
+        // Read the history again just before native work starts: provider admission can wait,
+        // for example on a reconnect, and a parallel run accepted meanwhile belongs in it. If the
+        // read fails, the snapshot taken before admission still grounds the run.
+        let started_history = execution
+            .product
+            .accepted_thread_history(thread.id, interaction.id)
+            .await
+            .ok();
         let command = CompleteInteraction {
+            thread_history: Some(
+                started_history
+                    .as_deref()
+                    .unwrap_or(thread_history.as_slice()),
+            ),
             execution_lease_id: admission
                 .as_ref()
                 .map(|admission| admission.execution_lease_id.as_str()),
