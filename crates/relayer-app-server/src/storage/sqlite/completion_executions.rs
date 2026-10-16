@@ -332,7 +332,7 @@ impl SqliteProductStore {
         let interaction = sqlx::query(
             "UPDATE interactions
              SET completion_status='accepted',completion_output_json=?1,completion_error=NULL
-             WHERE id=?2 AND graph_node_id=?3 AND completion_status='running'
+             WHERE id=?2 AND graph_node_id=?3 AND completion_status IN ('running','waiting_for_approval')
                AND harness_configuration_name=?4 AND harness_configuration_digest=?5
                AND effective_execution_digest=?6 AND effective_permission_receipt_json=?7",
         )

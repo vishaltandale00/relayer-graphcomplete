@@ -69,8 +69,8 @@ pub(crate) use context_drafts::{
     NodeContextDraftConfirmationError, NodeContextDraftConfirmationService,
 };
 pub(crate) use execution::{
-    InteractionExecutionService, RECONCILIATION_PENDING_PREFIX, record_background_failure,
-    validate_decision_resolution,
+    ApprovalRecorder, InteractionExecutionService, RECONCILIATION_PENDING_PREFIX,
+    persist_approval_snapshot, record_background_failure, validate_decision_resolution,
 };
 #[cfg(test)]
 pub(crate) use execution::{final_approval_acknowledgement, validate_approval_correlation};
