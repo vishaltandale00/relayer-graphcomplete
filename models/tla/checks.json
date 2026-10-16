@@ -43,7 +43,8 @@
       "HoldFromClick": "TRUE",
       "HoldUncertain": "TRUE",
       "RetireSuperseded": "TRUE",
-      "HandBackUncertain": "TRUE"
+      "HandBackUncertain": "TRUE",
+      "MessagesInParallel": "TRUE"
     },
     "composer-fixed": {
       "Threads": "{\"A\", \"B\"}",
@@ -57,7 +58,8 @@
       "HoldFromClick": "TRUE",
       "HoldUncertain": "TRUE",
       "RetireSuperseded": "TRUE",
-      "HandBackUncertain": "TRUE"
+      "HandBackUncertain": "TRUE",
+      "MessagesInParallel": "TRUE"
     },
     "composer-replay": {
       "Threads": "{\"A\", \"B\"}",
@@ -71,7 +73,23 @@
       "HoldFromClick": "TRUE",
       "HoldUncertain": "TRUE",
       "RetireSuperseded": "TRUE",
-      "HandBackUncertain": "TRUE"
+      "HandBackUncertain": "TRUE",
+      "MessagesInParallel": "TRUE"
+    },
+    "composer-replay-parallel": {
+      "Threads": "{\"A\", \"B\"}",
+      "MaxTurns": "3",
+      "MaxText": "3",
+      "MaxRev": "12",
+      "BackgroundRenders": "TRUE",
+      "CarryUnsentDraft": "TRUE",
+      "StableScopeRevision": "TRUE",
+      "OtherTurns": "TRUE",
+      "HoldFromClick": "TRUE",
+      "HoldUncertain": "TRUE",
+      "RetireSuperseded": "TRUE",
+      "HandBackUncertain": "TRUE",
+      "MessagesInParallel": "TRUE"
     },
     "inspector-today": {
       "Nodes": "{\"n1\", \"n2\"}",
@@ -153,30 +171,6 @@
       "StartupIsolatesProviders": "TRUE",
       "ForceStopsCancelledTurn": "TRUE"
     },
-    "codex-thread-today": {
-      "AllowSwitch": "TRUE",
-      "AllowCancel": "TRUE",
-      "LegacyState": "TRUE",
-      "CommitAtTurnStart": "TRUE",
-      "ThreadRecordsHome": "TRUE",
-      "BindToHome": "TRUE",
-      "RecoverMissingRollout": "TRUE",
-      "ForceForgets": "TRUE",
-      "CommitChecksForce": "TRUE",
-      "ForgetOnlyAfterTurnStart": "TRUE",
-      "StopForgetsPendingStart": "TRUE",
-      "ResetsVisible": "TRUE"
-    },
-    "prime-root-today": {
-      "CanForceClose": "TRUE",
-      "CanCrash": "FALSE",
-      "CanClose": "TRUE",
-      "ForcePersists": "TRUE",
-      "ForceShutdownForgets": "TRUE",
-      "ForgetOnlyRunning": "TRUE",
-      "ForceClosePersists": "TRUE",
-      "SessionScopedInstructions": "TRUE"
-    },
     "codex-auth": {},
     "lifecycle-today": {
       "MaxRt": "3",
@@ -206,7 +200,8 @@
       "RefusedLaunchFailsChild": "TRUE",
       "ChildrenOutsideRootGate": "TRUE",
       "ProductLeavesChildren": "TRUE",
-      "InvokesOutsideRootGate": "TRUE"
+      "InvokesOutsideRootGate": "TRUE",
+      "MessagesOutsideRootGate": "TRUE"
     },
     "readiness-repair-today": {
       "Providers": "{chatgpt, openrouter}",
@@ -228,6 +223,20 @@
       "ReleaseOnSettle": "TRUE",
       "ContextAtStart": "TRUE",
       "StartupInterruptsQueued": "TRUE"
+    },
+    "capacity-today": {
+      "Limit": "2",
+      "SameNode": "2",
+      "OwnNode": "2",
+      "Children": "1",
+      "MaxRestarts": "1",
+      "AtomicAdmission": "TRUE",
+      "ReleaseHandsSlot": "TRUE",
+      "Fifo": "TRUE",
+      "ChildrenUncounted": "TRUE",
+      "StartupInterruptsWaits": "TRUE",
+      "AtomicHandOff": "TRUE",
+      "WaitBehindWaiting": "TRUE"
     }
   },
   "checks": [
@@ -1446,12 +1455,24 @@
         "SettledRowIsTerminal",
         "StartupFailsActiveChildren",
         "SendNeverWaitsOnChild",
-        "OneHumanTurn",
+        "MessageNeverWaits",
         "ProductLeavesChildAlone",
         "InvokeNeverWaits"
       ],
       "expect": "pass",
-      "finding": "With every fix, a settled execution row has a terminal current and product row, and startup leaves no interrupted child active. The user can send whenever no message turn runs, two message turns never run at once, a run the user invokes never waits, and the product neither stops nor runs an agent's child."
+      "finding": "With every fix, a settled execution row has a terminal current and product row, and startup leaves no interrupted child active. A user's message never waits: not for the parent's turn, another message, the child or an invoked run. A run the user invokes never waits, and the product neither stops nor runs an agent's child."
+    },
+    {
+      "id": "launch-message-overlap",
+      "module": "CompletionLaunchWindows",
+      "preset": "launch-today",
+      "invariants": [
+        "OneMessageTurn"
+      ],
+      "expect": {
+        "violated": "OneMessageTurn"
+      },
+      "finding": "Reachability: the user's message runs beside the parent's message turn, so MessageNeverWaits is not vacuous."
     },
     {
       "id": "launch-liveness",
@@ -1588,8 +1609,7 @@
       },
       "invariants": [
         "TypeOK",
-        "SendNeverWaitsOnChild",
-        "OneHumanTurn"
+        "SendNeverWaitsOnChild"
       ],
       "expect": {
         "violated": "SendNeverWaitsOnChild"
@@ -1605,13 +1625,29 @@
       },
       "invariants": [
         "TypeOK",
-        "OneHumanTurn",
         "InvokeNeverWaits"
       ],
       "expect": {
         "violated": "InvokeNeverWaits"
       },
-      "finding": "Before the decision (#717), the gate counted a user's invoked run as the thread's one active turn: an invoke waited for the running message turn, and the next message waited for the invoke."
+      "finding": "Before the decision (#717), the gate counted a user's invoked run as a turn on the thread: a second invoke, and the next message, waited for the running invoke."
+    },
+    {
+      "id": "launch-message-gate-reverted",
+      "module": "CompletionLaunchWindows",
+      "preset": "launch-today",
+      "constants": {
+        "MessagesOutsideRootGate": "FALSE"
+      },
+      "invariants": [
+        "TypeOK",
+        "OneMessageTurn",
+        "MessageNeverWaits"
+      ],
+      "expect": {
+        "violated": "MessageNeverWaits"
+      },
+      "finding": "Before the decision (#719), the thread had one active message turn: the user's message was refused while the parent's turn or another message ran."
     },
     {
       "id": "launch-product-child-reverted",
@@ -1945,6 +1981,35 @@
       "finding": "Without handing it back, the text of a send lost to a network or server error stays stranded in its scope when an unrelated turn arrived while it was pending (review of #512, SCP-019)."
     },
     {
+      "id": "composer-parallel-messages",
+      "module": "TurnComposer",
+      "preset": "composer-today",
+      "invariants": [
+        "TypeOK",
+        "MessageNeverWaitsOnRun",
+        "UnsentDraftSurvives",
+        "SettlementClearsOnlySentText"
+      ],
+      "expect": "pass",
+      "finding": "Thread messages run in parallel (#719): a running turn never disables the prompt, and the server records a message beside it. Text typed and sent while a turn runs survives as before."
+    },
+    {
+      "id": "composer-message-gate-reverted",
+      "module": "TurnComposer",
+      "preset": "composer-today",
+      "constants": {
+        "MessagesInParallel": "FALSE"
+      },
+      "invariants": [
+        "TypeOK",
+        "MessageNeverWaitsOnRun"
+      ],
+      "expect": {
+        "violated": "MessageNeverWaitsOnRun"
+      },
+      "finding": "Decision (#719): with the one-message-turn gate restored, the prompt is disabled while the latest turn runs and the server refuses the next message."
+    },
+    {
       "id": "inspector-without-queue",
       "module": "NodeInspector",
       "preset": "inspector-today",
@@ -2039,385 +2104,6 @@
         "violated": "DropFitsNewLayout"
       },
       "finding": "Without fitting before the view is cached, leaving mid-drag after a layout change caches the unfitted camera, and returning restores it (review of #531)."
-    },
-    {
-      "id": "codex-thread-resumable",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "invariants": [
-        "TypeOK",
-        "NoDeadResume",
-        "ResumeOnlyMaterialized",
-        "NoKilledResume",
-        "NoNeedlessForget",
-        "NoSilentReset"
-      ],
-      "expect": "pass",
-      "finding": "A root turn never fails on a thread Codex cannot resume, never resumes a killed conversation, keeps resuming across providers that share a Codex home, and reports every reset (fixed; was: a provider switch or a Stop before turn/start pinned an unresumable thread, and every later root turn failed with \"no rollout found\", even across restart)."
-    },
-    {
-      "id": "codex-thread-home-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "ThreadRecordsHome": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "ResumeOnlyMaterialized"
-      ],
-      "expect": {
-        "violated": "ResumeOnlyMaterialized"
-      },
-      "finding": "Without a recorded binding, a follow-up in another Codex home resumes a thread that has no rollout there."
-    },
-    {
-      "id": "codex-thread-commit-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "CommitAtTurnStart": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "ResumeOnlyMaterialized"
-      ],
-      "expect": {
-        "violated": "ResumeOnlyMaterialized"
-      },
-      "finding": "Saving the thread when thread/start answers, not when turn/start is accepted, pins a thread a Stop left without a rollout."
-    },
-    {
-      "id": "codex-thread-recovery-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "RecoverMissingRollout": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoDeadResume"
-      ],
-      "expect": {
-        "violated": "NoDeadResume"
-      },
-      "finding": "Without the missing-rollout recovery, a thread saved by an earlier release that has no rollout in the turn's home fails the root turn."
-    },
-    {
-      "id": "codex-thread-force-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "ForceForgets": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoKilledResume"
-      ],
-      "expect": {
-        "violated": "NoKilledResume"
-      },
-      "finding": "If a force-stop or force shutdown keeps the saved thread, the next root turn resumes the conversation the killed turn may have left mid-write."
-    },
-    {
-      "id": "codex-thread-late-commit-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "CommitChecksForce": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoKilledResume"
-      ],
-      "expect": {
-        "violated": "NoKilledResume"
-      },
-      "finding": "If onTurnId saves a thread whose turn/start answer arrives after the force, the forced conversation is saved again and resumed."
-    },
-    {
-      "id": "codex-thread-forget-unwritten-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "ForgetOnlyAfterTurnStart": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoNeedlessForget"
-      ],
-      "expect": {
-        "violated": "NoNeedlessForget"
-      },
-      "finding": "If a force before turn/start also forgets the saved thread, the next root turn starts fresh although nothing wrote the thread."
-    },
-    {
-      "id": "codex-thread-home-binding-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "BindToHome": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoNeedlessForget"
-      ],
-      "expect": {
-        "violated": "NoNeedlessForget"
-      },
-      "finding": "Binding the thread to its provider definition instead of its Codex home drops native history when a follow-up moves between API-key providers that share Codex's default home (#584)."
-    },
-    {
-      "id": "codex-thread-stop-kill-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "StopForgetsPendingStart": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoKilledResume"
-      ],
-      "expect": {
-        "violated": "NoKilledResume"
-      },
-      "finding": "If a Stop that kills the app-server while turn/start is pending keeps the saved thread, the next root turn resumes a conversation the kill may have left mid-write."
-    },
-    {
-      "id": "codex-thread-silent-reset-reverted",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "constants": {
-        "ResetsVisible": "FALSE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoSilentReset"
-      ],
-      "expect": {
-        "violated": "NoSilentReset"
-      },
-      "finding": "Without the reset notice, a root turn silently starts a fresh thread after the previous native conversation was lost (#584)."
-    },
-    {
-      "id": "codex-thread-resume-witness",
-      "module": "HarnessCodexThread",
-      "preset": "codex-thread-today",
-      "invariants": [
-        "NeverResumes"
-      ],
-      "expect": {
-        "violated": "NeverResumes"
-      },
-      "finding": "Witness: a root turn really resumes a saved thread, so the resume properties are not vacuous."
-    },
-    {
-      "id": "prime-root-serialized",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanCrash": "TRUE"
-      },
-      "invariants": [
-        "TypeOK",
-        "NoChain",
-        "RootsSerialized"
-      ],
-      "expect": "pass",
-      "finding": "Root turns stay serialized, no chained acquisition starts, and two root natives never share a session, with close, force close and crashes."
-    },
-    {
-      "id": "prime-root-memory",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "invariants": [
-        "MemoryNeverTainted"
-      ],
-      "expect": "pass",
-      "finding": "While the harness is live it never pins or resumes a force-stopped root conversation."
-    },
-    {
-      "id": "prime-root-capture",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanForceClose": "FALSE"
-      },
-      "properties": [
-        "CapturedNotTainted"
-      ],
-      "expect": "pass",
-      "finding": "No state the host captures after a force-stop names the stopped session (fixed; was: a graceful close captured the state, a force-stop then fired, and the close persisted the stale capture)."
-    },
-    {
-      "id": "prime-root-capture-reverted",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanForceClose": "FALSE",
-        "ForcePersists": "FALSE"
-      },
-      "properties": [
-        "CapturedNotTainted"
-      ],
-      "expect": {
-        "violated": "CapturedNotTainted"
-      },
-      "finding": "Without recording at the force-stop, a close that captured before the force persists the stopped session."
-    },
-    {
-      "id": "prime-root-restart-close",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanForceClose": "FALSE"
-      },
-      "invariants": [
-        "RestartNotTainted"
-      ],
-      "expect": "pass",
-      "finding": "After a graceful close and restart, the restored session is never a force-stopped conversation (fixed)."
-    },
-    {
-      "id": "prime-root-restart-close-reverted",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanForceClose": "FALSE",
-        "ForcePersists": "FALSE"
-      },
-      "invariants": [
-        "RestartNotTainted"
-      ],
-      "expect": {
-        "violated": "RestartNotTainted"
-      },
-      "finding": "Without recording at the force-stop, a turn force-stopped after close persisted is restored after the restart."
-    },
-    {
-      "id": "prime-root-force-close",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "invariants": [
-        "RestartNotTainted",
-        "NoNeedlessForget"
-      ],
-      "expect": "pass",
-      "finding": "Quitting while a root turn runs (force close) does not leave the killed conversation resumable after the restart, and an idle root session, or one a root turn is still acquiring, is kept (fixed; was: force shutdown kept the root session and nothing persisted the change)."
-    },
-    {
-      "id": "prime-root-force-close-forget-reverted",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "ForceShutdownForgets": "FALSE"
-      },
-      "invariants": [
-        "RestartNotTainted"
-      ],
-      "expect": {
-        "violated": "RestartNotTainted"
-      },
-      "finding": "If force shutdown keeps the root session, force close persists the killed conversation and the restart resumes it."
-    },
-    {
-      "id": "prime-root-force-close-persist-reverted",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "ForceClosePersists": "FALSE"
-      },
-      "invariants": [
-        "RestartNotTainted"
-      ],
-      "expect": {
-        "violated": "RestartNotTainted"
-      },
-      "finding": "If force close does not persist, the previously saved killed conversation is resumed after the restart."
-    },
-    {
-      "id": "prime-root-forget-running-reverted",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "ForgetOnlyRunning": "FALSE"
-      },
-      "invariants": [
-        "NoNeedlessForget"
-      ],
-      "expect": {
-        "violated": "NoNeedlessForget"
-      },
-      "finding": "If force shutdown forgets the root session whenever a root turn is in flight, a force close during that turn's session acquisition forgets a session nothing ran on."
-    },
-    {
-      "id": "prime-root-keep-witness",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "invariants": [
-        "NeverKeptAcrossForceClose"
-      ],
-      "expect": {
-        "violated": "NeverKeptAcrossForceClose"
-      },
-      "finding": "Witness: an idle root session survives a force close and the restart, so NoNeedlessForget is not vacuous."
-    },
-    {
-      "id": "prime-root-crash",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanForceClose": "FALSE",
-        "CanClose": "FALSE",
-        "CanCrash": "TRUE"
-      },
-      "invariants": [
-        "RestartNotTainted"
-      ],
-      "expect": {
-        "violated": "RestartNotTainted"
-      },
-      "finding": "Open, narrowed: a crash after a per-turn force-stop but before its state write lands restores the stopped conversation. The write now starts when the force fires rather than when the host run ends."
-    },
-    {
-      "id": "prime-root-instructions",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "invariants": [
-        "RootSessionHasOwnInstructions"
-      ],
-      "expect": "pass",
-      "finding": "A running root turn's session carries its own pinned version's presentation instructions (fixed; was: a rotated session was built from the shared loader's stale cache, PPG-003)."
-    },
-    {
-      "id": "prime-root-instructions-reverted",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "SessionScopedInstructions": "FALSE"
-      },
-      "invariants": [
-        "RootSessionHasOwnInstructions"
-      ],
-      "expect": {
-        "violated": "RootSessionHasOwnInstructions"
-      },
-      "finding": "With one shared loader cache that only reload() refreshes, a rotated root session runs with the previous version's instructions."
-    },
-    {
-      "id": "prime-root-liveness",
-      "module": "HarnessPrimeRoot",
-      "preset": "prime-root-today",
-      "constants": {
-        "CanForceClose": "FALSE",
-        "CanClose": "FALSE"
-      },
-      "fair": true,
-      "properties": [
-        "ForcedReleasesLock"
-      ],
-      "expect": "pass",
-      "finding": "A force-stopped root turn's host run always ends and frees the session lock, even when its native turn never settles."
     },
     {
       "id": "codex-auth-safety",
@@ -3136,6 +2822,185 @@
         "violated": "QueuedHasRunAhead"
       },
       "finding": "Without the startup step, a run queued at a restart stays queued behind a run that no longer exists, and nothing ever starts it."
+    },
+    {
+      "id": "capacity-safety",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "invariants": [
+        "TypeOK",
+        "WithinLimit",
+        "NoIdleSlotWhileWaiting",
+        "WaitIsLive",
+        "OneRunPerNode",
+        "ChildrenNeverWait"
+      ],
+      "properties": [
+        "StartsInOrder",
+        "NoStartAheadOfWaiting"
+      ],
+      "expect": "pass",
+      "finding": "Executing human-started runs never exceed the limit. Runs waiting for capacity start first in, first out by when they began to wait, and no new run starts while another waits. No run waits while a slot is idle, every waiting run is in the live wait, runs on one node still run one at a time, and a child never waits for capacity. Across a restart, no run stays queued for a slot."
+    },
+    {
+      "id": "capacity-children-beside-full",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "invariants": [
+        "ChildNeverBesideFullCapacity"
+      ],
+      "expect": {
+        "violated": "ChildNeverBesideFullCapacity"
+      },
+      "finding": "Reachability: an agent's child runs while human-started runs fill every slot."
+    },
+    {
+      "id": "capacity-both-waits",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "invariants": [
+        "NeverWaitsForBoth"
+      ],
+      "expect": {
+        "violated": "NeverWaitsForBoth"
+      },
+      "finding": "Reachability: one run waits behind a run on its node, then takes its node and waits for capacity."
+    },
+    {
+      "id": "capacity-liveness",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0"
+      },
+      "fair": true,
+      "properties": [
+        "WaitingRunsStart"
+      ],
+      "expect": "pass",
+      "finding": "Without a restart, every run waiting for capacity that the user does not remove starts."
+    },
+    {
+      "id": "capacity-restart-liveness",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "fair": true,
+      "properties": [
+        "WaitingRunsLeaveTheWait"
+      ],
+      "expect": "pass",
+      "finding": "Across a restart, every run waiting for capacity leaves the wait: it starts, is removed, or is interrupted at startup.",
+      "constants": {
+        "Limit": "1"
+      }
+    },
+    {
+      "id": "capacity-race-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "AtomicAdmission": "FALSE"
+      },
+      "invariants": [
+        "WithinLimit"
+      ],
+      "expect": {
+        "violated": "WithinLimit"
+      },
+      "finding": "Without the lock, two runs racing for the last slot both see it free and both start, exceeding the limit."
+    },
+    {
+      "id": "capacity-fifo-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "Fifo": "FALSE"
+      },
+      "properties": [
+        "StartsInOrder"
+      ],
+      "expect": {
+        "violated": "StartsInOrder"
+      },
+      "finding": "A released slot that may pass to any waiting run starts a later run before an earlier one."
+    },
+    {
+      "id": "capacity-jump-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "AtomicHandOff": "FALSE",
+        "WaitBehindWaiting": "FALSE"
+      },
+      "properties": [
+        "NoStartAheadOfWaiting"
+      ],
+      "expect": {
+        "violated": "NoStartAheadOfWaiting"
+      },
+      "finding": "With the slot hand-off split from its release and no check that a run waits, a new run arriving as a slot frees takes it ahead of a run that already waits."
+    },
+    {
+      "id": "capacity-jump-guarded",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "AtomicHandOff": "FALSE"
+      },
+      "properties": [
+        "NoStartAheadOfWaiting",
+        "StartsInOrder"
+      ],
+      "expect": "pass",
+      "finding": "Even with the hand-off split from its release, admission's check that no run waits keeps a new run behind the waiting ones, and order holds."
+    },
+    {
+      "id": "capacity-release-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "ReleaseHandsSlot": "FALSE"
+      },
+      "invariants": [
+        "NoIdleSlotWhileWaiting"
+      ],
+      "expect": {
+        "violated": "NoIdleSlotWhileWaiting"
+      },
+      "finding": "A settled run that only frees its slot leaves the runs waiting for capacity queued beside an idle slot."
+    },
+    {
+      "id": "capacity-children-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "ChildrenUncounted": "FALSE"
+      },
+      "invariants": [
+        "ChildrenNeverWait"
+      ],
+      "expect": {
+        "violated": "ChildrenNeverWait"
+      },
+      "finding": "Counting an agent's children would make a child wait for capacity behind human-started runs, a recursion scheduler that decision 5 (#716) rules out."
+    },
+    {
+      "id": "capacity-restart-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "StartupInterruptsWaits": "FALSE"
+      },
+      "invariants": [
+        "WaitIsLive"
+      ],
+      "expect": {
+        "violated": "WaitIsLive"
+      },
+      "finding": "Without the startup step, a run that waited for capacity at a restart stays queued for a slot that no live wait will ever pass it."
     }
   ]
 }

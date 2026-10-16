@@ -6,8 +6,8 @@ import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessConfiguration, HarnessRunContext } from "../src/types.js";
 
-// PPG-003 with the real Prime SDK and no inference: every new native session, root or
-// invoked child, is built with its own interaction's native presentation instructions.
+// PPG-003 with the real Prime SDK and no inference: every run, root or invoked child, gets a
+// new native session built with its own interaction's native presentation instructions.
 // The turns carry no admitted model family, so each one stops right after its session
 // is acquired, before any prompt or provider request.
 
@@ -50,28 +50,17 @@ it("builds each new Prime session with its own interaction's native presentation
   const acquire = (context: HarnessRunContext) => expect(harness.complete(context)).rejects.toThrow("admitted model family");
   const instructed = (session: NativeSession | undefined) => session!.systemPrompt.includes(marker);
   try {
-    // The neutral first root turn keeps the initial session.
+    // Creating the harness creates no session (#719): each run creates its own.
+    expect(sessions).toHaveLength(0);
     await acquire(turn(1, "root", false));
-    expect(sessions.map(instructed)).toEqual([false]);
-
-    // A newly pinned version rotates the root session; the new session carries its guidance.
     await acquire(turn(2, "root", true));
-    expect(sessions.map(instructed)).toEqual([false, true]);
-
-    // Invoked children are built from their own pins, not from whatever the root saw last.
+    // Invoked children are built from their own pins, not from whatever another run saw.
     await acquire(turn(3, "invoke", true));
     await acquire(turn(4, "invoke", false));
-    expect(sessions.map(instructed)).toEqual([false, true, true, false]);
-
-    // A neutral child does not change the root session's guidance, even when it rebuilds.
-    await sessions[1]!.reload();
-    expect(instructed(sessions[1])).toBe(true);
+    // A root run never inherits an earlier root run's session or guidance.
     await acquire(turn(5, "root", true));
-    expect(sessions).toHaveLength(4);
-
-    // Changing back to neutral rotates again and removes the guidance.
     await acquire(turn(6, "root", false));
-    expect(sessions.map(instructed)).toEqual([false, true, true, false, false]);
+    expect(sessions.map(instructed)).toEqual([false, true, true, false, true, false]);
   } finally {
     await harness.dispose().catch(() => undefined);
     vi.unstubAllEnvs();

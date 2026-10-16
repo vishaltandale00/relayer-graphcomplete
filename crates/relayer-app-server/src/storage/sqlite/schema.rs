@@ -521,6 +521,22 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
             "table node_runs is missing its positive node id check",
         ));
     }
+    // The runs waiting for capacity (#720).
+    validate_columns(
+        pool,
+        "run_capacity_waits",
+        &[("interaction_id", "INTEGER", false, 1)],
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "run_capacity_waits",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
     validate_columns(pool, "interactions", INTERACTION_COLUMNS).await?;
     validate_columns(
         pool,
@@ -1500,6 +1516,37 @@ mod tests {
                     Err(crate::storage::StorageError::IncompatibleSchema(_))
                 ),
                 "reopened with node_runs as {replacement:?}"
+            );
+        }
+    }
+
+    /// The capacity-wait table (#720) is part of the reopen check too.
+    #[tokio::test]
+    async fn run_capacity_waits_table_is_validated_on_reopen() {
+        for replacement in [
+            None,
+            Some("CREATE TABLE run_capacity_waits (interaction_id INTEGER)"),
+            Some("CREATE TABLE run_capacity_waits (interaction_id INTEGER PRIMARY KEY)"),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = directory.path().join("schema.sqlite3");
+            let store = SqliteProductStore::open(&database).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::query("DROP TABLE run_capacity_waits")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            if let Some(table) = replacement {
+                sqlx::query(table).execute(&mut *connection).await.unwrap();
+            }
+            drop(connection);
+            store.pool.close().await;
+            assert!(
+                matches!(
+                    SqliteProductStore::open(&database).await,
+                    Err(crate::storage::StorageError::IncompatibleSchema(_))
+                ),
+                "reopened with run_capacity_waits as {replacement:?}"
             );
         }
     }

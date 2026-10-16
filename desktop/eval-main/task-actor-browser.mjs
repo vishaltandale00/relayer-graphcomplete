@@ -4,11 +4,13 @@ import { randomUUID } from "node:crypto";
 import { createHumanTaskSurface } from "./web-host.mjs";
 
 // Self-contained because Playwright serializes this production predicate.
-export function taskActorPresentationReady({ expected, presentation = globalThis.window?.__taskActorPresentation }) {
-  const { threadId, turnId, submittedAt } = expected;
-  return String(presentation?.threadId) === String(threadId) && String(presentation?.turnId) === String(turnId)
-    && presentation.observedAt >= submittedAt
-    && (expected.attemptId == null || String(presentation.attemptId) === String(expected.attemptId))
+export function taskActorPresentationReady({ expected, presentation = globalThis.window?.__taskActorPresentation, capturedAt }) {
+  const sameTurn = target => String(presentation?.turnId) === String(target.turnId)
+    && (target.attemptId == null || String(presentation.attemptId) === String(target.attemptId));
+  const source = expected.invokeSource;
+  return String(presentation?.threadId) === String(expected.threadId)
+    && ((sameTurn(expected) && presentation.observedAt >= expected.submittedAt)
+      || (source != null && sameTurn(source) && Number.isFinite(capturedAt) && capturedAt >= source.observedAfter))
     && (["accepted", "failed", "stopped"].includes(presentation.completionStatus)
       || (presentation.completionStatus === "not_started" && presentation.attemptOutcome === "model_failed"));
 }
@@ -229,7 +231,23 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
     let controlIdentities = new Map();
     async function observe(expected, working = false) {
       signal?.throwIfAborted();
-      if (expected) await page.waitForFunction(taskActorPresentationReady, { expected }, { timeout: 30000 });
+      let capture;
+      const scope = p => JSON.stringify([p?.threadId, p?.turnId, p?.layerId, p?.attemptId, p?.selectedNodeId, p?.navigationPath]);
+      if (expected?.invokeSource) {
+        const deadline = Date.now() + 30000;
+        do {
+          signal?.throwIfAborted();
+          // A source can remain visually identical after an invoke settles.
+          // Capture its real after-paint state; never forge renderer observedAt.
+          capture = await page.evaluate(async () => {
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            return { presentation: window.__taskActorPresentation, capturedAt: Date.now() };
+          });
+          if (taskActorPresentationReady({ expected, ...capture })) break;
+          if (Date.now() >= deadline) throw Object.assign(new Error("Actor presentation did not become ready."), { name: "TimeoutError" });
+          await new Promise(resolve => setTimeout(resolve, 50));
+        } while (true);
+      } else if (expected) await page.waitForFunction(taskActorPresentationReady, { expected }, { timeout: 30000 });
       for (const handle of handles.values()) await handle.dispose();
       handles = new Map();
       controlIdentities = new Map();
@@ -301,6 +319,9 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         }
         await elements.dispose();
         const screenshot = (await page.screenshot({ type: "png" })).toString("base64");
+        if (capture && scope(await page.evaluate(() => window.__taskActorPresentation)) !== scope(capture.presentation)) {
+          throw Object.assign(new Error("Actor presentation changed during capture."), { code: "actor_control_unavailable", actionDispatched: false });
+        }
         return { text, controls, screenshot };
       } finally { await snapshot.dispose(); }
     }

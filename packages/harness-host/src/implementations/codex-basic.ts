@@ -4,15 +4,10 @@ import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { type GraphCapability, type GraphNode } from "@relayer/graph-client";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, unlink, writeFile } from "node:fs/promises";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
 import { grantsGraphSearch } from "../configuration.js";
 import { INTERACTION_INPUT_GUIDANCE, INVOCATION_PUBLICATION_GUIDANCE, SUBCOMPLETION_INTEGRATION_GUIDANCE, renderInteractionInput, renderThreadHistory } from "../interaction-input.js";
-import {
-  parseNativeSessionResetReason,
-  reportNativeSessionReset,
-  type NativeSessionResetReason,
-} from "../native-session-reset.js";
 import { redactTraceData } from "../trace.js";
 import { CURRENT_COMMUNICATION_GUIDANCE_JS, CURRENT_WORKSPACE_GUIDANCE, currentCommunicationAuthoringRecipeJs, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE } from "./graph-presentation-guidance.js";
 import { ARTIFACT_LAYER_GUIDANCE } from "./artifact-layer-guidance.js";
@@ -60,19 +55,6 @@ const CODEX_MANAGED_RUNTIME_ENVIRONMENT = new Set([
 ]);
 const CODEX_BASIC_SECRET_ADAPTERS = new Set(["openai-api", "openrouter", "vercel-ai-router"]);
 const CODEX_BASIC_ADAPTERS = new Set(["codex-subscription", ...CODEX_BASIC_SECRET_ADAPTERS]);
-/** The stable name recorded for Codex's default home, used when a turn sets no CODEX_HOME. */
-const CODEX_DEFAULT_HOME = "codex-default-home";
-
-/**
- * The Codex home a turn's app-server reads and writes rollouts in. A thread resumes only in the
- * home holding its rollout. The configured path is recorded as given, so it stays the same
- * across restarts; a turn without CODEX_HOME uses Codex's default home.
- */
-function codexHomeOf(environment: Readonly<Record<string, string>>): string {
-  const home = environment.CODEX_HOME;
-  return home === undefined || home === "" ? CODEX_DEFAULT_HOME : home;
-}
-
 // Codex authenticates an API-key provider from CODEX_HOME/auth.json. The
 // OPENAI_API_KEY environment variable alone is not honored by the managed Codex
 // runtime (requests go out with no bearer). Write the selected provider's key
@@ -170,7 +152,6 @@ interface CodexBasicConfiguration {
   readonly webSearchMode?: CodexWebSearchMode;
   readonly skipGitRepoCheck?: boolean;
   readonly additionalDirectories?: readonly string[];
-  readonly rootSessionMode?: "resume" | "fresh";
 }
 
 interface ResolvedCodexConfiguration {
@@ -206,6 +187,12 @@ interface NormalizedCollaborationItem {
   readonly status?: "in_progress" | "completed" | "failed";
 }
 
+/**
+ * Every turn, root or invoked, starts a fresh Codex thread in its own app-server process and
+ * never resumes one (#719). A thread's runs may overlap, so there is no root conversation to
+ * continue: a root run finds the thread's earlier turns through the graph pointers in its
+ * prompt's thread history.
+ */
 export class CodexBasicHarness implements Harness {
   readonly supportsInvokedComplete = true;
   /** Each turn runs in its own app-server process group, so a force-stop ends only that turn. */
@@ -213,50 +200,15 @@ export class CodexBasicHarness implements Harness {
   private readonly clientModuleUrl: string;
   private readonly completeModuleUrl: string;
   private readonly resolved: ResolvedCodexConfiguration;
-  private codexThreadId: string | undefined;
-  private codexSessionIdentity: string | undefined;
-  private codexThreadPersonalPresentationVersionId: number | null | undefined;
-  /**
-   * The Codex home holding the thread's rollout. Undefined only for a thread saved by an earlier
-   * release: it is still offered for resume, binds to the home it resumes in, and a missing
-   * rollout starts a fresh thread instead.
-   */
-  private codexThreadHome: string | undefined;
-  /**
-   * Why the root thread was dropped, until the next root turn that starts fresh reports it.
-   * It is saved with the state, so the notice survives a restart.
-   */
-  private pendingRootReset: NativeSessionResetReason | undefined;
-  /** Each running turn's force controller, with the step that forgets its root thread. */
-  private readonly activeForceShutdowns = new Map<AbortController, () => void>();
+  /** Each running turn's own force controller. */
+  private readonly activeForceShutdowns = new Set<AbortController>();
 
+  /** Saved state from a release that resumed root threads is ignored, never resumed. */
   constructor(private readonly context: HarnessFactoryContext, private readonly dependencies: CodexBasicDependencies = {}) {
-    const resolved = parseCodexBasicConfiguration(context);
-    this.resolved = resolved;
+    this.resolved = parseCodexBasicConfiguration(context);
     this.clientModuleUrl = dependencies.clientModuleUrl ?? import.meta.resolve("@relayer/graph-client");
     this.completeModuleUrl = dependencies.completeModuleUrl ?? new URL("../../../../dist/index.js", import.meta.url).href;
     validateBrowserMcpRuntime(dependencies.browserMcpRuntime);
-    const codexThreadId = context.savedState?.codexThreadId;
-    const savedPresentationVersionId = context.savedState?.codexThreadPersonalPresentationVersionId;
-    const savedHome = context.savedState?.codexThreadHome;
-    const validSavedPresentationVersion = savedPresentationVersionId === undefined
-      || savedPresentationVersionId === null
-      || (typeof savedPresentationVersionId === "number"
-        && Number.isSafeInteger(savedPresentationVersionId)
-        && savedPresentationVersionId > 0);
-    if (typeof codexThreadId === "string" && !validSavedPresentationVersion) throw new Error("Legacy native history has an invalid presentation pin; its saved state was preserved.");
-    const validSavedHome = savedHome === undefined || (typeof savedHome === "string" && savedHome !== "");
-    if (typeof codexThreadId === "string" && !validSavedHome) throw new Error("Legacy native history has an invalid storage identity; its saved state was preserved.");
-    if (resolved.settings.rootSessionMode === "fresh") return;
-    this.pendingRootReset = parseNativeSessionResetReason(context.savedState?.codexRootResetReason);
-    if (typeof codexThreadId === "string" && validSavedPresentationVersion && validSavedHome) {
-      this.codexThreadId = codexThreadId;
-      if (typeof context.savedState?.codexSessionIdentity === "string") this.codexSessionIdentity = context.savedState.codexSessionIdentity;
-      this.codexThreadPersonalPresentationVersionId = savedPresentationVersionId;
-      this.codexThreadHome = savedHome;
-    } else if (typeof codexThreadId === "string") {
-      this.pendingRootReset = "session_unavailable";
-    }
   }
 
   complete(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
@@ -265,45 +217,26 @@ export class CodexBasicHarness implements Harness {
         "codex.basic invoked completion requires an explicitly admitted model and execution-scoped access",
       )));
     }
-    return this.executionHandle(context, context.origin.kind, signal);
+    return this.executionHandle(context, signal);
   }
 
-  private executionHandle(
-    context: HarnessRunContext,
-    kind: "root" | "invoke",
-    signal?: AbortSignal,
-  ): NativeExecutionHandle {
+  private executionHandle(context: HarnessRunContext, signal?: AbortSignal): NativeExecutionHandle {
     let resolveAttached!: (identity: JsonObject) => void;
     let rejectAttached!: (error: unknown) => void;
     const attached = new Promise<JsonObject>((resolve, reject) => {
       resolveAttached = resolve;
       rejectAttached = reject;
     });
-    const execution = this.execute(context, kind, resolveAttached, signal);
+    const execution = this.execute(context, resolveAttached, signal);
     void execution.catch(rejectAttached);
     return nativeExecutionHandle(execution, undefined, attached);
   }
 
   private async execute(
     context: HarnessRunContext,
-    kind: "root" | "invoke",
     attach: (identity: JsonObject) => void,
     signal?: AbortSignal,
   ): Promise<void> {
-    const personalPresentationVersionId = context.personalPresentation?.attachment.versionInteractionNodeId ?? null;
-    // A fresh root run starts its own Codex thread and leaves the thread's root conversation alone.
-    const persistentRootSession = kind === "root"
-      && this.resolved.settings.rootSessionMode !== "fresh"
-      && context.nativeSession !== "fresh";
-    if (kind === "root" && context.requireNativeContinuity && (!persistentRootSession || this.codexThreadId === undefined)) {
-      throw new Error("This conversation's native history is unavailable. Continuing with a fresh session would lose context; its saved history was preserved.");
-    }
-    if (persistentRootSession && this.codexThreadId !== undefined
-      && this.codexThreadPersonalPresentationVersionId !== personalPresentationVersionId
-      && !(context.requireNativeContinuity && this.codexThreadPersonalPresentationVersionId === undefined)) {
-      if (context.requireNativeContinuity) throw new Error("This conversation's native history cannot be reused with the changed presentation settings. Its history was preserved.");
-      this.forgetRootThread("presentation_changed");
-    }
     this.selectedModel(context);
     if (context.model !== undefined && context.access === undefined) {
       throw new Error("codex.basic requires execution-scoped access for the selected provider");
@@ -313,25 +246,6 @@ export class CodexBasicHarness implements Harness {
     // A turn force-stopped while resolving its runtime no longer holds access: write nothing.
     context.forceSignal?.throwIfAborted();
     const environment = this.graphEnvironment(capability, context.completionBroker, context.access, resolvedRuntime.environment);
-    const sessionIdentity = createHash("sha256").update(JSON.stringify({
-      providerId: context.access?.providerId ?? null,
-      adapterId: context.access?.adapterId ?? null,
-      kind: context.access?.kind ?? null,
-      endpoint: context.access?.kind === "secret" ? context.access.endpoint : null,
-      home: resolve(environment.CODEX_HOME || join(environment.HOME || process.env.HOME || this.context.workingDirectory, ".codex")),
-    })).digest("hex");
-    if (context.requireNativeContinuity && persistentRootSession && this.codexThreadId !== undefined && this.codexSessionIdentity !== undefined && this.codexSessionIdentity !== sessionIdentity) {
-      throw new Error("This conversation's provider or native session location changed. Its original history was preserved; this route cannot continue it.");
-    }
-    const codexHome = codexHomeOf(environment);
-    // A thread resumes only in the Codex home holding its rollout. Providers that share a home,
-    // such as API-key providers in Codex's default home, keep resuming it. This decides only
-    // resumption for the provider the product selected, never which providers it may select.
-    if (persistentRootSession && this.codexThreadId !== undefined
-      && this.codexThreadHome !== undefined && this.codexThreadHome !== codexHome) {
-      if (context.requireNativeContinuity) throw new Error("This conversation's native session location changed. Its saved history was preserved.");
-      this.forgetRootThread("home_changed");
-    }
     let authHome: string | undefined;
     try {
       if (context.access?.kind === "secret") {
@@ -349,12 +263,7 @@ export class CodexBasicHarness implements Harness {
           });
         }
       }
-      await this.runCodexTurn(context, attach, signal, environment, resolvedRuntime.executable, {
-        persistentRootSession,
-        personalPresentationVersionId,
-        codexHome,
-        sessionIdentity,
-      });
+      await this.runCodexTurn(context, attach, signal, environment, resolvedRuntime.executable);
     } finally {
       if (authHome !== undefined) {
         await releaseCodexApiKeyAuth(
@@ -371,14 +280,7 @@ export class CodexBasicHarness implements Harness {
     signal: AbortSignal | undefined,
     environment: Record<string, string>,
     executable: string,
-    rootThread: {
-      readonly persistentRootSession: boolean;
-      readonly personalPresentationVersionId: number | null;
-      readonly codexHome: string;
-      readonly sessionIdentity: string;
-    },
   ): Promise<void> {
-    const { persistentRootSession } = rootThread;
     const sandboxPolicy = this.sandboxPolicy();
     const run = this.dependencies.runAppServerTurn ?? runCodexAppServerTurn;
     const model = this.selectedModel(context);
@@ -395,36 +297,17 @@ export class CodexBasicHarness implements Harness {
     };
     // The host's per-turn force-stop kills this turn's app-server process group, exactly as a
     // harness force shutdown does, and no other turn's. A turn force-stopped before it spawns
-    // never spawns. A root turn killed either way after it sent turn/start also drops its
-    // native thread: the killed process may have left it mid-write, so the next root turn
-    // starts a fresh one. Killed before turn/start, it wrote nothing, so the thread is kept.
+    // never spawns. No other turn continues this turn's thread, so a kill loses nothing else.
     context.forceSignal?.throwIfAborted();
     const forceShutdown = new AbortController();
-    let conversationStarted = false;
-    const forgetForcedRootThread = () => {
-      if (persistentRootSession && conversationStarted) this.forgetRootThread("force_stopped");
-    };
-    const forceTurn = () => {
-      forgetForcedRootThread();
-      forceShutdown.abort(context.forceSignal?.reason);
-    };
+    const forceTurn = () => forceShutdown.abort(context.forceSignal?.reason);
     context.forceSignal?.addEventListener("abort", forceTurn, { once: true });
-    this.activeForceShutdowns.set(forceShutdown, forgetForcedRootThread);
-    if (persistentRootSession && this.codexThreadId === undefined && this.pendingRootReset !== undefined) {
-      reportNativeSessionReset(context, "Codex", this.context.threadId, this.pendingRootReset);
-      this.pendingRootReset = undefined;
-    }
+    this.activeForceShutdowns.add(forceShutdown);
     try {
       await run({
         environment,
         codexPathOverride: executable,
-        requireNativeContinuity: persistentRootSession && context.requireNativeContinuity === true,
         ...this.codexConfigOverrides(context.access),
-        ...(persistentRootSession && this.codexThreadId !== undefined
-          ? { savedThreadId: this.codexThreadId }
-          : {}),
-        ...(persistentRootSession && context.requireNativeContinuity && this.codexSessionIdentity === undefined
-          ? { legacyHistoryAnchor: context.nativeHistoryAnchor ?? { interactionNodeId: -1, message: "" } } : {}),
         threadParams: this.threadParams(model, context, context.access),
         turnParams: this.turnParams(sandboxPolicy, model),
         prompt,
@@ -437,32 +320,7 @@ export class CodexBasicHarness implements Harness {
         ...(signal === undefined ? {} : { signal }),
         forceSignal: forceShutdown.signal,
         ...(this.dependencies.spawnProcess === undefined ? {} : { spawnProcess: this.dependencies.spawnProcess }),
-        // A thread gets its rollout only once turn/start is accepted. Until then, a stopped
-        // turn leaves nothing that Codex could resume, so the thread is not kept.
-        onThreadId: (threadId) => {
-          if (context.requireNativeContinuity && persistentRootSession && this.codexThreadId !== threadId) throw new Error("Native resume returned a different conversation. The original history was preserved.");
-        },
-        onTurnStarting: () => { conversationStarted = true; },
-        onSavedThreadUnavailable: (threadId) => {
-          if (!persistentRootSession || this.codexThreadId !== threadId) return;
-          if (context.requireNativeContinuity) throw new Error("The saved native conversation is unavailable. Its original history was preserved; no fresh turn was started.");
-          this.forgetRootThread("no_rollout");
-          reportNativeSessionReset(context, "Codex", this.context.threadId, "no_rollout");
-          this.pendingRootReset = undefined;
-        },
-        // A Stop that lands while turn/start is pending kills the app-server, which may have
-        // left the thread mid-write, as a force-stop does.
-        onTurnStartAbandoned: () => {
-          if (persistentRootSession && !forceShutdown.signal.aborted) this.forgetRootThread("stopped_during_start");
-        },
         onTurnId: (threadId, turnId) => {
-          if (persistentRootSession && !forceShutdown.signal.aborted) {
-            this.codexThreadId = threadId;
-            this.codexThreadPersonalPresentationVersionId = rootThread.personalPresentationVersionId;
-            this.codexThreadHome = rootThread.codexHome;
-            this.codexSessionIdentity = rootThread.sessionIdentity;
-            this.pendingRootReset = undefined;
-          }
           attach(Object.freeze({
             schemaVersion: 1,
             provider: "codex",
@@ -474,8 +332,6 @@ export class CodexBasicHarness implements Harness {
         onServerRequest: (method, params) => traceCodexAppServerNotification(context, method, params, traceState),
       });
     } finally {
-      // Nothing is forgotten here: forceTurn already did, and a later root turn may have
-      // stored its own thread by the time this killed turn settles.
       context.forceSignal?.removeEventListener("abort", forceTurn);
       this.activeForceShutdowns.delete(forceShutdown);
       closeIncompleteCollaborationSpans(traceState);
@@ -495,34 +351,15 @@ export class CodexBasicHarness implements Harness {
     };
   }
 
+  /** No turn leaves anything to resume, so there is no harness state to save. */
   state(): HarnessSessionState {
-    const reset = this.pendingRootReset === undefined ? {} : { codexRootResetReason: this.pendingRootReset };
-    return this.codexThreadId === undefined
-      ? reset
-      : {
-          codexThreadId: this.codexThreadId,
-          ...(this.codexSessionIdentity === undefined ? {} : { codexSessionIdentity: this.codexSessionIdentity }),
-          ...(this.codexThreadHome === undefined ? {} : { codexThreadHome: this.codexThreadHome }),
-          ...reset,
-          ...(this.codexThreadPersonalPresentationVersionId === undefined ? {} : { codexThreadPersonalPresentationVersionId: this.codexThreadPersonalPresentationVersionId }),
-        };
+    return {};
   }
 
   forceShutdown(): void {
-    for (const [shutdown, forgetForcedRootThread] of this.activeForceShutdowns) {
-      // A turn already force-stopped forgot its thread then; a later root turn may own one now.
-      if (shutdown.signal.aborted) continue;
-      forgetForcedRootThread();
-      shutdown.abort(new Error("Codex harness force-disposed"));
+    for (const shutdown of this.activeForceShutdowns) {
+      if (!shutdown.signal.aborted) shutdown.abort(new Error("Codex harness force-disposed"));
     }
-  }
-
-  private forgetRootThread(reason: NativeSessionResetReason): void {
-    this.codexSessionIdentity = undefined;
-    this.codexThreadId = undefined;
-    this.codexThreadPersonalPresentationVersionId = undefined;
-    this.codexThreadHome = undefined;
-    this.pendingRootReset = reason;
   }
 
   private graphEnvironment(
@@ -1417,6 +1254,19 @@ function optionalJsonValue(value: JsonValue | undefined): JsonValue | undefined 
   return value;
 }
 
+/**
+ * Every root turn starts a fresh Codex thread (#719). Configurations written before that may
+ * still say `fresh`, which is now the only behavior; `resume` asks for something that no
+ * longer exists.
+ */
+function parseRootSessionMode(value: unknown): void {
+  if (value === undefined || value === "fresh") return;
+  if (value === "resume") {
+    throw new Error("codex.basic rootSessionMode \"resume\" is retired: every root run starts a fresh Codex thread (#719). Remove the setting or set it to \"fresh\".");
+  }
+  throw new Error("codex.basic rootSessionMode must be \"fresh\"");
+}
+
 function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedCodexConfiguration {
   const selected = context.configuration;
   if (selected.implementation !== CODEX_BASIC_KEY) {
@@ -1436,7 +1286,7 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
   const skipGitRepoCheck = optionalBoolean(configuration.skipGitRepoCheck, "skipGitRepoCheck");
   const additionalDirectories = optionalStringArray(configuration.additionalDirectories, "additionalDirectories");
   const promptProfile = optionalEnum(configuration.promptProfile, ["layered-navigation-v1", "layered-navigation-multi-agent-v1"] as const, "promptProfile");
-  const rootSessionMode = optionalEnum(configuration.rootSessionMode, ["resume", "fresh"] as const, "rootSessionMode");
+  parseRootSessionMode(configuration.rootSessionMode);
   optionalEnum(configuration.personalPresentationVersion, ["personal-presentation-v0", "personal-presentation-v1", "personal-presentation-v2", "personal-presentation-v3", "personal-presentation-v4", "personal-presentation-v6"] as const, "personalPresentationVersion");
   const permission = parseCodexPermissionBinding(context.permissionProfileId, context.permissionBinding);
 
@@ -1447,7 +1297,6 @@ function parseCodexBasicConfiguration(context: HarnessFactoryContext): ResolvedC
       ...(webSearchMode === undefined ? {} : { webSearchMode }),
       ...(skipGitRepoCheck === undefined ? {} : { skipGitRepoCheck }),
       ...(additionalDirectories === undefined ? {} : { additionalDirectories }),
-      ...(rootSessionMode === undefined ? {} : { rootSessionMode }),
     },
     permission,
     ...(promptProfile === undefined ? {} : { promptProfile }),

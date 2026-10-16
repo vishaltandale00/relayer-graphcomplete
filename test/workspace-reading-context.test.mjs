@@ -128,6 +128,27 @@ describe("follow-up reading context at the production thread controller", () => 
     expect(controller.appState.pendingTurn).toBeNull();
   });
 
+  // #719: a Send that waited behind an accepted retry must not target the same retry again,
+  // even when the refresh after that retry fails.
+  it("records an accepted retry locally so the next Send starts a new message", async () => {
+    const returned = { ...pending, completionStatus: "not_started", latestAttempt: { id: 5, outcome: "model_failed" } };
+    await setup({ initialState: state(returned) });
+    const posts = [];
+    const base = requestImplementation;
+    requestImplementation = vi.fn(async (path, options) => {
+      if (options?.method === "POST") {
+        posts.push(path);
+        return path.endsWith("/retry") ? { ...returned, completionStatus: "submitted" } : { ...pending, id: 3, sequence: 3, text: "Next" };
+      }
+      if (path.startsWith("/api/state?threadId=10")) throw new Error("refresh failed");
+      return base(path, options);
+    });
+    await controller.submitInteraction("Retry", modelSelection);
+    expect(controller.appState.interactions.find(({ id }) => id === 2).completionStatus).toBe("submitted");
+    await controller.submitInteraction("Next", modelSelection);
+    expect(posts).toEqual(["/api/threads/10/interactions/2/retry", "/api/threads/10/interactions"]);
+  });
+
   it("preserves reading until accepted output exists, then opens its first node", async () => {
     const fixture = await setup();
     await controller.submitInteraction("Follow-up", modelSelection);

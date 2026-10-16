@@ -839,7 +839,21 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       if (first.controls[0]) await assert.rejects(controller.act({ kind: "click", ref: first.controls[0].ref }), /stale/);
       await assert.rejects(controller.act({ kind: "click", ref: "forged" }), { code: "actor_control_stale", actionDispatched: false, message: /stale/ });
       await actorPage.locator("#actor-hidden-test").evaluate((element) => element.remove());
-      return controller;
+      return { ...controller, async observe(expected) {
+        if (!expected?.invokeSource) return controller.observe(expected);
+        const resultControl = actorPage.locator(`[data-invocation-result-interaction-id="${expected.turnId}"]`).first();
+        await resultControl.waitFor({ state: "visible" });
+        await until(() => resultControl.isEnabled(), "settled invoke result is enabled from its source");
+        // The source is already settled and idle: duplicate after-paint snapshots
+        // need not publish a new observedAt. Actual fresh pixels still qualify.
+        await actorPage.evaluate(() => {
+          window.__idleSourceDescriptor = Object.getOwnPropertyDescriptor(window, "__taskActorPresentation");
+          const stable = { ...window.__taskActorPresentation, observedAt: 0 };
+          Object.defineProperty(window, "__taskActorPresentation", { configurable: true, get: () => stable, set() {} });
+        });
+        try { return await controller.observe(expected); }
+        finally { await actorPage.evaluate(() => { Object.defineProperty(window, "__taskActorPresentation", window.__idleSourceDescriptor); delete window.__idleSourceDescriptor; }); }
+      } };
     },
     createActor: async () => ({ close: async () => {},
       observe: async (observation) => {
@@ -987,7 +1001,11 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(task.termination.reason, "endpoint_reached");
     assert.ok(task.events.some((event) => event.kind === "submission" && event.path?.endsWith("/invoke")));
     const lastTurn = (await tasks.detail(task.currentThreadId)).interactions.at(-1);
-    assert.equal(String(task.events.findLast(event => event.kind === "presentation").snapshot.turnId), String(lastTurn.id), "latest completed response is painted before actor finishes");
+    assert.equal(lastTurn.completionStatus, "accepted", "invoked completion settled before actor finishes");
+    const invoked = task.events.findLast(event => event.kind === "submission" && event.path?.endsWith("/invoke"));
+    const sourceTurnId = /^\/api\/threads\/\d+\/interactions\/(\d+)\//.exec(invoked.path)[1];
+    assert.equal(String(task.events.findLast(event => event.kind === "presentation").snapshot.turnId), sourceTurnId,
+      "READ-001 preserves the source; opening the discoverable invoked result remains a user choice");
     for (const snapshot of snapshots) {
       assert.deepEqual(Object.keys(snapshot).sort(), [...["availableActions", "controls", "screenshot", "text"], ...(snapshot.completionJudgeFeedback ? ["completionJudgeFeedback"] : [])].sort());
       assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", "scroll", ...(snapshot === snapshots[6] ? [] : ["finish"])]);

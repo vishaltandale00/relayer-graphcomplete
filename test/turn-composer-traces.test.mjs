@@ -16,6 +16,8 @@ import {
 // final step, and the replay proves the code reaches it.
 const traceDirectory = join(import.meta.dirname, "..", "models", "tla", "traces");
 const manifest = JSON.parse(readFileSync(join(import.meta.dirname, "..", "models", "tla", "checks.json"), "utf8"));
+const scenarioPresets = new Map(JSON.parse(readFileSync(join(import.meta.dirname, "..", "models", "tla", "scenarios.json"), "utf8"))
+  .scenarios.map((scenario) => [scenario.id, scenario.preset]));
 const traces = readdirSync(traceDirectory)
   .filter((file) => file.endsWith(".json"))
   .map((file) => JSON.parse(readFileSync(join(traceDirectory, file), "utf8")))
@@ -36,7 +38,7 @@ describe("TurnComposer traces replay against the Product workspace composer", ()
 
   for (const trace of traces) {
     it(`${trace.scenario}: ${trace.summary}`, async () => {
-      const bounds = manifest.presets["composer-replay"];
+      const bounds = manifest.presets[scenarioPresets.get(trace.scenario) ?? "composer-replay"];
       world = await new TurnComposerWorld({ maxText: Number(bounds.MaxText), maxTurns: Number(bounds.MaxTurns) }).ready();
       const last = trace.steps.length - 1;
       for (const [index, { action, state }] of trace.steps.entries()) {
@@ -103,20 +105,38 @@ describe("After a restart, text an earlier session left in an older turn", () =>
   });
 });
 
-// TurnComposer.tla's one scalar send per thread assumes a second Send away;
-// this replays one against the real workspace.
-describe("A second Send while the thread's follow-up is in flight", () => {
-  it("does not post, even after the thread was left and shown again", async () => {
-    world = await new TurnComposerWorld({ maxText: 3, maxTurns: 2 }).ready();
+// TurnComposer.tla keeps one send per thread: since #719 Send stays enabled while the thread's
+// earlier send posts, and a click then waits for that post and reads the composer afresh. This
+// replays such a click against the real workspace.
+describe("A second Send while the thread's follow-up is posting", () => {
+  it("waits for the first post, then sends only the text typed since", async () => {
+    world = await new TurnComposerWorld({ maxText: 3, maxTurns: 3 }).ready();
     for (const step of [["Type"], ["ClickSend"], ["SwitchThread", "B"], ["SwitchThread", "A"], ["Type"]]) {
       await world.apply(step);
     }
-    expect(world.send.disabled).toBe(true);
-    // Force the click past the disabled button, as a keyboard shortcut or a
-    // stale event could.
-    world.send.disabled = false;
+    // The message box never locks, and Send stays Send while the first send posts.
+    expect(world.prompt.disabled).toBe(false);
+    expect(world.send.disabled).toBe(false);
     world.send.click();
     await world.apply(["BackgroundRender"]);
+    expect(world.submits).toBe(1);
+    for (const step of [["PostInserted", "A"], ["PostSucceeds", "A"], ["RefreshReturns", "A"], ["Settle", "A"]]) {
+      await world.apply(step);
+    }
+    // The first send carried draft 1; the waiting click sends what the user typed after it.
+    expect(world.submits).toBe(2);
+    expect(world.calls.A.text).toBe("draft 2");
+  });
+
+  it("sends nothing more when the composer holds only the posting text", async () => {
+    world = await new TurnComposerWorld({ maxText: 3, maxTurns: 3 }).ready();
+    for (const step of [["Type"], ["ClickSend"]]) await world.apply(step);
+    world.send.click();
+    for (const step of [["PostInserted", "A"], ["PostSucceeds", "A"], ["RefreshReturns", "A"], ["Settle", "A"]]) {
+      await world.apply(step);
+    }
+    // Settlement cleared the sent text, so the second click finds nothing to send.
+    expect(world.prompt.value).toBe("");
     expect(world.submits).toBe(1);
   });
 });

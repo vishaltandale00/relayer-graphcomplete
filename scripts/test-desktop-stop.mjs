@@ -52,17 +52,18 @@ async function main() {
     const control = fixture.controls.get(turn.graphNodeId);
     await control.started.promise;
     await window.webContents.executeJavaScript(`import('./src/threads.js').then(m => m.loadThread(${thread.id}))`);
-    await waitFor("visible Stop", () => window.webContents.executeJavaScript(`(() => { const b=document.querySelector('#sendInteraction'); return b?.getAttribute('aria-label')==='Stop run' && b.classList.contains('stop-button') && getComputedStyle(b,'::before').width==='10px' && !b.disabled && b.offsetParent!==null; })()`));
-    assert.equal(await window.webContents.executeJavaScript(`(() => { const b=document.querySelector('#sendInteraction'); return getComputedStyle(b).backgroundColor===getComputedStyle(document.querySelector('#composerRetryMessage')).backgroundColor; })()`), true);
+    // #719: each run's Stop lives on its interaction node (the prompt card), and the composer's
+    // Send stays Send while the run is active.
+    await waitFor("visible Stop", () => window.webContents.executeJavaScript(`(() => { const b=document.querySelector('#interactionRunStop'); const s=document.querySelector('#sendInteraction'); return b?.getAttribute('aria-label')==='Stop this run' && b.textContent==='Stop' && !b.disabled && b.offsetParent!==null && s?.getAttribute('aria-label')==='Send' && !document.querySelector('#threadPrompt').disabled; })()`));
     await capture(`${provider}-01-running`);
-    await window.webContents.executeJavaScript(`document.querySelector('#sendInteraction').click();document.querySelector('#sendInteraction').click()`);
+    await window.webContents.executeJavaScript(`document.querySelector('#interactionRunStop').click();document.querySelector('#interactionRunStop').click()`);
     await control.aborted.promise;
     assert.equal(control.aborts, 1);
-    await waitFor("visible Stopping", () => window.webContents.executeJavaScript(`(() => { const b=document.querySelector('#sendInteraction'); return b?.getAttribute('aria-label')==='Stopping' && b.disabled && b.getAttribute('aria-busy')==='true' && getComputedStyle(b,'::after').animationName==='stop-button-spin'; })()`));
+    await waitFor("visible Stopping", () => window.webContents.executeJavaScript(`(() => { const b=document.querySelector('#interactionRunStop'); return b?.getAttribute('aria-label')==='Stopping this run' && b.disabled && b.getAttribute('aria-busy')==='true'; })()`));
     assert.equal((await fixture.request(`/api/threads/${thread.id}`)).interactions[0].completionStatus, "running");
     await capture(`${provider}-02-stopping`);
     control.settled.resolve();
-    await waitFor("visible Stopped", () => window.webContents.executeJavaScript(`document.querySelector('#interactionStatus')?.textContent==='Stopped' && !document.querySelector('#threadPrompt').disabled && document.querySelector('#sendInteraction')?.textContent==='↑' && !document.querySelector('#sendInteraction').classList.contains('stop-button') && document.querySelector('#sendInteraction').getAttribute('aria-busy')==='false'`));
+    await waitFor("visible Stopped", () => window.webContents.executeJavaScript(`document.querySelector('#interactionStatus')?.textContent==='Stopped' && !document.querySelector('#threadPrompt').disabled && document.querySelector('#sendInteraction')?.textContent==='↑' && document.querySelector('#interactionRunStop').classList.contains('hidden')`));
     assert.equal(await window.webContents.executeJavaScript(`(() => { const m=document.querySelector('#composerRetryMessage'); return m.classList.contains('is-stopped') && getComputedStyle(m).color===getComputedStyle(document.querySelector('#interactionStatus')).color; })()`), true);
     await capture(`${provider}-03-stopped`);
     const result = (await fixture.request(`/api/threads/${thread.id}`)).interactions[0];

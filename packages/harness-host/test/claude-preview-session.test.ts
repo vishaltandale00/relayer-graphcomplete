@@ -44,7 +44,7 @@ const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1])
 afterEach(() => vi.unstubAllGlobals());
 
 describe("Claude session preview compatibility", () => {
-  it.each(["live", "saved"] as const)("keeps the %s native session while enabling previews, then reopens it", async (mode) => {
+  it.each(["live", "saved"] as const)("enables previews on a %s pinned thread, then reopens it, with a fresh session per run", async (mode) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-claude-preview-session-"));
     const stateFile = join(directory, "sessions.json");
     let accepted = false;
@@ -82,7 +82,7 @@ describe("Claude session preview compatibility", () => {
           viewed.push(await server.options.tools[0]!.handler({ path }, {}));
         }
         accepted = true;
-        yield { type: "result", subtype: "success", result: "done", session_id: "existing-claude-session" };
+        yield { type: "result", subtype: "success", result: "done", session_id: `claude-session-${calls.length}` };
       })();
     }) as ClaudeSdkQuery;
     const factory = createClaudeBasicFactory({ query, browserSdk });
@@ -99,17 +99,18 @@ describe("Claude session preview compatibility", () => {
     const register = (host: HarnessHost, configuration: HarnessConfiguration) => host.createSession({
       threadId: 1, permissionProfileId: "auto", workingDirectory: directory, configuration,
     });
-    const complete = async (host: HarnessHost, requireNativeContinuity = false) => {
+    const complete = async (host: HarnessHost) => {
       accepted = false;
-      await host.complete(1, calls.length + 1, { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 }, model, undefined, { productInteractionId: calls.length + 1, requireNativeContinuity });
+      await host.complete(1, calls.length + 1, { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 }, model, undefined, { productInteractionId: calls.length + 1 });
     };
     let host = await openHost();
     try {
       await register(host, oldConfiguration);
       await complete(host);
+      // No run leaves a native session to resume (#719).
       const originalState = JSON.parse(await readFile(stateFile, "utf8")).sessions[0].state;
-      expect(originalState.claudeSessionId).toBe("existing-claude-session");
-      expect(calls[0]!.options.resume).toBeUndefined();
+      expect(originalState).toEqual({});
+      expect(calls[0]!.options).not.toHaveProperty("resume");
       expect(calls[0]!.options.mcpServers).not.toHaveProperty("relayer_graph_preview");
       if (mode === "saved") {
         await host.close();
@@ -131,14 +132,14 @@ describe("Claude session preview compatibility", () => {
         configuration: previewConfiguration, state: originalState,
       });
       expect(digestHarnessConfiguration(previewConfiguration)).not.toBe(digestHarnessConfiguration(oldConfiguration));
-      await complete(host, true);
+      await complete(host);
       await host.close();
       host = await openHost();
       await register(host, previewConfiguration);
-      await complete(host, true);
+      await complete(host);
       expect(calls).toHaveLength(3);
       for (const call of calls.slice(1)) {
-        expect(call.options.resume).toBe("existing-claude-session");
+        expect(call.options).not.toHaveProperty("resume");
         expect(call.options.allowedTools).toContain(CLAUDE_PREVIEW_TOOL);
         expect(call.prompt).toContain("Draft previews are on");
       }

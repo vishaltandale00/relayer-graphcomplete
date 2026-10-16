@@ -43,6 +43,18 @@ impl<OnAbandon: FnOnce()> Drop for Preparation<'_, OnAbandon> {
     }
 }
 
+/// An owned preparing mark for a run (#720); it ends when dropped.
+pub(crate) struct PreparingHold {
+    queue: NodeRunQueue,
+    run: InteractionId,
+}
+
+impl Drop for PreparingHold {
+    fn drop(&mut self) {
+        self.queue.end_preparing(self.run);
+    }
+}
+
 #[derive(Default)]
 struct NodeState {
     holder: Option<Holder>,
@@ -124,6 +136,17 @@ impl NodeRunQueue {
         result
     }
 
+    /// Marks a run preparing for as long as the returned hold lives (#720). A held run stays
+    /// its request's from its claim, through its wait for capacity, to its preparation, so a
+    /// Stop that lands meanwhile is settled by that request, never beside it.
+    pub(crate) fn hold_preparing(&self, run: InteractionId) -> PreparingHold {
+        self.begin_preparing(run);
+        PreparingHold {
+            queue: self.clone(),
+            run,
+        }
+    }
+
     fn begin_preparing(&self, run: InteractionId) {
         *self.preparing.lock().unwrap().entry(run).or_default() += 1;
     }
@@ -136,6 +159,17 @@ impl NodeRunQueue {
                 preparing.remove(&run);
             }
         }
+    }
+
+    /// How many deliveries mark a run preparing.
+    #[cfg(test)]
+    pub(crate) fn preparing_count(&self, run: InteractionId) -> usize {
+        self.preparing
+            .lock()
+            .unwrap()
+            .get(&run)
+            .copied()
+            .unwrap_or(0)
     }
 
     pub(crate) fn is_preparing(&self, run: InteractionId) -> bool {

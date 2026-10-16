@@ -4,7 +4,9 @@ import { createProductWorkspace } from "../desktop/renderer/src/product-workspac
 
 afterEach(() => vi.unstubAllGlobals());
 
-it.each(["running", "accepted", "read-only"])("allows annotations on a %s follow-up without unlocking Send", async (status) => {
+// Thread messages run in parallel (#719): a node can be annotated, and the annotation sent with
+// the next message, while the follow-up it came from still runs.
+it.each(["running", "accepted", "read-only"])("allows annotations on a %s follow-up and sends them with the next message", async (status) => {
   const window = new Window({ url: "http://127.0.0.1:3000" });
   vi.stubGlobal("document", window.document);
   vi.stubGlobal("window", window);
@@ -84,13 +86,14 @@ it.each(["running", "accepted", "read-only"])("allows annotations on a %s follow
     expect(confirmations[0].annotation).toBe("Expand this point");
     expect(window.document.querySelector("#contextAnnotationEditor")).toBeNull();
     if (status === "running") {
-      expect(window.document.querySelector("#threadPrompt").disabled).toBe(true);
-      expect(window.document.querySelector("#sendInteraction").disabled).toBe(true);
+      // The message box never locks, and Send stays Send, while the follow-up runs.
+      expect(window.document.querySelector("#threadPrompt").disabled).toBe(false);
+      expect(window.document.querySelector("#sendInteraction").getAttribute("aria-label")).toBe("Send");
     }
     workspace.render();
     await window.happyDOM.waitUntilComplete();
     expect(window.document.querySelector("#composerContextTray").textContent).toContain("1");
-    if (status === "accepted") {
+    {
       const prompt = window.document.querySelector("#threadPrompt");
       prompt.value = "Next follow-up";
       prompt.dispatchEvent(new window.Event("input", { bubbles: true }));
@@ -98,6 +101,11 @@ it.each(["running", "accepted", "read-only"])("allows annotations on a %s follow
       expect(send.disabled).toBe(false);
       send.click();
       await vi.waitFor(() => expect(submit).toHaveBeenCalled());
+      // The Send snapshots exactly its own annotation and consumes its confirmation.
+      const [text, , contexts, confirmationIds] = submit.mock.calls[0];
+      expect(text).toBe("Next follow-up");
+      expect(JSON.stringify(contexts)).toContain("Expand this point");
+      expect(confirmationIds).toEqual([confirmations[0].draftId]);
       const duringSend = window.document.querySelector("#attachNodeContext");
       expect(duringSend.classList.contains("hidden")).toBe(false);
       expect(duringSend.disabled).toBe(true);

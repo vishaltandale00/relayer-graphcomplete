@@ -317,7 +317,7 @@ mod icon_tests {
 
     async fn accept(store: &SqliteProductStore, thread: &Thread, proposal: serde_json::Value) {
         let id = store
-            .insert_interaction(thread.id, "Later completion", None, false, false)
+            .insert_interaction(thread.id, "Later completion", None, false)
             .await
             .unwrap()
             .id;
@@ -645,7 +645,7 @@ mod tests {
         // Archive wins: both follow-up admission and retry through the real storage seams fail.
         store.set_thread_archived(thread.id, true).await.unwrap();
         let error = store
-            .insert_interaction(thread.id, "Follow-up", None, false, false)
+            .insert_interaction(thread.id, "Follow-up", None, false)
             .await
             .unwrap_err();
         assert!(error.to_string().contains("thread_archived"));
@@ -657,7 +657,7 @@ mod tests {
         store.set_thread_archived(thread.id, false).await.unwrap();
         // Admission wins: archive refuses, even when a newer interaction is idle.
         let later = store
-            .insert_interaction(thread.id, "Later idle turn", None, false, false)
+            .insert_interaction(thread.id, "Later idle turn", None, false)
             .await
             .unwrap();
         sqlx::query("UPDATE interactions SET completion_status='failed' WHERE id=?1")

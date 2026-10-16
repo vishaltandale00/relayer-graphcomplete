@@ -199,7 +199,7 @@ describe("A request waiting for a resolving draft", () => {
 
 // Plain Enter follows the same durable confirmation seam as the checkmark.
 describe("annotation keyboard confirmation", () => {
-  it.each([false, true])("confirms with Enter and preserves Send admission while running=%s", async (running) => {
+  it.each([false, true])("confirms with Enter and sends the annotation while running=%s", async (running) => {
     const send = vi.fn(async () => {});
     world = await new NodeInspectorWorld({ onSubmitInteraction: send }).ready();
     world.state.conversationCompatibility = { threadId: 3, status: "unrestricted", harnessId: "fixture" };
@@ -232,19 +232,11 @@ describe("annotation keyboard confirmation", () => {
     await world.apply(["ConfirmReturns", "ok"], quiet, quiet);
     expect(world.window.document.querySelector("#nodeContextDock").classList.contains("hidden")).toBe(true);
     const prompt = world.window.document.querySelector("#threadPrompt");
-    expect(prompt.disabled).toBe(running);
+    // Thread messages run in parallel (#719): the message box never locks while a turn runs.
+    expect(prompt.disabled).toBe(false);
     if (!running) expect(world.window.document.activeElement).toBe(prompt);
     expect(send).not.toHaveBeenCalled();
-    if (running) {
-      prompt.dispatchEvent(new world.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
-      for (let turn = 0; turn < 40; turn += 1) await new Promise((resolve) => setImmediate(resolve));
-      expect(send).not.toHaveBeenCalled();
-      world.state.interactions.at(-1).completionStatus = "accepted";
-      world.workspace.render();
-      expect(prompt.disabled).toBe(false);
-      expect(send).not.toHaveBeenCalled();
-      prompt.focus();
-    }
+    if (running) prompt.focus();
     prompt.dispatchEvent(new world.window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
     for (let turn = 0; turn < 40; turn += 1) await new Promise((resolve) => setImmediate(resolve));
     expect(send).toHaveBeenCalledOnce();

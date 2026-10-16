@@ -13,7 +13,9 @@ export function productWorkspaceMarkup() {
         <div class="conversation-settings hidden" id="conversationSettings">
           <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
           <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
+            <button class="conversation-export hidden" id="stopAllRuns" type="button" role="menuitem">Stop all runs</button>
             <button class="conversation-export hidden" id="archiveConversation" type="button" role="menuitem">Archive</button>
+            <button class="conversation-export hidden" id="stopAllAndArchive" type="button" role="menuitem">Stop all and archive</button>
             <button class="conversation-export" id="shareConversationMenu" type="button" role="menuitem" data-review-ref="share-conversation-menu" data-review-kind="conversation-share">Share…</button>
             <button class="conversation-export" id="exportConversation" type="button" role="menuitem" data-review-ref="export-conversation" data-review-kind="conversation-export">Export conversation…</button>
           </div>
@@ -42,6 +44,8 @@ export function productWorkspaceMarkup() {
             <div class="turn-popover hidden" id="turnPopover" role="group" aria-label="Choose a turn"></div>
           </div>
           <span class="interaction-status" id="interactionStatus" role="status"></span>
+          <button class="interaction-run-stop hidden" id="interactionRunStop" type="button" data-review-ref="interaction-run-stop" data-review-kind="run-stop">Stop</button>
+          <span class="interaction-run-error" id="interactionRunError" role="status"></span>
     </div>
     <aside class="environment-panel hidden" role="dialog" id="environmentPanel" aria-labelledby="environmentTitle">
       <div class="environment-header"><h2 id="environmentTitle">Environment</h2><span class="environment-observed" id="environmentObserved"></span><button id="closeEnvironment" class="icon-button" type="button" aria-label="Close Environment">×</button></div>

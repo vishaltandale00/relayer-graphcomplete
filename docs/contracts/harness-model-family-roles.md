@@ -53,7 +53,7 @@ exact admitted orchestrator.
 | --- | --- |
 | V2 normalization, role/version agreement, exactly one root, unknown metadata rejection before access | `host.test.ts`: inconsistent-role rejection journey |
 | Admission deep freeze, ordered providers, one lease per exact definition, fixed legacy JSON digest | `host.test.ts`: v1/v2 ordered-family admission journeys |
-| Queue captures admitted roles before user mutation while the prior execution is blocked | `host.test.ts`: serialized graph-scope and queued-role journey |
+| Parallel root captures admitted roles before user mutation while the prior execution is blocked | `host.test.ts`: parallel graph-scope and admitted-role journey |
 | Producer shape, field-ordered v2 bytes and digest | `host.test.ts`: producer fixture journey; `test/fixtures/model-family-roles-v2.json` has a Python independently computed SHA-256 fixture |
 | Role-bearing claim integrity and launch-time invoked admission | `host.test.ts`: family binding and invoked-child admission journeys |
 | Prime actual prompt and native scope, root index, selectors, credentials, quiescence | `prime-agent.test.ts`: basic/layered root and invoked role delivery |

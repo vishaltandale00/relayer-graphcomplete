@@ -196,6 +196,16 @@ export class TaskActorService {
           const attemptId = turn.latestAttempt?.id;
           if (submission.path?.endsWith("/retry") && attemptId == null) throw new Error("Retried interaction has no settled attempt identity.");
           expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at), ...(attemptId == null ? {} : { attemptId }) };
+          // READ-001 keeps invoked results discoverable from their source. The
+          // actor must not wait for navigation the user has not chosen.
+          const invoke = /^\/api\/threads\/([1-9]\d*)\/interactions\/([1-9]\d*)\/actions\/[1-9]\d*\/invoke$/.exec(submission.path ?? "");
+          if (invoke) {
+            const source = detail.interactions.find(item => String(item.id) === invoke[2]);
+            if (invoke[1] !== String(submission.threadId) || !source) throw new Error("Invoked source interaction is unavailable.");
+            expected.invokeSource = { turnId: source.id,
+              ...(source.latestAttempt?.id == null ? {} : { attemptId: source.latestAttempt.id }),
+              observedAfter: Date.now() };
+          }
         }
         phase = "observe";
         const observation = await browser.observe(expected);
