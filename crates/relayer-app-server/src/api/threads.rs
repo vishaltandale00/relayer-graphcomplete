@@ -3091,9 +3091,17 @@ async fn settle_unstarted_stop(
     thread_id: ThreadId,
     interaction_id: InteractionId,
 ) -> bool {
-    let Ok(current) = state.product.get_interaction(interaction_id).await else {
-        return false;
-    };
+    try_settle_unstarted_stop(state, thread_id, interaction_id)
+        .await
+        .unwrap_or(false)
+}
+
+async fn try_settle_unstarted_stop(
+    state: &ApiState,
+    thread_id: ThreadId,
+    interaction_id: InteractionId,
+) -> Result<bool, crate::product::ProductError> {
+    let current = state.product.get_interaction(interaction_id).await?;
     let unstarted = current.completion_status == "submitted"
         && current.stop_requested
         && current.stop_error.is_none()
@@ -3101,19 +3109,14 @@ async fn settle_unstarted_stop(
             .latest_attempt
             .as_ref()
             .is_none_or(|attempt| attempt.outcome != "running");
-    if !unstarted
-        || !matches!(
-            state.product.node_run_key(interaction_id).await,
-            Ok(Some(_))
-        )
-    {
-        return false;
+    if !unstarted || state.product.node_run_key(interaction_id).await?.is_none() {
+        return Ok(false);
     }
     let settle_state = state.clone();
     tokio::spawn(async move {
         settle_queued_stop(settle_state, thread_id, interaction_id).await;
     });
-    true
+    Ok(true)
 }
 
 /// Settles the Stop of a queued run whose call the graph already prepared. Nothing ran, so it
@@ -4484,6 +4487,80 @@ fn depart_node_run(state: ApiState, key: NodeRunKey, run: InteractionId, arrival
     tokio::spawn(depart);
 }
 
+/// Scopes this delivery's preparation and wakes an already-requested, identifiable Stop if
+/// the task disappears. The queue clears the count before dispatching abandonment cleanup.
+async fn prepare_node_run<T>(
+    state: &ApiState,
+    key: NodeRunKey,
+    run: InteractionId,
+    preparation: impl std::future::Future<Output = T>,
+) -> T {
+    let abandoned_state = state.clone();
+    state
+        .node_runs
+        .while_preparing(run, preparation, move || {
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    release_node_run(abandoned_state.clone(), key, run, true);
+                    settle_abandoned_node_preparation(&abandoned_state, key.thread_id, run).await;
+                });
+            }
+        })
+        .await
+}
+
+async fn settle_abandoned_node_preparation(
+    state: &ApiState,
+    thread_id: ThreadId,
+    run: InteractionId,
+) {
+    retry_abandoned_node_preparation(|| {
+        try_settle_abandoned_node_preparation(state, thread_id, run)
+    })
+    .await;
+}
+
+async fn retry_abandoned_node_preparation<Attempt>(mut attempt: impl FnMut() -> Attempt)
+where
+    Attempt: std::future::Future<Output = Result<(), crate::product::ProductError>>,
+{
+    let mut backoff = std::time::Duration::from_millis(100);
+    loop {
+        match attempt().await {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!(
+                    "could not inspect an abandoned node preparation for Stop; retrying in {backoff:?}: {error}"
+                );
+                tokio::time::sleep(backoff).await;
+                backoff = (backoff * 2).min(std::time::Duration::from_secs(30));
+            }
+        }
+    }
+}
+
+async fn try_settle_abandoned_node_preparation(
+    state: &ApiState,
+    thread_id: ThreadId,
+    run: InteractionId,
+) -> Result<(), crate::product::ProductError> {
+    if state.node_runs.is_preparing(run) {
+        return Ok(());
+    }
+    let current = state.product.get_interaction(run).await?;
+    if current.thread_id != thread_id {
+        return Ok(());
+    }
+    let identified = current.graph_node_id.is_some()
+        || state.product.prepared_invocation_node(run).await?.is_some();
+    // An unanswered legacy graph-create request can still produce a current. Abandonment is
+    // not proof that nothing was created, so only an already-identified current may settle.
+    if identified {
+        try_settle_unstarted_stop(state, thread_id, run).await?;
+    }
+    Ok(())
+}
+
 /// Starts a run that holds its node. The node is released once the run's outcome is saved,
 /// whatever it is, and the next queued run on it then starts. A run whose preparation ended
 /// ambiguously stays `submitted` until it is retried or a restart interrupts it, and keeps its
@@ -4495,10 +4572,13 @@ async fn start_held_action_interaction(
     key: NodeRunKey,
     already_claimed: bool,
 ) -> Result<Interaction, ApiError> {
-    state.node_runs.begin_preparing(interaction.id);
-    let prepared =
-        prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false).await;
-    state.node_runs.end_preparing(interaction.id);
+    let prepared = prepare_node_run(
+        state,
+        key,
+        interaction.id,
+        prepare_and_claim_interaction(state, thread, &interaction, already_claimed, false),
+    )
+    .await;
     let prepared = match prepared {
         Ok(prepared) => prepared,
         Err(error) => {
@@ -6021,21 +6101,16 @@ mod tests {
         fixture.finish();
     }
 
-    /// The Stop of a queued run whose call the graph prepared (#718 review). The graph
-    /// current stops first; while the graph refuses, the product row keeps waiting (Stopping…)
-    /// and is never reported stopped on its own. Once the graph Stop lands, the row ends
-    /// stopped, and no provider work ever started.
-    #[tokio::test]
-    async fn a_queued_stop_ends_the_product_row_only_after_the_graph_current_stops() {
-        let fixture = broker_fixture("queued-stop", "active").await;
+    async fn prepared_node_run(fixture: &BrokerFixture, status: &str) -> InteractionId {
         let pool = sqlx::SqlitePool::connect(&format!(
             "sqlite://{}",
             fixture._root.path().join("product.sqlite3").display()
         ))
         .await
         .unwrap();
-        let run = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,(SELECT MAX(sequence)+1 FROM interactions WHERE thread_id=?1),'Child work','2','queued','auto')")
+        let run = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,(SELECT MAX(sequence)+1 FROM interactions WHERE thread_id=?1),'Child work','2',?2,'auto')")
             .bind(fixture.thread.id.value())
+            .bind(status)
             .execute(&pool)
             .await
             .unwrap()
@@ -6055,7 +6130,32 @@ mod tests {
         .await
         .unwrap();
         pool.close().await;
-        let run = InteractionId::from_database(run);
+        InteractionId::from_database(run)
+    }
+
+    async fn hold_node_preparation(fixture: &BrokerFixture, run: InteractionId) -> NodeRunKey {
+        let current = fixture.product.get_interaction(run).await.unwrap();
+        let key = fixture.product.node_run_key(run).await.unwrap().unwrap();
+        assert_eq!(
+            fixture
+                .state
+                .node_runs
+                .admit(&fixture.product, key, run, current.sequence, None)
+                .await
+                .unwrap(),
+            NodeAdmission::Start
+        );
+        key
+    }
+
+    /// The Stop of a queued run whose call the graph prepared (#718 review). The graph
+    /// current stops first; while the graph refuses, the product row keeps waiting (Stopping…)
+    /// and is never reported stopped on its own. Once the graph Stop lands, the row ends
+    /// stopped, and no provider work ever started.
+    #[tokio::test]
+    async fn a_queued_stop_ends_the_product_row_only_after_the_graph_current_stops() {
+        let fixture = broker_fixture("queued-stop", "active").await;
+        let run = prepared_node_run(&fixture, "queued").await;
         assert_eq!(
             fixture
                 .product
@@ -6102,6 +6202,237 @@ mod tests {
         settle_queued_stop_once(&fixture.state, fixture.thread.id, run)
             .await
             .unwrap();
+        fixture.finish();
+    }
+
+    /// PAR-008: a Stop on an already-prepared call must still settle if its preparing task
+    /// disappears, whether the Stop arrived before or after that task ended.
+    #[tokio::test]
+    async fn abandoned_node_preparation_does_not_lose_stop_on_a_prepared_call() {
+        for panic in [true, false] {
+            for stop_first in [true, false] {
+                let fixture = broker_fixture("abandoned-preparation-stop", "active").await;
+                let run = prepared_node_run(&fixture, "submitted").await;
+                let key = hold_node_preparation(&fixture, run).await;
+                let (entered, started) = tokio::sync::oneshot::channel();
+                let (fail, failure) = tokio::sync::oneshot::channel();
+                let preparing = {
+                    let state = fixture.state.clone();
+
+                    tokio::spawn(async move {
+                        prepare_node_run(&state, key, run, async move {
+                            entered.send(()).unwrap();
+                            failure.await.unwrap();
+                            panic!("preparation failed while running");
+                        })
+                        .await;
+                    })
+                };
+                started.await.unwrap();
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    header::COOKIE,
+                    format!("{}=control", crate::api::CONTROL_COOKIE)
+                        .parse()
+                        .unwrap(),
+                );
+                let stop = || {
+                    stop_interaction(
+                        State(fixture.state.clone()),
+                        headers.clone(),
+                        Path((fixture.thread.id.value(), run.value())),
+                    )
+                };
+                if stop_first {
+                    let _ = stop()
+                        .await
+                        .unwrap_or_else(|error| panic!("{}", error.message()));
+                    assert_eq!(
+                        fixture
+                            .product
+                            .get_interaction(run)
+                            .await
+                            .unwrap()
+                            .completion_status,
+                        "submitted"
+                    );
+                    assert_eq!(fixture.current.lock().unwrap()["lifecycle"], "active");
+                }
+                if panic {
+                    fail.send(()).unwrap();
+                } else {
+                    preparing.abort();
+                }
+                let error = preparing.await.unwrap_err();
+                assert_eq!(error.is_panic(), panic);
+                assert!(!fixture.state.node_runs.is_preparing(run));
+                if !stop_first {
+                    let _ = stop()
+                        .await
+                        .unwrap_or_else(|error| panic!("{}", error.message()));
+                }
+                let settled = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                    loop {
+                        if fixture
+                            .product
+                            .get_interaction(run)
+                            .await
+                            .unwrap()
+                            .completion_status
+                            == "stopped"
+                            && fixture.state.node_runs.holder(key).await.is_none()
+                        {
+                            break;
+                        }
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await;
+                assert!(
+                    settled.is_ok(),
+                    "the existing Stop did not settle and release its node after preparation ended"
+                );
+                assert_eq!(fixture.current.lock().unwrap()["lifecycle"], "stopped");
+                assert_eq!(fixture.starts.load(Ordering::SeqCst), 0);
+                fixture.finish();
+            }
+        }
+    }
+
+    /// Losing a request is not proof that its graph creation did nothing. Without a durable
+    /// current identity, abandonment keeps the existing Stop pending for reconciliation.
+    #[tokio::test]
+    async fn abandoned_node_preparation_keeps_an_unidentified_graph_creation_pending() {
+        let fixture = broker_fixture("unknown-preparation-stop", "active").await;
+        let run = prepared_node_run(&fixture, "submitted").await;
+        let key = hold_node_preparation(&fixture, run).await;
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            fixture._root.path().join("product.sqlite3").display()
+        ))
+        .await
+        .unwrap();
+        sqlx::query("UPDATE action_invocations SET prepared_graph_node_id=NULL WHERE result_interaction_id=?1")
+            .bind(run.value()).execute(&pool).await.unwrap();
+        pool.close().await;
+        let (entered, started) = tokio::sync::oneshot::channel();
+        let preparing = {
+            let state = fixture.state.clone();
+
+            tokio::spawn(async move {
+                prepare_node_run(&state, key, run, async move {
+                    entered.send(()).unwrap();
+                    std::future::pending::<()>().await;
+                })
+                .await;
+            })
+        };
+        started.await.unwrap();
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            header::COOKIE,
+            format!("{}=control", crate::api::CONTROL_COOKIE)
+                .parse()
+                .unwrap(),
+        );
+        let _ = stop_interaction(
+            State(fixture.state.clone()),
+            headers,
+            Path((fixture.thread.id.value(), run.value())),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("{}", error.message()));
+        preparing.abort();
+        assert!(preparing.await.unwrap_err().is_cancelled());
+        assert!(!fixture.state.node_runs.is_preparing(run));
+        // Await the same cleanup entry point instead of guessing when its spawned task ran.
+        settle_abandoned_node_preparation(&fixture.state, fixture.thread.id, run).await;
+        let pending = fixture.product.get_interaction(run).await.unwrap();
+        assert_eq!(pending.completion_status, "submitted");
+        assert!(pending.stop_requested);
+        assert_eq!(fixture.state.node_runs.holder(key).await, Some(run));
+        assert!(fixture.transitions.lock().unwrap().is_empty());
+        assert_eq!(fixture.current.lock().unwrap()["lifecycle"], "active");
+        assert_eq!(fixture.starts.load(Ordering::SeqCst), 0);
+        fixture.finish();
+    }
+
+    /// A failed identity read is different from an unknown identity: the owned cleanup
+    /// retries the former, and only the graph-first Stop path may end the product row.
+    #[tokio::test]
+    async fn abandoned_node_preparation_retries_a_failed_identity_read() {
+        let fixture = broker_fixture("preparation-stop-read-failure", "active").await;
+        let run = prepared_node_run(&fixture, "submitted").await;
+        fixture
+            .product
+            .request_interaction_stop(fixture.thread.id, run)
+            .await
+            .unwrap();
+        let pool = sqlx::SqlitePool::connect(&format!(
+            "sqlite://{}",
+            fixture._root.path().join("product.sqlite3").display()
+        ))
+        .await
+        .unwrap();
+        // Exercise the actual storage query, without adding a production fault switch.
+        sqlx::query("ALTER TABLE action_invocations RENAME TO unavailable_action_invocations")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let (failed, observed_failure) = tokio::sync::oneshot::channel();
+        let failed = Arc::new(Mutex::new(Some(failed)));
+        let cleanup = {
+            let state = fixture.state.clone();
+            let thread_id = fixture.thread.id;
+            tokio::spawn(async move {
+                retry_abandoned_node_preparation(|| {
+                    let state = state.clone();
+                    let failed = failed.clone();
+                    async move {
+                        let result =
+                            try_settle_abandoned_node_preparation(&state, thread_id, run).await;
+                        if result.is_err()
+                            && let Some(failed) = failed.lock().unwrap().take()
+                        {
+                            let _ = failed.send(());
+                        }
+                        result
+                    }
+                })
+                .await;
+            })
+        };
+        observed_failure.await.unwrap();
+        let status: String =
+            sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+                .bind(run.value())
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(status, "submitted");
+        assert!(fixture.transitions.lock().unwrap().is_empty());
+        sqlx::query("ALTER TABLE unavailable_action_invocations RENAME TO action_invocations")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            cleanup.await.unwrap();
+            while fixture
+                .product
+                .get_interaction(run)
+                .await
+                .unwrap()
+                .completion_status
+                != "stopped"
+            {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Stop did not resume after the actual identity read recovered");
+        assert_eq!(fixture.current.lock().unwrap()["lifecycle"], "stopped");
+        assert_eq!(fixture.starts.load(Ordering::SeqCst), 0);
         fixture.finish();
     }
 
