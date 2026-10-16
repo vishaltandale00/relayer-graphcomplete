@@ -18,12 +18,15 @@ import {
   workspaceBreadcrumbItems,
   workspaceModeCapabilities,
   humanTurns,
+  messageTurns,
   workspaceTurns,
   nativeInvocationCurrentPresentation,
 } from "./model.js";
 import { createLucideIcon, createRelayerIcon as createSymbolIcon, relayerIconFamily, renderThreadTitle } from "./icons.js";
 import { createImageIcon, imageIconReference } from "./image-icons.js";
-import { interactionActivity, NODE_RUN_STATE, nodeRunState, THREAD_ACTIVITY } from "./run-state.js";
+import { NODE_RUN_STATE, nodeActiveRuns, nodeRunState, THREAD_ACTIVITY, threadActivity,
+  withoutPreparationsAwaitingRetry,
+} from "./run-state.js";
 import { graphLayoutSignature, nodesInReadingOrder, projectLayerNodePositions } from "./graph-layout.js";
 import { graphEdgePath, graphFollowWaypoints, graphLayerCircle, graphRoutedEdgePath, resolveEdgeShape } from "./edge-shapes.js";
 import { renderMarkdown } from "./markdown.js";
@@ -439,10 +442,11 @@ export function graphTurnNavigationDelta(event, graphFocused) {
   return null;
 }
 
-export { humanTurns, workspaceTurns } from "./model.js";
+export { humanTurns, messageTurns, workspaceTurns } from "./model.js";
 
+/** The composer's Stop: the active message turn. Each invoked run has its own Stop on its node. */
 export function productStopTarget(state, thread) {
-  return humanTurns(state, thread).findLast((turn) => ["submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
+  return messageTurns(state, thread).findLast((turn) => ["submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
 }
 
 export function turnStatusPresentation(status) {
@@ -1364,12 +1368,12 @@ export function applyComposerCapabilities({ composer, prompt, send, readOnlyMess
 }
 
 export function composerStatusForThread(state, thread) {
-  return humanTurns(state, thread).at(-1)?.completionStatus || state.status || "idle";
+  return messageTurns(state, thread).at(-1)?.completionStatus || state.status || "idle";
 }
 
-/** The latest human turn, which the composer follows up, retries, and inherits a model from. */
-export function latestHumanTurn(state, thread) {
-  return humanTurns(state, thread).at(-1);
+/** The latest message turn, which the composer follows up, retries, and inherits a model from. */
+export function latestMessageTurn(state, thread) {
+  return messageTurns(state, thread).at(-1);
 }
 
 export function composerFocusRestoration(
@@ -2708,6 +2712,7 @@ export function createProductWorkspace({
     $("#detailIcon").dataset.family = "neutral";
     $("#detailKind").textContent = kind || anchor.kind;
     $("#detailTitle").textContent = title || `${anchor.kind} comments`;
+    syncNodeRunBar();
     $("#detailContent").replaceChildren();
     $("#detailActions").classList.add("hidden");
     $("#detailActions").replaceChildren();
@@ -3730,7 +3735,70 @@ export function createProductWorkspace({
     renderNodeContextDock();
     syncComposer();
   }
+  // Each run an invoke action started has its own status and Stop on the selected node it came
+  // from. Runs from one node can run at once, so each active run gets a row. Rows are keyed by
+  // run and updated in place: a refresh keeps keyboard focus and never re-announces a row.
+  const stopNodeRun = async (runId) => {
+    const thread = getThread();
+    if (!thread || pendingStops.has(runId)) return;
+    pendingStops.add(runId);
+    stopErrors.delete(runId);
+    syncNodeRunBar();
+    try { await onStopInteraction(thread.id, runId); }
+    catch (failure) { stopErrors.set(runId, failure.message || "Stop could not be confirmed. Try again."); }
+    finally { pendingStops.delete(runId); syncNodeRunBar(); }
+  };
+  const syncNodeRunBar = () => {
+    const bar = $("#nodeRunBar");
+    const thread = getThread();
+    const state = getState();
+    const node = selection.selectedNodeId == null
+      ? null
+      : state.nodes?.find((candidate) => String(candidate.id) === String(selection.selectedNodeId));
+    const runs = node && mode === "interactive" && thread?.imported !== true && state.capabilities?.stopRuns === true
+      ? nodeActiveRuns(node, state.actions, state.actionInvocations, state.interactions)
+      : [];
+    bar.classList.toggle("hidden", runs.length === 0);
+    const existing = new Map([...bar.children].map((row) => [row.dataset.interactionId, row]));
+    const rows = runs.map(({ invocation, run }) => {
+      const runId = String(run.id);
+      let row = existing.get(runId);
+      if (!row) {
+        row = document.createElement("div");
+        row.className = "node-run-row";
+        row.dataset.interactionId = runId;
+        const status = document.createElement("span");
+        status.className = "node-run-status";
+        status.setAttribute("role", "status");
+        const stop = document.createElement("button");
+        stop.type = "button";
+        stop.className = "node-run-stop";
+        stop.textContent = "Stop";
+        stop.onclick = () => { void stopNodeRun(run.id); };
+        row.append(status, stop);
+      }
+      const action = state.actions?.find((candidate) => String(candidate.id) === String(invocation.actionId));
+      const label = action ? actionPresentation(action).label : null;
+      const stopping = pendingStops.has(run.id) || (run.stopRequested && !run.stopError);
+      const error = stopErrors.get(run.id) || run.stopError;
+      const phase = error
+        || (stopping ? "Stopping…" : run.completionStatus === "waiting_for_approval" ? "Needs approval" : "Running");
+      const text = label ? `${label} · ${phase}` : phase;
+      const [status, stop] = row.children;
+      if (status.textContent !== text) status.textContent = text;
+      row.classList.toggle("has-error", Boolean(error));
+      stop.disabled = Boolean(stopping);
+      stop.setAttribute("aria-busy", String(Boolean(stopping)));
+      stop.setAttribute("aria-label", label ? `Stop ${label}` : "Stop run");
+      return row;
+    });
+    for (const row of existing.values()) if (!rows.includes(row)) row.remove();
+    rows.forEach((row, index) => {
+      if (bar.children[index] !== row) bar.insertBefore(row, bar.children[index] ?? null);
+    });
+  };
   const syncComposer = () => {
+    syncNodeRunBar();
     resizeComposerTextarea(prompt);
     const thread = getThread();
     if (!thread) {
@@ -3896,7 +3964,7 @@ export function createProductWorkspace({
     // While another thread is shown, the send's thread's newest scope
     // decides: newer text there supersedes the stranded text, and an empty
     // one carries it forward when the thread is shown again.
-    const newestTurn = shown ? null : humanTurns(getState(), { id: submission.threadId }).at(-1);
+    const newestTurn = shown ? null : messageTurns(getState(), { id: submission.threadId }).at(-1);
     const newestScopeKey = newestTurn ? composerDraftScopeKey(submission.threadId, newestTurn.id) : null;
     if (!shown && (!newestScopeKey || newestScopeKey === submission.scopeKey
       || !(threadFollowupDraft(newestScopeKey) ?? composerDraftScopeState.drafts.get(newestScopeKey)?.promptValue))) {
@@ -4446,15 +4514,17 @@ export function createProductWorkspace({
       pickerButton.disabled = !turns.length;
       pickerButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12M6 6v12m0-6h12"/><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/></svg><b>${graph.contextCount}</b>`;
       pickerButton.setAttribute("aria-label", `Open interaction graph. ${graph.contextCount} attached context nodes`);
-      const title = graphDocument.createElement("div"); title.className = "interaction-graph-heading";
+      const popover = $("#turnPopover");
+      const title = popover.querySelector(".interaction-graph-heading") ?? graphDocument.createElement("div"); title.className = "interaction-graph-heading";
       title.textContent = graph.incomplete ? "Interaction graph · Some connections unavailable" : "Interaction graph";
-      const viewport = graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
-      viewport.append(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
+      // Keep the scroll host mounted while status/context updates rebuild the cards.
+      const viewport = popover.querySelector(".interaction-graph-viewport") ?? graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
+      viewport.replaceChildren(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
         if (!await prepareNodeContextSelectionChange()) return;
         closeTurnPopover(); collapseContextPreviews();
         if (onSelectTurnById) await onSelectTurnById(node.id, { responseRoot: node.completionStatus === "accepted", threadId: node.threadId });
       }));
-      $("#turnPopover").replaceChildren(title, viewport);
+      if (viewport.parentElement !== popover) popover.replaceChildren(title, viewport);
       if (focusedTurnId !== null) [...$("#turnPopover").querySelectorAll("[data-turn-id]")].find((row) => row.dataset.turnId === focusedTurnId)?.focus({ preventScroll: true });
       $("#turnPopover").classList.toggle("hidden", !turnPopoverOpen);
       pickerButton.setAttribute("aria-expanded", String(turnPopoverOpen));
@@ -4778,10 +4848,12 @@ export function createProductWorkspace({
     renderTurnNavigation(state, thread, interaction);
     renderHistoricalContexts(state, interaction);
     renderHistoricalInputs(interaction);
-    // A child an agent launched is not a human turn: the composer's scopes follow human turns.
-    const turns = humanTurns(state, thread);
+    // An invoked run runs beside the message turns: the composer's scopes follow message turns.
+    const turns = messageTurns(state, thread);
     const latestInteraction = turns.at(-1);
-    renderThreadStatusSymbol(interactionActivity(latestInteraction));
+    renderThreadStatusSymbol(threadActivity(
+      withoutPreparationsAwaitingRetry(humanTurns(state, thread), state.actionInvocations || []),
+    ));
     if (inputDraftController && latestInteraction) {
       const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;
       const priorStatusKey = renderedInputDraftStatusKeys.get(threadId);
@@ -5342,7 +5414,7 @@ export function createProductWorkspace({
       const annotationLabel = count ? `. ${count} comment${count === 1 ? "" : "s"}` : "";
       const family = relayerIconFamily(node.icon || node.metadata?.relayer?.icon);
       const imageIcon = imageIconReference(node.icon);
-      const runStateKey = nodeRunState(node, state.actions, state.actionInvocations);
+      const runStateKey = nodeRunState(node, state.actions, state.actionInvocations, state.interactions);
       const runState = NODE_RUN_STATE[runStateKey];
       const runStateMarks = runState
         ? `${runState.icon ? '<span class="graph-node-state-badge" aria-hidden="true"></span>' : ""}<span class="graph-node-caption" aria-hidden="true">${runState.label}</span>`
@@ -6466,6 +6538,7 @@ export function createProductWorkspace({
     releaseDetachedIcons();
     $("#detailKind").textContent = node.kind;
     $("#detailTitle").textContent = node.title;
+    syncNodeRunBar();
     const actions = (state.actions || []).filter((action) => String(action.sourceNodeId) === String(node.id));
     const inputActions = actions.filter((action) => action.kind === "input" && action.control);
     const ordinaryActions = actions.filter((action) => action.kind !== "input");

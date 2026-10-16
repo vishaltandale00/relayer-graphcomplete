@@ -54,6 +54,16 @@ try {
     const bounds = await check(`viewport-${width}-${height}`);
     if (width === 390) {
       assert.ok(bounds.scrollWidth > bounds.clientWidth, 'Narrow graph scrolls internally');
+      const beforeRefresh = await page.locator('.interaction-graph-viewport').evaluate(element => {
+        element.scrollLeft = 40;
+        return element.scrollLeft;
+      });
+      assert.ok(beforeRefresh > 0, 'Scroll regression fixture has real horizontal overflow');
+      const focusedTurn = await page.evaluate(() => document.activeElement.dataset.turnId);
+      assert.equal(focusedTurn, '5', 'Selected interaction is focused before reconciliation');
+      await page.evaluate(() => { for (let i = 0; i < 3; i++) layoutWorkspace.render(); });
+      assert.equal(await page.locator('.interaction-graph-viewport').evaluate(element => element.scrollLeft), beforeRefresh, 'Repeated reconciliation preserves horizontal scroll');
+      assert.equal(await page.evaluate(() => document.activeElement.dataset.turnId), focusedTurn, 'Reconciliation retains focused interaction');
       await page.locator('.interaction-graph-node[data-turn-id="6"]').click();
       assert.equal(await page.locator('#turnPopover').isVisible(), false);
       assert.equal(await page.evaluate(() => layoutFixture.selection.currentInteractionId), 6);
@@ -83,6 +93,21 @@ try {
   const last = await page.locator('.interaction-graph-node[data-turn-id="14"]').boundingBox();
   const viewport = await page.locator('.interaction-graph-viewport').boundingBox();
   assert.ok(last.y >= viewport.y && last.y + last.height <= viewport.y + viewport.height + 1, 'Selected last card is fully visible');
+  // Background state reconciliation must not undo the reader's scroll gesture.
+  await page.locator('.interaction-graph-viewport').evaluate(element => { element.scrollTop = 0; });
+  await page.mouse.move(viewport.x + viewport.width / 2, viewport.y + viewport.height / 2);
+  await page.mouse.wheel(0, 80);
+  await page.waitForFunction(() => document.querySelector('.interaction-graph-viewport').scrollTop > 0);
+  const beforeRefresh = await page.locator('.interaction-graph-viewport').evaluate(element => element.scrollTop);
+  assert.ok(beforeRefresh > 0, 'Scroll regression fixture has real vertical overflow');
+  await page.evaluate(() => {
+    layoutFixture.turns[1].completionStatus = 'running';
+    layoutWorkspace.render();
+  });
+  const afterRefresh = await page.locator('.interaction-graph-viewport').evaluate(element => element.scrollTop);
+  console.log(JSON.stringify({ name: 'scroll-after-reconciliation', beforeRefresh, afterRefresh }));
+  await page.screenshot({ path: resolve(output, 'scroll-after-reconciliation.png') });
+  assert.equal(afterRefresh, beforeRefresh, 'Interaction graph preserves reader scroll during state reconciliation');
   await page.locator('.interaction-graph-node[data-turn-id="14"]').click();
   await page.evaluate(() => {
     layoutFixture.selection.currentInteractionId = 5;

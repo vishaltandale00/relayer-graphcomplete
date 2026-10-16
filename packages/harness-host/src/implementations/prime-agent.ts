@@ -14,7 +14,7 @@ import {
   type NativeSessionResetReason,
 } from "../native-session-reset.js";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH } from "../approval.js";
-import { INTERACTION_INPUT_GUIDANCE, INVOCATION_PUBLICATION_GUIDANCE, SUBCOMPLETION_INTEGRATION_GUIDANCE, renderInteractionInput } from "../interaction-input.js";
+import { INTERACTION_INPUT_GUIDANCE, INVOCATION_PUBLICATION_GUIDANCE, SUBCOMPLETION_INTEGRATION_GUIDANCE, renderInteractionInput, renderThreadHistory } from "../interaction-input.js";
 import { HarnessApprovalRequestTerminatedError } from "../approval-coordinator.js";
 import { redactTraceData } from "../trace.js";
 import { createPrimeWorkspaceBoundary } from "./prime-agent-workspace-boundary.js";
@@ -688,7 +688,9 @@ export class PrimeAgentHarness implements Harness {
     const abort = () => controller.abort(signal?.reason ?? new Error("Prime Agent completion was cancelled"));
     signal?.addEventListener("abort", abort, { once: true });
     const forceStop = new PrimeTurnForceStop(context.forceSignal);
-    if (context.origin.kind === "root") {
+    // A fresh root run gets its own session, as an invoked child does, and leaves the thread's
+    // persistent root session alone.
+    if (context.origin.kind === "root" && context.nativeSession !== "fresh") {
       const execution = forceStop.race(this.executeRoot(context, controller.signal, forceStop))
         .finally(() => signal?.removeEventListener("abort", abort));
       return nativeExecutionHandle(execution, (reason) => controller.abort(new Error(reason)));
@@ -1136,6 +1138,7 @@ ${renderInteractionInput(context.interactionInput)}
 ${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 ${context.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}
 ${context.completionBroker ? INVOCATION_PUBLICATION_GUIDANCE : ""}
+${renderThreadHistory(context, "python")}
 
 Use this entry point. Top-level cell code starts at column 0; never indent it.
 
@@ -1185,6 +1188,7 @@ ${renderInteractionInput(context.interactionInput)}
 ${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 ${context.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}
 ${context.completionBroker ? INVOCATION_PUBLICATION_GUIDANCE : ""}
+${renderThreadHistory(context, "python")}
 
 Use this entry point. Top-level cell code starts at column 0; never indent it.
 

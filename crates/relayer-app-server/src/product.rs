@@ -98,6 +98,7 @@ pub(crate) use models::Project;
 pub(crate) use models::ProjectAlias;
 pub(crate) use models::SubmittedInputEvidence;
 pub(crate) use models::Thread;
+pub(crate) use models::ThreadHistoryEntry;
 pub(crate) use models::ThreadView;
 pub(crate) use models::UnwindingRecursiveAttempt;
 pub(crate) use models::settled_recursive_attempt_outcome;

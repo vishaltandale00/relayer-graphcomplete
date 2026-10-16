@@ -869,6 +869,7 @@ impl World {
                         thread_icon_selection_eligible: false,
                         require_native_continuity: false,
                         native_history_anchor: None,
+                        fresh_native_session: None,
                         project_id: None,
                         product_interaction_id: child.id.value(),
                         thread_id: thread.id.value(),
@@ -2832,6 +2833,7 @@ async fn v4_import_reexport_preserves_call_only_own_draft_history() {
         thread_icon_selection_eligible: false,
         require_native_continuity: false,
         native_history_anchor: None,
+        fresh_native_session: None,
         project_id: None,
         product_interaction_id: world.child.id.value(),
         thread_id: world.thread.id.value(),
@@ -6025,8 +6027,6 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
     };
     // This fixture has no provider continuity receipt for its historical root;
     // seed an ordinary unsent Product draft, which owns no graph or execution.
-    let busy = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,(SELECT COALESCE(MAX(sequence),0)+1 FROM interactions WHERE thread_id=?1),'Busy ordinary turn','1','not_started','auto')")
-        .bind(world.thread.id.value()).execute(&world.pool).await.unwrap().last_insert_rowid();
     let draft = world
         .product
         .commit_action_input_attachment(
@@ -6038,6 +6038,13 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
             },
             0,
         )
+        .await
+        .unwrap();
+    // Admission refuses before any reservation. An active message turn no longer refuses an
+    // invoke (#717), so this refuses the new interaction at the same point as an archived
+    // thread's trigger does. The fixture's own running work would block a real archive.
+    sqlx::query("CREATE TRIGGER refuse_admission BEFORE INSERT ON interactions BEGIN SELECT RAISE(ABORT,'thread_archived'); END")
+        .execute(&world.pool)
         .await
         .unwrap();
     let refused = invoke_action_with_authority(
@@ -6052,11 +6059,11 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
     .await;
     let error = match refused {
         Err(error) => error,
-        Ok(_) => panic!("active ordinary turn was admitted"),
+        Ok(_) => panic!("an archived thread admitted an invoke"),
     };
     assert_eq!(
         error.message(),
-        "Wait for the active interaction to finish."
+        "Open this archived chat again before starting work."
     );
     assert!(
         world
@@ -6087,8 +6094,7 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
             .unwrap(),
         draft
     );
-    sqlx::query("UPDATE interactions SET completion_status='stopped' WHERE id=?1")
-        .bind(busy)
+    sqlx::query("DROP TRIGGER refuse_admission")
         .execute(&world.pool)
         .await
         .unwrap();
