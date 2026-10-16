@@ -98,6 +98,22 @@ impl SqliteProductStore {
         .bind(&finished_at)
         .execute(&mut *transaction)
         .await?;
+        // A message that was executing waits, interrupted, for the user's Resume (#722),
+        // whether or not the graph runtime is here to reconcile it now; a later startup with the
+        // runtime checks it against its graph interaction. One with a Stop or submitted answers
+        // fails, as before.
+        let interrupted = sqlx::query(
+            "UPDATE interactions SET completion_status='interrupted',completion_error=?1
+             WHERE completion_status IN ('running','submitted','waiting_for_approval')
+               AND id NOT IN (SELECT result_interaction_id FROM action_invocations)
+               AND NOT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=interactions.id)
+               AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests WHERE interaction_id=interactions.id)
+               AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+        )
+        .bind(super::RESTART_INTERRUPTED)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected();
         let result = sqlx::query(
             "UPDATE interactions SET completion_status='failed',completion_error=?1 WHERE completion_status IN ('running','submitted') AND (?2=0 OR input_identity IS NULL) AND id NOT IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1) AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
         )
@@ -106,7 +122,7 @@ impl SqliteProductStore {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
-        Ok(result.rows_affected())
+        Ok(interrupted + result.rows_affected())
     }
 
     pub(crate) async fn fail_interrupted_submitted_input(
@@ -940,7 +956,7 @@ impl SqliteProductStore {
         harness_configuration_name: &str,
         error: &str,
     ) -> Result<bool, StorageError> {
-        let result = sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=COALESCE(harness_configuration_name,?1),completion_error=?2 WHERE id=?3 AND completion_status IN ('not_started','running','submitted','waiting_for_approval') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
+        let result = sqlx::query("UPDATE interactions SET completion_status='failed',harness_configuration_name=COALESCE(harness_configuration_name,?1),completion_error=?2 WHERE id=?3 AND completion_status IN ('not_started','running','submitted','waiting_for_approval','interrupted') AND thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)")
             .bind(harness_configuration_name)
             .bind(error)
             .bind(interaction_id.value())

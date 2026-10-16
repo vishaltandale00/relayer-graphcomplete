@@ -9,8 +9,6 @@ export const RESUMABLE_STATUSES = new Set(["paused", "interrupted"]);
 // Runs that are still part of their node's queue: running, waiting, or stopped by a restart.
 const CHAIN_STATUSES = new Set(["not_started", "submitted", "queued", "running", "waiting_for_approval", ...RESUMABLE_STATUSES]);
 const RUNNING_STATUSES = new Set(["submitted", "running", "waiting_for_approval"]);
-// Only runs with no response to view fold into a deck (#721): waiting or stopped by a restart.
-const FOLDABLE_STATUSES = new Set(["queued", ...RESUMABLE_STATUSES]);
 const CARD_HEIGHT = 70;
 const ROW_GAP = 28;
 const DECK_TOGGLE_HEIGHT = 26;
@@ -41,15 +39,25 @@ function childAttempt(child, parent) {
 const interruptedChild = (child) => child.latestAttempt?.failureCategory === "application_restart"
   || (child.completionStatus === "failed" && /interrupted|restart/i.test(child.completionError ?? ""));
 
+// An invoke whose preparation failed before anything ran waits for its action's Retry, its only
+// control; it is neither running nor part of its node's queue.
+function preparationsAwaitingRetry(invocations = []) {
+  return new Set(invocations
+    .filter((invocation) => invocation.preparationRecoverable === true && invocation.resultInteractionId != null)
+    .map((invocation) => String(invocation.resultInteractionId)));
+}
+
 /**
  * The human runs on each node, in creation order, that are still part of its queue: running,
  * waiting, or stopped by a restart.
  */
 export function nodeRunChains(turns = [], invocations = []) {
   const children = agentChildParents(invocations);
+  const awaitingRetry = preparationsAwaitingRetry(invocations);
   const chains = new Map();
   for (const turn of [...turns].sort(bySequence)) {
-    if (turn.runNodeId == null || children.has(String(turn.id)) || !CHAIN_STATUSES.has(turn.completionStatus)) continue;
+    if (turn.runNodeId == null || children.has(String(turn.id)) || awaitingRetry.has(String(turn.id))
+      || !CHAIN_STATUSES.has(turn.completionStatus)) continue;
     const key = chainKey(turn);
     if (!chains.has(key)) chains.set(key, []);
     chains.get(key).push(turn);
@@ -70,9 +78,10 @@ export function runNeedsAttention(turn, chains) {
 }
 
 /** What the user can do with a run from its card (#721): Stop, Remove, or Resume and Discard. */
-export function runControls(turn, { chains = new Map(), children = new Map(), controllable = true } = {}) {
-  // An agent's child is never stopped or resumed by the product: only its parent agent may.
-  if (!controllable || children.has(String(turn.id))) return [];
+export function runControls(turn, { chains = new Map(), children = new Map(), controllable = true, awaitingRetry = new Set() } = {}) {
+  // An agent's child is never stopped or resumed by the product: only its parent agent may. A
+  // preparation waiting for its action's Retry has only that Retry.
+  if (!controllable || children.has(String(turn.id)) || awaitingRetry.has(String(turn.id))) return [];
   const status = turn.completionStatus;
   const stopping = Boolean(turn.stopRequested && !turn.stopError);
   if (status === "queued") return [{ action: "remove", label: "Remove: take it out of the queue. Its text is kept.", icon: "✕", disabled: stopping }];
@@ -101,14 +110,20 @@ export function interactionGraph(turns, selectedId, options = {}) {
     && !(selected && turns.some((turn) => RESUMABLE_STATUSES.has(turn.completionStatus)))) return null;
   const { invocations = [], expanded = new Set(), nodeLabels = new Map(), controllable = false } = options;
   const children = agentChildParents(invocations);
+  const awaitingRetry = preparationsAwaitingRetry(invocations);
   const chains = nodeRunChains(turns, invocations);
   const local = new Map(turns.map((turn) => [String(turn.id), turn]));
   // A node's queue folds into its head card as a deck; queued runs have no response to view.
+  // The live queue and a restart's chain are separate: runs waiting behind the run that holds
+  // the node fold into that run's card, and paused runs into their chain's head. A running run
+  // is never folded: its response is there to view.
   const folded = new Map();
-  // A running run is never folded: its response is there to view.
+  const fold = (head, behind) => { if (head && behind.length) folded.set(String(head.id), [...(folded.get(String(head.id)) ?? []), ...behind]); };
   for (const chain of chains.values()) {
-    const behind = chain.slice(1).filter((run) => FOLDABLE_STATUSES.has(run.completionStatus));
-    if (behind.length) folded.set(String(chain[0].id), behind);
+    const restart = chain.filter((run) => RESUMABLE_STATUSES.has(run.completionStatus));
+    fold(restart[0], restart.slice(1));
+    const live = chain.filter((run) => !RESUMABLE_STATUSES.has(run.completionStatus));
+    fold(live[0], live.slice(1).filter((run) => run.completionStatus === "queued"));
   }
   const foldedIds = new Set([...folded.values()].flat().map((turn) => String(turn.id)));
   // An agent's children collapse under their parent as a chip: one for the parent's current
@@ -128,8 +143,9 @@ export function interactionGraph(turns, selectedId, options = {}) {
   const nodes = new Map();
   for (const turn of turns) {
     const id = String(turn.id);
-    const hidden = foldedIds.has(id) || (children.has(id) && local.has(children.get(id)) && !shownChildren.has(id));
-    if (hidden && id !== String(selectedId)) continue;
+    // A folded run shows in its head's deck only; a selected child shows beside its chip.
+    const hiddenChild = children.has(id) && local.has(children.get(id)) && !shownChildren.has(id);
+    if (foldedIds.has(id) || (hiddenChild && id !== String(selectedId))) continue;
     nodes.set(id, { ...turn, id, kind: "turn", localTurn: true });
   }
   const edges = [];
@@ -177,7 +193,7 @@ export function interactionGraph(turns, selectedId, options = {}) {
   }
   const counts = { running: 0, queued: 0, capacity: 0, paused: 0, interrupted: 0 };
   for (const turn of turns) {
-    if (children.has(String(turn.id))) continue;
+    if (children.has(String(turn.id)) || awaitingRetry.has(String(turn.id))) continue;
     const status = turn.completionStatus;
     if (RUNNING_STATUSES.has(status)) counts.running += 1;
     else if (status === "queued") counts[turn.queueReason === "capacity" ? "capacity" : "queued"] += 1;
@@ -198,11 +214,12 @@ export function interactionGraph(turns, selectedId, options = {}) {
     return {
       ...placed,
       agentRun: children.has(node.id),
-      deck: deck.map((run) => ({ ...run, id: String(run.id), controls: runControls(run, { chains, children, controllable }) })),
+      preparationRecoverable: awaitingRetry.has(node.id),
+      deck: deck.map((run) => ({ ...run, id: String(run.id), controls: runControls(run, { chains, children, controllable, awaitingRetry }) })),
       deckOpen,
       deckLabel: deck.length ? nodeLabels.get(String(node.runNodeId)) ?? "this node" : null,
       deckPaused: deck.some((run) => RESUMABLE_STATUSES.has(run.completionStatus)),
-      controls: node.localTurn ? runControls(node, { chains, children, controllable }) : [],
+      controls: node.localTurn ? runControls(node, { chains, children, controllable, awaitingRetry }) : [],
       needsAttention: node.localTurn && !children.has(node.id) && runNeedsAttention(node, chains),
     };
   });
@@ -226,6 +243,7 @@ export function interactionGraph(turns, selectedId, options = {}) {
 export function interactionGraphStatus(node) {
   const status = node.completionStatus;
   if (status === "accepted") return "Response ready";
+  if (node.preparationRecoverable && ["not_started", "submitted"].includes(status)) return "Waiting for Retry";
   if (CHAIN_STATUSES.has(status) && !RESUMABLE_STATUSES.has(status) && node.stopRequested && !node.stopError) return "Stopping…";
   if (status === "queued" && node.queueReason === "capacity") return "Waiting for capacity";
   if (status === "queued") return "Queued";

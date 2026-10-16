@@ -4917,6 +4917,8 @@ struct HeldRunsFixture {
     accepted_nodes: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// Invoke actions whose graph preparation the graph refuses.
     refused_actions: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Invoke actions whose graph preparation answers with a body that cannot be read.
+    garbled_actions: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// How many times the graph was asked to create an interaction.
     graph_creates: Arc<AtomicUsize>,
     /// While set, the graph answers interaction metadata reads with 503.
@@ -5052,6 +5054,8 @@ impl HeldRunsFixture {
         let stop_accepted = accepted_nodes.clone();
         let refused_actions = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
         let prepare_refused = refused_actions.clone();
+        let garbled_actions = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let prepare_garbled = garbled_actions.clone();
         let graph_creates = Arc::new(AtomicUsize::new(0));
         let counted_creates = graph_creates.clone();
         let metadata_unavailable = Arc::new(std::sync::atomic::AtomicBool::new(false));
@@ -5147,19 +5151,28 @@ impl HeldRunsFixture {
                     let refused = body["invocation"]["sourceActionId"]
                         .as_i64()
                         .is_some_and(|action| prepare_refused.lock().unwrap().contains(&action));
+                    let garbled = body["invocation"]["sourceActionId"]
+                        .as_i64()
+                        .is_some_and(|action| prepare_garbled.lock().unwrap().contains(&action));
                     async move {
+                        if garbled {
+                            // A body the product cannot read, as when a response is lost on the way.
+                            return (StatusCode::OK, "truncated graph response").into_response();
+                        }
                         if refused {
                             return (
                                 StatusCode::UNPROCESSABLE_ENTITY,
                                 axum::Json(json!({"error": {"code": "invocation_refused", "message": "The graph refuses this call."}})),
-                            );
+                            )
+                                .into_response();
                         }
                         // The graph refuses this input, as it refuses a stale context target.
                         if body["text"] == "Rejected by the graph" {
                             return (
                                 StatusCode::UNPROCESSABLE_ENTITY,
                                 axum::Json(json!({"error": {"code": "context_target_missing", "message": "The context target is gone."}})),
-                            );
+                            )
+                                .into_response();
                         }
                         let identity = if !body["inputIdentity"].is_null() {
                             Some(format!("input:{}", body["inputIdentity"]))
@@ -5190,6 +5203,7 @@ impl HeldRunsFixture {
                             "node": { "id": node_id }, "graphToken": "",
                             "inputIdentity": body["inputIdentity"], "inputDigest": body["inputDigest"]
                         })))
+                        .into_response()
                     }
                 }),
             )
@@ -5345,6 +5359,7 @@ impl HeldRunsFixture {
             stopped_currents,
             accepted_nodes,
             refused_actions,
+            garbled_actions,
             graph_creates,
             metadata_unavailable,
             graph_task,
@@ -6621,9 +6636,18 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
         [head, identified, plain, second, third, waiting]
     );
     assert_eq!(fixture.thread_summary().await["pausedRuns"], 0);
-    // A run that is not paused neither resumes nor is discarded.
-    let (status, _) = fixture.run_action(other, "resume").await;
-    assert_eq!(status, StatusCode::CONFLICT);
+    // A repeated Resume of a run that already ended reports it as it stands and starts
+    // nothing; a Discard of it changes nothing.
+    let (status, ended) = fixture.run_action(other, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{ended}");
+    assert_eq!(ended["interactions"][0]["completionStatus"], "stopped");
+    let (status, discarded) = fixture.run_action(other, "discard").await;
+    assert_eq!(status, StatusCode::OK, "{discarded}");
+    assert_eq!(discarded["completionStatus"], "stopped");
+    assert_eq!(
+        fixture.started_runs(),
+        [head, identified, plain, second, third, waiting]
+    );
     fixture.finish();
 }
 
@@ -6906,6 +6930,42 @@ async fn a_restart_without_the_graph_still_interrupts_a_plain_message() {
     assert_eq!(fixture.started(plain).await["graph"]["nodeId"], node);
     fixture.settle(plain, true);
     fixture.settled(plain, "accepted").await;
+    fixture.finish();
+}
+
+/// PAUSE-003 (#722): a Resume whose graph preparation ends without starting the run, for
+/// example with an unreadable answer, leaves it waiting for the user again, holding nothing.
+/// The chain behind it stays paused, and a later Resume runs it in order.
+#[tokio::test]
+async fn a_resume_whose_preparation_ends_ambiguously_waits_for_the_user_again() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let (head, _) = fixture.invoke(41).await;
+    fixture.started(head).await;
+    let (second, _) = fixture.invoke(42).await;
+    fixture.waits_for(second, "node").await;
+    fixture.restart().await;
+
+    fixture.garbled_actions.lock().unwrap().insert(41);
+    let (status, body) = fixture.run_action(head, "resume").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "resume_not_started");
+    assert_eq!(fixture.status_of(head).await, "interrupted");
+    assert_eq!(fixture.status_of(second).await, "paused");
+    assert!(fixture.started_runs().is_empty());
+    let summary = fixture.thread_summary().await;
+    assert!(summary.get("activity").is_none(), "{summary}");
+
+    // Once the graph answers again, the chain resumes in order; its node was never left held.
+    fixture.garbled_actions.lock().unwrap().clear();
+    let (status, _) = fixture.run_action(head, "resume").await;
+    assert_eq!(status, StatusCode::OK);
+    fixture.started(head).await;
+    fixture.waits_for(second, "node").await;
+    fixture.settle(head, true);
+    fixture.started(second).await;
+    fixture.settle(second, true);
+    fixture.settled(second, "accepted").await;
     fixture.finish();
 }
 
@@ -8646,7 +8706,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
 }
 
 #[tokio::test]
-async fn interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread_on_restart() {
+async fn interrupted_ordinary_interaction_waits_for_resume_and_releases_the_thread_on_restart() {
     let temporary = tempfile::Builder::new()
         .prefix("relayer-interrupted-interaction-")
         .tempdir()
@@ -8716,12 +8776,14 @@ async fn interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread
         .iter()
         .find(|interaction| interaction["id"] == interrupted_id)
         .unwrap();
-    assert_eq!(recovered["completionStatus"], "failed");
+    // Even without the graph runtime, a message that was executing waits, interrupted, for the
+    // user's Resume (#722); it never holds the thread.
+    assert_eq!(recovered["completionStatus"], "interrupted");
     assert!(
         recovered["completionError"]
             .as_str()
             .unwrap()
-            .contains("Send a follow-up to continue")
+            .contains("Resume runs it again")
     );
 
     let follow_up = reopened

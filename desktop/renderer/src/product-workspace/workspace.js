@@ -4784,6 +4784,12 @@ export function createProductWorkspace({
       fitInteractionGraphPopover();
       return;
     }
+    // The run view went away with the last run that needed it, such as a thread's only
+    // paused message resumed: its popover closes and focus returns to the trigger.
+    if (focusedGraphControl && turnPopoverOpen) {
+      closeTurnPopover();
+      pickerButton.focus({ preventScroll: true });
+    }
     $("#turnPicker .turn-stepper").setAttribute("aria-label", "Turn navigation");
     pickerButton.disabled = turnIndex < 0 || !turns.length;
     pickerButton.textContent = `Turn ${turnIndex < 0 ? 0 : turnIndex + 1} of ${turns.length}`;

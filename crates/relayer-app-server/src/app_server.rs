@@ -791,7 +791,9 @@ pub(crate) async fn reconcile_interrupted_work(
             {
                 // A run an earlier startup interrupted keeps waiting for the user's Resume;
                 // its next start reconciles it with the graph (#722).
-                if interaction.completion_status == "interrupted" {
+                // A failure that may clear keeps it interrupted for the user's Resume. A
+                // deterministic integrity failure is quarantined below like any other run.
+                if interaction.completion_status == "interrupted" && error.is_retryable() {
                     eprintln!(
                         "keeping interrupted run {} for the user's Resume after startup reconciliation failed: {error}",
                         interaction.id
@@ -986,7 +988,7 @@ pub(crate) async fn reconcile_interrupted_work(
         .await?;
     if interrupted > 0 {
         eprintln!(
-            "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
+            "recovered {interrupted} interrupted ordinary interaction(s) during backend startup"
         );
     }
     if let Some(runtime) = runtime

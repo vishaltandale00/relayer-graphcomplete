@@ -23,6 +23,9 @@ pub(crate) enum RestartDiscard {
     /// The graph already holds the run's call. The run now carries a Stop, and the caller
     /// stops its graph current before the product row ends stopped.
     SettleBeforeStart,
+    /// The graph holds the run's call, but GraphComplete is unavailable to stop it, so
+    /// nothing changed.
+    NeedsGraph,
 }
 
 impl SqliteProductStore {
@@ -250,13 +253,14 @@ impl SqliteProductStore {
         &self,
         thread: ThreadId,
         run: InteractionId,
+        graph_available: bool,
     ) -> Result<RestartDiscard, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let bound: Option<bool> = sqlx::query_scalar(
             "SELECT i.graph_node_id IS NOT NULL OR EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=i.id AND prepared_graph_node_id IS NOT NULL)
              FROM interactions i WHERE i.id=?1 AND i.thread_id=?2 AND i.completion_status IN ('paused','interrupted')
                AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1)
-               AND i.thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL)",
+               AND i.thread_id IN (SELECT id FROM threads WHERE conversation_import_id IS NULL AND archived_at IS NULL)",
         )
         .bind(run.value())
         .bind(thread.value())
@@ -264,6 +268,7 @@ impl SqliteProductStore {
         .await?;
         let outcome = match bound {
             None => RestartDiscard::NotResumable,
+            Some(true) if !graph_available => RestartDiscard::NeedsGraph,
             Some(false) => {
                 sqlx::query("UPDATE interactions SET completion_status='stopped',completion_error=?2 WHERE id=?1 AND completion_status IN ('paused','interrupted')")
                     .bind(run.value())
@@ -386,6 +391,15 @@ mod tests {
         store.set_thread_archived(thread, true).await.unwrap();
         assert!(store.claim_restart_runs(thread, &[runs[0]]).await.is_err());
         assert_eq!(store.completion_status_for_test(runs[0]).await, "paused");
+        // Nor is it discarded there.
+        assert_eq!(
+            store
+                .discard_restart_run(thread, runs[0], true)
+                .await
+                .unwrap(),
+            RestartDiscard::NotResumable
+        );
+        assert_eq!(store.completion_status_for_test(runs[0]).await, "paused");
     }
 
     /// PAUSE-003: on a node, only the head of the paused chain is a Resume all head, and a
@@ -423,14 +437,29 @@ mod tests {
 
         // Discarding the head makes the next run the head, still paused.
         assert_eq!(
-            store.discard_restart_run(thread, runs[0]).await.unwrap(),
+            store
+                .discard_restart_run(thread, runs[0], true)
+                .await
+                .unwrap(),
             RestartDiscard::Stopped
         );
         let discarded = store.get_interaction(runs[0]).await.unwrap().unwrap();
         assert_eq!(discarded.completion_status, "stopped");
         assert_eq!(discarded.text, "Run");
+        // It never ran, so it neither owns nor obscures the thread's route, even with no model.
+        assert_ne!(
+            store
+                .conversation_compatibility(thread)
+                .await
+                .unwrap()
+                .status,
+            "blocked"
+        );
         assert_eq!(
-            store.discard_restart_run(thread, runs[0]).await.unwrap(),
+            store
+                .discard_restart_run(thread, runs[0], true)
+                .await
+                .unwrap(),
             RestartDiscard::NotResumable
         );
         assert_eq!(store.completion_status_for_test(runs[1]).await, "paused");
@@ -482,8 +511,20 @@ mod tests {
             .execute(&store.pool)
             .await
             .unwrap();
+        // Without GraphComplete its graph current cannot stop, so nothing changes.
         assert_eq!(
-            store.discard_restart_run(thread, runs[3]).await.unwrap(),
+            store
+                .discard_restart_run(thread, runs[3], false)
+                .await
+                .unwrap(),
+            RestartDiscard::NeedsGraph
+        );
+        assert_eq!(store.completion_status_for_test(runs[3]).await, "paused");
+        assert_eq!(
+            store
+                .discard_restart_run(thread, runs[3], true)
+                .await
+                .unwrap(),
             RestartDiscard::SettleBeforeStart
         );
         let settling = store.get_interaction(runs[3]).await.unwrap().unwrap();

@@ -1,6 +1,6 @@
 import { Window } from "happy-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { interactionGraph, interactionGraphStatusChips } from "../desktop/renderer/src/product-workspace/interaction-graph.js";
+import { interactionGraph, interactionGraphStatus, interactionGraphStatusChips } from "../desktop/renderer/src/product-workspace/interaction-graph.js";
 import { createProductWorkspace, turnStatusPresentation } from "../desktop/renderer/src/product-workspace/workspace.js";
 
 afterEach(() => {
@@ -56,11 +56,28 @@ describe("the interaction graph as the run view (#721, #722)", () => {
   });
 
   it("keeps a running run out of a deck and shows the run view for a turn with no graph yet", () => {
-    // After a restart the user starts a new run on node 21; it runs at once, beside the chain.
-    const turns = [...restartTurns(), { id: 10, threadId: 10, sequence: 10, text: "New run", completionStatus: "running", runNodeId: 21, interactionGraph: invokedFrom(1) }];
-    const graph = interactionGraph(turns, 1, { controllable: true });
-    expect(graph.nodes.find((node) => node.id === "5").deck.map((run) => run.id)).toEqual(["6", "7"]);
-    expect(graph.nodes.find((node) => node.id === "10").controls.map((control) => control.action)).toEqual(["stop"]);
+    // After a restart the user starts a new run on node 21, which runs at once beside the
+    // chain, and another that waits behind it. The waiting run folds under the run that holds
+    // the node, not under the paused chain.
+    const turns = [...restartTurns(),
+      { id: 10, threadId: 10, sequence: 10, text: "New run", completionStatus: "running", runNodeId: 21, interactionGraph: invokedFrom(1) },
+      { id: 11, threadId: 10, sequence: 11, text: "Behind it", completionStatus: "queued", queueReason: "node", runNodeId: 21, interactionGraph: invokedFrom(1) }];
+    const graph = interactionGraph(turns, 7, { controllable: true });
+    const card = (id) => graph.nodes.find((node) => node.id === id);
+    expect(card("5").deck.map((run) => run.id)).toEqual(["6", "7"]);
+    expect(card("5").deckPaused).toBe(true);
+    expect(card("10").controls.map((control) => control.action)).toEqual(["stop"]);
+    expect(card("10").deck.map((run) => run.id)).toEqual(["11"]);
+    expect(card("10").deckPaused).toBe(false);
+    // A selected run inside a deck is not drawn a second time.
+    expect(graph.nodes.filter((node) => node.id === "7")).toHaveLength(0);
+    // A preparation waiting for its action's Retry has only that Retry: no Stop, not counted.
+    const retry = interactionGraph([...restartTurns(), { id: 12, threadId: 10, sequence: 12, text: "Retry me", completionStatus: "submitted", runNodeId: 23, interactionGraph: invokedFrom(1) }], 1, {
+      controllable: true, invocations: [{ sourceInteractionId: 1, actionId: 50, resultInteractionId: 12, preparationRecoverable: true }],
+    });
+    expect(retry.nodes.find((node) => node.id === "12").controls).toEqual([]);
+    expect(interactionGraphStatus(retry.nodes.find((node) => node.id === "12"))).toBe("Waiting for Retry");
+    expect(retry.counts.running).toBe(1);
     // A thread whose only message paused before it was prepared still gets its run view.
     const lone = [{ id: 1, threadId: 10, sequence: 1, text: "Waited for a slot", completionStatus: "paused" }];
     expect(interactionGraph(lone, 1, { controllable: true }).nodes[0].controls.map((control) => control.action)).toEqual(["resume", "discard"]);
@@ -197,6 +214,45 @@ it("shows a relaunch's paused runs and resumes them from the graph popover", asy
     await window.happyDOM.waitUntilComplete();
     expect(popover.querySelector(".interaction-graph-restart-notice")).toBeNull();
     expect(trigger.querySelector("b.needs-attention")).toBeNull();
+  } finally {
+    workspace.dispose?.();
+    await window.happyDOM.close();
+  }
+});
+
+it("returns focus to the trigger when the last run needing the user leaves the run view", async () => {
+  const window = new Window({ url: "http://127.0.0.1:3000" });
+  vi.stubGlobal("document", window.document);
+  vi.stubGlobal("window", window);
+  vi.stubGlobal("lucide", new Proxy({ createElement: () => window.document.createElement("svg") }, { get: (t, k) => t[k] ?? {} }));
+  window.document.body.innerHTML = '<section id="threadView"></section>';
+  // A thread whose only message paused before it was ever prepared: no graph projection.
+  const only = { id: 1, threadId: 10, sequence: 1, text: "Waited for a slot", completionStatus: "paused" };
+  const state = {
+    status: "idle", currentInteractionId: 1, capabilities: { stopRuns: true }, invocationInventoryAvailable: true,
+    conversationCompatibility: { threadId: 10, status: "unrestricted", harnessId: "fixture" },
+    interactions: [only], actionInvocations: [], nodes: [], actions: [], projects: [], permissionProfiles: [],
+    modelSettings: { defaults: { harnessId: "fixture" }, harnesses: [{ id: "fixture", available: true }], providers: [], families: [] },
+    modelCatalog: [], pendingActionInvocations: [],
+  };
+  const selection = { currentThreadId: 10, currentInteractionId: 1, selectedNodeId: null, layerPath: [] };
+  const workspace = createProductWorkspace({
+    root: window.document, getState: () => state, getThread: () => ({ id: 10, title: "New", harnessId: "fixture" }), selection, mode: "interactive",
+    onResumeInteraction: async () => {}, onDiscardInteraction: async () => {}, onResumeAllRuns: async () => {}, showThread() {}, showEmpty() {},
+  });
+  try {
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    const trigger = window.document.querySelector("#turnPickerButton");
+    trigger.click();
+    await window.happyDOM.waitUntilComplete();
+    const popover = window.document.querySelector("#turnPopover");
+    popover.querySelector('[data-run-action="discard"][data-run-id="1"]').focus();
+    only.completionStatus = "stopped";
+    workspace.render();
+    await window.happyDOM.waitUntilComplete();
+    expect(popover.classList.contains("hidden")).toBe(true);
+    expect(window.document.activeElement).toBe(trigger);
   } finally {
     workspace.dispose?.();
     await window.happyDOM.close();

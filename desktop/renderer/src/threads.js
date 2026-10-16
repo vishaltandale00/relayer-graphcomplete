@@ -426,12 +426,9 @@ function layerContainsUnresolvedInvokedAction(layer, invocations = appState.acti
   )) ?? false;
 }
 
-// A run a restart paused or interrupted (#722) can still resume, so its action is unresolved.
 const NONTERMINAL_INVOCATION_STATUSES = new Set([
   "not_started",
   "queued",
-  "paused",
-  "interrupted",
   "running",
   "submitted",
   "waiting_for_approval",
@@ -447,6 +444,10 @@ function layerContainsPendingInvokedAction(layer, invocations = appState.actionI
   );
 }
 
+// A run a restart paused or interrupted (#722) can still resume, so its action is unresolved
+// and its layer stays refreshable. It waits for the user, so it is not pending work to poll.
+const RESTART_STOPPED_INVOCATION_STATUSES = new Set(["paused", "interrupted"]);
+
 function layerContainsRefreshableInvokedAction(layer, invocations = appState.actionInvocations) {
   return layerContainsUnresolvedInvokedAction(
     layer,
@@ -454,6 +455,7 @@ function layerContainsRefreshableInvokedAction(layer, invocations = appState.act
       resultCompletionStatus == null
       || resultCompletionStatus === "accepted"
       || NONTERMINAL_INVOCATION_STATUSES.has(resultCompletionStatus)
+      || RESTART_STOPPED_INVOCATION_STATUSES.has(resultCompletionStatus)
     )),
   );
 }

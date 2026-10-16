@@ -2936,9 +2936,10 @@ impl ProductService {
         &self,
         thread: ThreadId,
         run: InteractionId,
+        graph_available: bool,
     ) -> Result<crate::storage::RestartDiscard, ProductError> {
         self.storage
-            .discard_restart_run(thread, run)
+            .discard_restart_run(thread, run, graph_available)
             .await
             .map_err(Into::into)
     }
