@@ -18,12 +18,15 @@ import {
   workspaceBreadcrumbItems,
   workspaceModeCapabilities,
   humanTurns,
+  messageTurns,
   workspaceTurns,
   nativeInvocationCurrentPresentation,
 } from "./model.js";
 import { createLucideIcon, createRelayerIcon as createSymbolIcon, relayerIconFamily, renderThreadTitle } from "./icons.js";
 import { createImageIcon, imageIconReference } from "./image-icons.js";
-import { interactionActivity, NODE_RUN_STATE, nodeRunState, THREAD_ACTIVITY } from "./run-state.js";
+import { NODE_RUN_STATE, nodeActiveRuns, nodeRunState, THREAD_ACTIVITY, threadActivity,
+  withoutPreparationsAwaitingRetry,
+} from "./run-state.js";
 import { graphLayoutSignature, nodesInReadingOrder, projectLayerNodePositions } from "./graph-layout.js";
 import { graphEdgePath, graphFollowWaypoints, graphLayerCircle, graphRoutedEdgePath, resolveEdgeShape } from "./edge-shapes.js";
 import { renderMarkdown } from "./markdown.js";
@@ -36,6 +39,7 @@ import {
   restoredDraftForInteraction,
 } from "../interaction-failure-model.js";
 import { createNodeContextDraftController } from "../node-context-drafts.js";
+import { createLiveAnswerController } from "../live-answers.js";
 import {
   captureTextControlState,
   committedInputAttachment,
@@ -438,10 +442,11 @@ export function graphTurnNavigationDelta(event, graphFocused) {
   return null;
 }
 
-export { humanTurns, workspaceTurns } from "./model.js";
+export { humanTurns, messageTurns, workspaceTurns } from "./model.js";
 
+/** The composer's Stop: the active message turn. Each invoked run has its own Stop on its node. */
 export function productStopTarget(state, thread) {
-  return humanTurns(state, thread).findLast((turn) => ["submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
+  return messageTurns(state, thread).findLast((turn) => ["submitted", "running", "waiting_for_approval"].includes(turn.completionStatus)) || null;
 }
 
 export function turnStatusPresentation(status) {
@@ -1363,12 +1368,12 @@ export function applyComposerCapabilities({ composer, prompt, send, readOnlyMess
 }
 
 export function composerStatusForThread(state, thread) {
-  return humanTurns(state, thread).at(-1)?.completionStatus || state.status || "idle";
+  return messageTurns(state, thread).at(-1)?.completionStatus || state.status || "idle";
 }
 
-/** The latest human turn, which the composer follows up, retries, and inherits a model from. */
-export function latestHumanTurn(state, thread) {
-  return humanTurns(state, thread).at(-1);
+/** The latest message turn, which the composer follows up, retries, and inherits a model from. */
+export function latestMessageTurn(state, thread) {
+  return messageTurns(state, thread).at(-1);
 }
 
 export function composerFocusRestoration(
@@ -1677,8 +1682,18 @@ export function createProductWorkspace({
   function releaseDetachedIcons() {
     for (const mount of iconMounts) if (!mount.isConnected) { mount.disposeIcon(); iconMounts.delete(mount); }
   }
+  function mountGraphNodeIcon(element, node, presentation) {
+    const icon = createRelayerIcon(node.icon || node.metadata?.relayer?.icon,
+      { class: "relayer-node-icon" }, node);
+    element.querySelector(".glyph").replaceChildren(icon);
+    presentation.iconStatus = "pending";
+    icon.readyIcon?.then(status => {
+      if (element.querySelector(".glyph").firstElementChild === icon) presentation.iconStatus = status;
+    });
+  }
   const capabilities = workspaceModeCapabilities(mode);
   let graphNodes = [];
+  const graphNodeElements = new WeakMap();
   let graphEdges = [];
   let graphEdgeShape = resolveEdgeShape(undefined);
   // Agent-authored per-edge routes by edge ID, with waypoints projected into the world plane.
@@ -1757,6 +1772,7 @@ export function createProductWorkspace({
   const inputDraftController = inputDraftApi
     ? createNodeInputDraftController({ api: inputDraftApi })
     : null;
+  const liveAnswerController = inputDraftApi?.answer ? createLiveAnswerController({ api: inputDraftApi }) : null;
   const inputDraftLoads = inputDraftController
     ? createNodeInputDraftLoadQueue({ load: (threadId) => inputDraftController.load(threadId) })
     : null;
@@ -2686,6 +2702,7 @@ export function createProductWorkspace({
     $("#detailIcon").dataset.family = "neutral";
     $("#detailKind").textContent = kind || anchor.kind;
     $("#detailTitle").textContent = title || `${anchor.kind} comments`;
+    syncNodeRunBar();
     $("#detailContent").replaceChildren();
     $("#detailActions").classList.add("hidden");
     $("#detailActions").replaceChildren();
@@ -3708,7 +3725,70 @@ export function createProductWorkspace({
     renderNodeContextDock();
     syncComposer();
   }
+  // Each run an invoke action started has its own status and Stop on the selected node it came
+  // from. Runs from one node can run at once, so each active run gets a row. Rows are keyed by
+  // run and updated in place: a refresh keeps keyboard focus and never re-announces a row.
+  const stopNodeRun = async (runId) => {
+    const thread = getThread();
+    if (!thread || pendingStops.has(runId)) return;
+    pendingStops.add(runId);
+    stopErrors.delete(runId);
+    syncNodeRunBar();
+    try { await onStopInteraction(thread.id, runId); }
+    catch (failure) { stopErrors.set(runId, failure.message || "Stop could not be confirmed. Try again."); }
+    finally { pendingStops.delete(runId); syncNodeRunBar(); }
+  };
+  const syncNodeRunBar = () => {
+    const bar = $("#nodeRunBar");
+    const thread = getThread();
+    const state = getState();
+    const node = selection.selectedNodeId == null
+      ? null
+      : state.nodes?.find((candidate) => String(candidate.id) === String(selection.selectedNodeId));
+    const runs = node && mode === "interactive" && thread?.imported !== true && state.capabilities?.stopRuns === true
+      ? nodeActiveRuns(node, state.actions, state.actionInvocations, state.interactions)
+      : [];
+    bar.classList.toggle("hidden", runs.length === 0);
+    const existing = new Map([...bar.children].map((row) => [row.dataset.interactionId, row]));
+    const rows = runs.map(({ invocation, run }) => {
+      const runId = String(run.id);
+      let row = existing.get(runId);
+      if (!row) {
+        row = document.createElement("div");
+        row.className = "node-run-row";
+        row.dataset.interactionId = runId;
+        const status = document.createElement("span");
+        status.className = "node-run-status";
+        status.setAttribute("role", "status");
+        const stop = document.createElement("button");
+        stop.type = "button";
+        stop.className = "node-run-stop";
+        stop.textContent = "Stop";
+        stop.onclick = () => { void stopNodeRun(run.id); };
+        row.append(status, stop);
+      }
+      const action = state.actions?.find((candidate) => String(candidate.id) === String(invocation.actionId));
+      const label = action ? actionPresentation(action).label : null;
+      const stopping = pendingStops.has(run.id) || (run.stopRequested && !run.stopError);
+      const error = stopErrors.get(run.id) || run.stopError;
+      const phase = error
+        || (stopping ? "Stopping…" : run.completionStatus === "waiting_for_approval" ? "Needs approval" : "Running");
+      const text = label ? `${label} · ${phase}` : phase;
+      const [status, stop] = row.children;
+      if (status.textContent !== text) status.textContent = text;
+      row.classList.toggle("has-error", Boolean(error));
+      stop.disabled = Boolean(stopping);
+      stop.setAttribute("aria-busy", String(Boolean(stopping)));
+      stop.setAttribute("aria-label", label ? `Stop ${label}` : "Stop run");
+      return row;
+    });
+    for (const row of existing.values()) if (!rows.includes(row)) row.remove();
+    rows.forEach((row, index) => {
+      if (bar.children[index] !== row) bar.insertBefore(row, bar.children[index] ?? null);
+    });
+  };
   const syncComposer = () => {
+    syncNodeRunBar();
     resizeComposerTextarea(prompt);
     const thread = getThread();
     if (!thread) {
@@ -3874,7 +3954,7 @@ export function createProductWorkspace({
     // While another thread is shown, the send's thread's newest scope
     // decides: newer text there supersedes the stranded text, and an empty
     // one carries it forward when the thread is shown again.
-    const newestTurn = shown ? null : humanTurns(getState(), { id: submission.threadId }).at(-1);
+    const newestTurn = shown ? null : messageTurns(getState(), { id: submission.threadId }).at(-1);
     const newestScopeKey = newestTurn ? composerDraftScopeKey(submission.threadId, newestTurn.id) : null;
     if (!shown && (!newestScopeKey || newestScopeKey === submission.scopeKey
       || !(threadFollowupDraft(newestScopeKey) ?? composerDraftScopeState.drafts.get(newestScopeKey)?.promptValue))) {
@@ -4424,15 +4504,17 @@ export function createProductWorkspace({
       pickerButton.disabled = !turns.length;
       pickerButton.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6h12M6 6v12m0-6h12"/><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/></svg><b>${graph.contextCount}</b>`;
       pickerButton.setAttribute("aria-label", `Open interaction graph. ${graph.contextCount} attached context nodes`);
-      const title = graphDocument.createElement("div"); title.className = "interaction-graph-heading";
+      const popover = $("#turnPopover");
+      const title = popover.querySelector(".interaction-graph-heading") ?? graphDocument.createElement("div"); title.className = "interaction-graph-heading";
       title.textContent = graph.incomplete ? "Interaction graph · Some connections unavailable" : "Interaction graph";
-      const viewport = graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
-      viewport.append(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
+      // Keep the scroll host mounted while status/context updates rebuild the cards.
+      const viewport = popover.querySelector(".interaction-graph-viewport") ?? graphDocument.createElement("div"); viewport.className = "interaction-graph-viewport";
+      viewport.replaceChildren(renderInteractionGraph(graphDocument, graph, interaction?.id, async (node) => {
         if (!await prepareNodeContextSelectionChange()) return;
         closeTurnPopover(); collapseContextPreviews();
         if (onSelectTurnById) await onSelectTurnById(node.id, { responseRoot: node.completionStatus === "accepted", threadId: node.threadId });
       }));
-      $("#turnPopover").replaceChildren(title, viewport);
+      if (viewport.parentElement !== popover) popover.replaceChildren(title, viewport);
       if (focusedTurnId !== null) [...$("#turnPopover").querySelectorAll("[data-turn-id]")].find((row) => row.dataset.turnId === focusedTurnId)?.focus({ preventScroll: true });
       $("#turnPopover").classList.toggle("hidden", !turnPopoverOpen);
       pickerButton.setAttribute("aria-expanded", String(turnPopoverOpen));
@@ -4743,10 +4825,12 @@ export function createProductWorkspace({
     renderTurnNavigation(state, thread, interaction);
     renderHistoricalContexts(state, interaction);
     renderHistoricalInputs(interaction);
-    // A child an agent launched is not a human turn: the composer's scopes follow human turns.
-    const turns = humanTurns(state, thread);
+    // An invoked run runs beside the message turns: the composer's scopes follow message turns.
+    const turns = messageTurns(state, thread);
     const latestInteraction = turns.at(-1);
-    renderThreadStatusSymbol(interactionActivity(latestInteraction));
+    renderThreadStatusSymbol(threadActivity(
+      withoutPreparationsAwaitingRetry(humanTurns(state, thread), state.actionInvocations || []),
+    ));
     if (inputDraftController && latestInteraction) {
       const statusKey = `${latestInteraction.id}:${latestInteraction.completionStatus || ""}`;
       const priorStatusKey = renderedInputDraftStatusKeys.get(threadId);
@@ -5297,7 +5381,9 @@ export function createProductWorkspace({
       ? cachedView.signature === nextSignature
       : !enteringView && graphSignature === nextSignature;
     graphSignature = nextSignature;
-    $("#nodeLayer").innerHTML = graphNodes.map((node) => {
+    const nodeLayer = $("#nodeLayer");
+    const priorElements = new Map(enteringView ? [] : [...nodeLayer.children].map(element => [element.dataset.node, element]));
+    const nextElements = graphNodes.map((node) => {
       const count = annotationCount(subjectAnchor("node", { nodeId: node.id }, state, thread));
       const badge = annotationEnabled && count
         ? `<span class="graph-annotation-badge" aria-label="${count} comment${count === 1 ? "" : "s"}">${count}</span>`
@@ -5305,24 +5391,43 @@ export function createProductWorkspace({
       const annotationLabel = count ? `. ${count} comment${count === 1 ? "" : "s"}` : "";
       const family = relayerIconFamily(node.icon || node.metadata?.relayer?.icon);
       const imageIcon = imageIconReference(node.icon);
-      const runStateKey = nodeRunState(node, state.actions, state.actionInvocations);
+      const runStateKey = nodeRunState(node, state.actions, state.actionInvocations, state.interactions);
       const runState = NODE_RUN_STATE[runStateKey];
       const runStateMarks = runState
         ? `${runState.icon ? '<span class="graph-node-state-badge" aria-hidden="true"></span>' : ""}<span class="graph-node-caption" aria-hidden="true">${runState.label}</span>`
         : "";
       const runStateLabel = runState ? `. ${runState.label}` : "";
-      return `<div class="graph-node ${String(node.id) === String(selection.selectedNodeId) ? "selected" : ""}" data-node="${escapeHtml(node.id)}" data-family="${family}"${imageIcon ? ' data-image-icon="true"' : ""}${runState ? ` data-run-state="${runStateKey}"` : ""} data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}${runStateLabel}${annotationLabel}"><div class="glyph"></div>${badge}<div class="copy"><b>${escapeHtml(node.title)}</b></div>${runStateMarks}</div>`;
-    }).join("");
+      const markup = `<div class="graph-node" data-node="${escapeHtml(node.id)}" data-family="${family}"${imageIcon ? ' data-image-icon="true"' : ""}${runState ? ` data-run-state="${runStateKey}"` : ""} data-review-ref="node-${escapeHtml(node.id)}" data-review-kind="node" role="button" tabindex="0" aria-label="Open ${escapeHtml(node.title)}${runStateLabel}${annotationLabel}"><div class="glyph"></div>${badge}<div class="copy"><b>${escapeHtml(node.title)}</b></div>${runStateMarks}</div>`;
+      const signature = JSON.stringify([markup, node.icon || node.metadata?.relayer?.icon]);
+      let element = priorElements.get(String(node.id));
+      if (!element || graphNodeElements.get(element)?.signature !== signature) {
+        const template = graphDocument.createElement("template");
+        template.innerHTML = markup;
+        element = template.content.firstElementChild;
+        const presentation = { signature, suppressClickAfterDrag: false };
+        graphNodeElements.set(element, presentation);
+        mountGraphNodeIcon(element, node, presentation);
+        if (runState?.icon) element.querySelector(".graph-node-state-badge").replaceChildren(createLucideIcon(runState.icon));
+      } else if (["fallback", "disposed"].includes(graphNodeElements.get(element).iconStatus)) {
+        // Retry unavailable image content on refresh without replacing the
+        // observed control or restarting a pending/loaded image request.
+        mountGraphNodeIcon(element, node, graphNodeElements.get(element));
+      }
+      element.classList.toggle("selected", String(node.id) === String(selection.selectedNodeId));
+      return element;
+    });
+    // Unchanged refreshes must not detach a control or release pointer capture
+    // between browser preflight and dispatch. A new view never reuses controls.
+    const retained = new Set(nextElements);
+    for (const element of [...nodeLayer.children]) if (!retained.has(element)) element.remove();
+    nextElements.forEach((element, index) => {
+      if (nodeLayer.children[index] !== element) nodeLayer.insertBefore(element, nodeLayer.children[index] ?? null);
+    });
     releaseDetachedIcons();
     $$('[data-node]').forEach((element) => {
       const authoredNode = graphNodes.find((candidate) => String(candidate.id) === element.dataset.node);
-      let suppressClickAfterDrag = false;
-      element.querySelector(".glyph").replaceChildren(createRelayerIcon(
-        authoredNode?.icon || authoredNode?.metadata?.relayer?.icon,
-        { class: "relayer-node-icon" }, authoredNode,
-      ));
+      const gesture = graphNodeElements.get(element);
       const runState = NODE_RUN_STATE[element.dataset.runState];
-      if (runState?.icon) element.querySelector(".graph-node-state-badge").replaceChildren(createLucideIcon(runState.icon));
       if (authoredNode) {
         authoredNode.layoutBounds = graphNodeLayoutBounds(
           element.offsetWidth,
@@ -5332,8 +5437,8 @@ export function createProductWorkspace({
         authoredNode.pillBox = { halfWidth: element.offsetWidth / 2, halfHeight: element.offsetHeight / 2 };
       }
       element.onclick = () => {
-        if (!shouldActivateGraphNodeAfterPointerGesture(suppressClickAfterDrag)) {
-          suppressClickAfterDrag = false;
+        if (!shouldActivateGraphNodeAfterPointerGesture(gesture.suppressClickAfterDrag)) {
+          gesture.suppressClickAfterDrag = false;
           return;
         }
         void selectNode(state, element.dataset.node);
@@ -5387,9 +5492,9 @@ export function createProductWorkspace({
         drawGraph();
       };
       element.onpointerup = () => {
-        suppressClickAfterDrag = Boolean(dragging?.moved);
-        if (suppressClickAfterDrag) {
-          graphWindow?.setTimeout?.(() => { suppressClickAfterDrag = false; }, 0);
+        gesture.suppressClickAfterDrag = Boolean(dragging?.moved);
+        if (gesture.suppressClickAfterDrag) {
+          graphWindow?.setTimeout?.(() => { gesture.suppressClickAfterDrag = false; }, 0);
         }
         dragging = null;
         fitAfterDrop();
@@ -5591,9 +5696,37 @@ export function createProductWorkspace({
   }
 
   function displayedInputAttachment(draft, input, occurrence) {
+    if (input.liveInput) return null;
     const bound = implicitInputAcceptance && (getState().actions ?? []).some(action => action.kind === "invoke"
       && action.inputActionIds?.some(id => String(id) === String(input.id)));
     return bound ? boundInputAttachment(draft, input, occurrence) : committedInputAttachment(draft, occurrence);
+  }
+
+  function liveInputIdentity(input) {
+    return input?.unavailable ? undefined : input ? JSON.stringify([input.attemptId, input.authorityEpoch, input.currentRevision]) : null;
+  }
+
+  function registerInputStage(key, entry, committedValue, receipt) {
+    const observedIdentity = liveInputIdentity(entry.action.liveInput);
+    const prior = implicitInputEntries.get(key);
+    const previousIdentity = prior && (Object.hasOwn(prior, "liveIdentity") ? prior.liveIdentity : liveInputIdentity(prior.action?.liveInput));
+    // Failed lookup grants no channel/authority knowledge and cannot discard a
+    // private edit. Keep its last confirmed identity while delivery is locked.
+    const liveIdentity = observedIdentity === undefined ? previousIdentity : observedIdentity;
+    if (prior && observedIdentity !== undefined && previousIdentity !== undefined && previousIdentity !== liveIdentity) {
+      inputStages.delete(key);
+      inputTouched.delete(key);
+      inputErrors.delete(key);
+      noteInputEdit(key);
+    }
+    // A graph-owned receipt wins over a conflicting private edit, including on
+    // reload when this workspace's local Answer controller has no history.
+    if (receipt) {
+      inputStages.set(key, committedValue);
+      inputTouched.delete(key);
+      inputErrors.delete(key);
+    } else if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, committedValue);
+    implicitInputEntries.set(key, { ...entry, liveIdentity });
   }
 
   function captureImplicitInputs(threadId, { composerOnly = false, action = null } = {}) {
@@ -5602,7 +5735,7 @@ export function createProductWorkspace({
     const interaction = currentInteraction(state, getThread());
     const layerId = currentLayerId(state, getThread());
     const draft = inputDraftController?.current(threadId);
-    return [...implicitInputEntries].filter(([key, entry]) => inputKeyBelongsToThread(key, threadId)
+    return [...implicitInputEntries].filter(([key, entry]) => !entry.action?.liveInput && inputKeyBelongsToThread(key, threadId)
       && (!composerOnly || isComposerInputOccurrence(entry.occurrence))
       && (!action || (String(entry.occurrence.presentingInteractionNodeId) === String(interaction?.graphNodeId)
         && String(entry.occurrence.presentingLayerId) === String(layerId)
@@ -5733,6 +5866,8 @@ export function createProductWorkspace({
   }
 
   function inputConsumersExhausted(state, input) {
+    if (input.liveInput && liveAnswerController?.receipt(getThread()?.id,
+      createInputOccurrence(currentInteraction(state)?.graphNodeId, currentLayerId(state, getThread()), input.id))) return true;
     if (typeof input.inputCanAcceptAnswer === "boolean") return !input.inputCanAcceptAnswer;
     const consumers = (state.actions ?? []).filter(action => action.kind === "invoke"
       && action.inputActionIds?.some(id => String(id) === String(input.id)));
@@ -5853,6 +5988,69 @@ export function createProductWorkspace({
     syncBoundInvokeControls(state);
   }
 
+  function liveAnswerButton(state, node, action, occurrence) {
+    const thread = getThread();
+    const interaction = currentInteraction(state, thread);
+    const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
+    const semantic = action.input ?? action;
+    const receipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(thread.id, occurrence);
+    const button = graphDocument.createElement("button");
+    button.type = "button";
+    button.className = "node-input-operator-send";
+    button.dataset.inputControlRole = "answer";
+    button.dataset.liveAnswerScope = JSON.stringify(occurrence);
+    button.textContent = receipt ? "Delivered" : "Answer";
+    button.setAttribute("aria-label", `${receipt ? "Delivered answer for" : "Answer"} ${semantic.prompt}`);
+    button.disabled = mode !== "interactive" || !capabilities.canCompose || !liveAnswerController || Boolean(receipt)
+      || !action.liveInput?.eligible || inputPending.has(stageKey)
+      || Boolean(validateInputStage(semantic, inputStages.get(stageKey)));
+    button.onclick = async () => {
+      if (button.disabled) return;
+      const staged = inputStages.get(stageKey);
+      const value = semantic.control === "text" ? { text: staged }
+        : { selected: semantic.options.filter(option => staged.includes(String(option.key))).sort((a, b) => a.key.localeCompare(b.key)) };
+      inputPending.begin(stageKey);
+      button.disabled = true;
+      inputErrors.delete(stageKey);
+      try {
+        await liveAnswerController.answer(thread.id, interaction.id, {
+          occurrence, attemptId: action.liveInput.attemptId, authorityEpoch: action.liveInput.authorityEpoch,
+          expectedRevision: action.liveInput.currentRevision,
+        }, value);
+        inputTouched.delete(stageKey);
+      } catch (error) {
+        const graphMessage = error?.details?.error?.message;
+        const message = typeof graphMessage === "string" && graphMessage.trim() ? graphMessage
+          : typeof error?.message === "string" && error.message !== "[object Object]" && error.message.trim()
+            ? error.message : "Answer could not be delivered. Reopen the question to check its receipt.";
+        inputErrors.set(stageKey, message);
+      }
+      finally {
+        inputPending.end(stageKey);
+        if (String(getThread()?.id) === String(thread.id) && String(selection.selectedNodeId) === String(node.id)) {
+          await selectNode(getState(), node.id, { notify: false });
+        }
+      }
+    };
+    return button;
+  }
+
+  function renderAuthoredLiveAnswers(state, node, actions) {
+    const thread = getThread();
+    const interaction = currentInteraction(state, thread);
+    const layerId = currentLayerId(state, thread);
+    const host = $("#nodeInputActions");
+    const live = actions.filter(action => action.liveInput);
+    host.classList.toggle("hidden", !live.length);
+    host.replaceChildren(...live.flatMap(action => {
+      const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
+      const error = graphDocument.createElement("p");
+      error.className = "node-input-error";
+      error.textContent = inputErrors.get(threadInputOccurrenceKey(thread.id, occurrence)) || "";
+      return [liveAnswerButton(state, node, action, occurrence), error];
+    }));
+  }
+
   function renderNodeInputActions(state, node, actions, { groupInvokes = true } = {}) {
     restoreGroupedInvokeControls();
     const host = $("#nodeInputActions");
@@ -5865,15 +6063,8 @@ export function createProductWorkspace({
     const interaction = currentInteraction(state, thread);
     const layerId = currentLayerId(state, thread);
     const immutableReviewInput = mode === "review";
-    if ((!inputDraftController || !loadedInputDraftThreads.has(String(thread?.id))) && !immutableReviewInput) {
-      const status = graphDocument.createElement("p");
-      status.className = "node-input-status";
-      status.textContent = inputDraftController
-        ? "Loading committed inputs…"
-        : "Input editing is unavailable in this view.";
-      host.replaceChildren(status);
-      return;
-    }
+    const draftReady = immutableReviewInput || (inputDraftController
+      && loadedInputDraftThreads.has(String(thread?.id)));
     if (interaction?.graphNodeId == null || layerId == null) {
       const status = graphDocument.createElement("p");
       status.className = "node-input-status";
@@ -5893,7 +6084,7 @@ export function createProductWorkspace({
     for (const rail of host.querySelectorAll("[data-input-rail-key]")) {
       inputRailScroll.set(rail.dataset.inputRailKey, rail.scrollLeft);
     }
-    const draft = immutableReviewInput
+    const draft = immutableReviewInput || !draftReady
       ? { revision: 0, attachments: [] }
       : inputDraftController.current(thread.id);
     const sections = actions.map((action) => {
@@ -5902,15 +6093,30 @@ export function createProductWorkspace({
       const semantic = action.input || action;
       const occurrence = createInputOccurrence(interaction.graphNodeId, layerId, action.id);
       const stageKey = threadInputOccurrenceKey(thread.id, occurrence);
+      if (!action.liveInput && !draftReady) {
+        const fieldset = graphDocument.createElement("fieldset");
+        fieldset.className = "node-input-editor";
+        fieldset.dataset.inputOccurrenceKey = stageKey;
+        fieldset.disabled = true;
+        const legend = graphDocument.createElement("legend");
+        legend.textContent = semantic.prompt;
+        const status = graphDocument.createElement("p");
+        status.className = "node-input-status";
+        status.textContent = inputDraftController
+          ? "Loading committed inputs…" : "Input editing is unavailable in this view.";
+        fieldset.append(legend, status);
+        return fieldset;
+      }
       const attachment = displayedInputAttachment(draft, action, occurrence);
-      const committedValue = initialInputStageValue(semantic, attachment);
-      implicitInputEntries.set(stageKey, { occurrence, semantic, action,
-        composerEligible: !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
-          && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
-      if (!inputStages.has(stageKey) || !inputTouched.has(stageKey)) inputStages.set(stageKey, committedValue);
+      const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(thread.id, occurrence);
+      const committedValue = liveReceipt ? (semantic.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key))) : initialInputStageValue(semantic, attachment);
+      registerInputStage(stageKey, { occurrence, semantic, action,
+        composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
+          && candidate.inputActionIds?.some(id => String(id) === String(action.id))) }, committedValue, liveReceipt);
       const fieldset = graphDocument.createElement("fieldset");
       fieldset.className = "node-input-editor";
       fieldset.dataset.inputOccurrenceKey = stageKey;
+      if (action.liveInput) fieldset.dataset.liveAnswerScope = JSON.stringify(occurrence);
       fieldset.dataset.reviewCapture = inputActionReviewRef(occurrence);
       fieldset.dataset.reviewActionId = String(action.id);
       fieldset.setAttribute("aria-label", `Input action: ${semantic.prompt}`);
@@ -6017,7 +6223,7 @@ export function createProductWorkspace({
         const persistedError = inputErrors.get(stageKey);
         error.textContent = persistedError || (inputTouched.has(stageKey) ? issue?.message : "") || "";
         const pending = inputPending.has(stageKey);
-        const locked = contextStagingDisabled() || pending || inputConsumersExhausted(state, action);
+        const locked = (action.liveInput ? mode !== "interactive" || !capabilities.canCompose || action.liveInput.eligible !== true || Boolean(liveReceipt) : contextStagingDisabled()) || pending || inputConsumersExhausted(state, action);
         control.disabled = locked;
         for (const option of control.querySelectorAll?.("button") || []) option.disabled = locked;
         undo.disabled = locked || inputStageValuesEqual(semantic, staged, committedValue);
@@ -6035,6 +6241,7 @@ export function createProductWorkspace({
           inputErrors.delete(stageKey);
           inputTouched.add(stageKey);
           sync();
+          if (action.liveInput) actionsHost.replaceChildren(liveAnswerButton(state, node, action, occurrence));
           syncComposer();
         };
       }
@@ -6107,7 +6314,8 @@ export function createProductWorkspace({
           });
         }
       };
-      if (implicitInputAcceptance) actionsHost.append(undo);
+      if (action.liveInput) actionsHost.append(liveAnswerButton(state, node, action, occurrence));
+      else if (implicitInputAcceptance) actionsHost.append(undo);
       else actionsHost.append(undo, commit);
       footer.append(error, actionsHost);
       fieldset.append(footer);
@@ -6307,6 +6515,7 @@ export function createProductWorkspace({
     releaseDetachedIcons();
     $("#detailKind").textContent = node.kind;
     $("#detailTitle").textContent = node.title;
+    syncNodeRunBar();
     const actions = (state.actions || []).filter((action) => String(action.sourceNodeId) === String(node.id));
     const inputActions = actions.filter((action) => action.kind === "input" && action.control);
     const ordinaryActions = actions.filter((action) => action.kind !== "input");
@@ -6335,11 +6544,13 @@ export function createProductWorkspace({
       for (const action of inputActions) {
         const occurrence = createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, action.id);
         const key = threadInputOccurrenceKey(getThread()?.id, occurrence);
-        implicitInputEntries.set(key, { occurrence, action, semantic: action.input ?? action,
-          composerEligible: !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
-            && candidate.inputActionIds?.some(id => String(id) === String(action.id))) });
-        if (!inputStages.has(key) || !inputTouched.has(key)) inputStages.set(key, initialInputStageValue(action.input ?? action,
-          displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)));
+        const liveReceipt = action.liveInput?.receipt ?? liveAnswerController?.receipt(getThread()?.id, occurrence);
+        const value = liveReceipt
+          ? (action.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key)))
+          : initialInputStageValue(action.input ?? action, displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence));
+        registerInputStage(key, { occurrence, action, semantic: action.input ?? action,
+          composerEligible: !action.liveInput && !(state.actions ?? []).some(candidate => candidate.kind === "invoke"
+            && candidate.inputActionIds?.some(id => String(id) === String(action.id))) }, value, liveReceipt);
       }
     }
     const authoredCapabilityState = {};
@@ -6374,26 +6585,41 @@ export function createProductWorkspace({
         const attachment = occurrence && inputDraftController
           ? displayedInputAttachment(inputDraftController.current(getThread()?.id), action, occurrence)
           : null;
+        const liveReceipt = action.liveInput && occurrence
+          ? action.liveInput.receipt ?? liveAnswerController?.receipt(getThread()?.id, occurrence)
+          : null;
+        const initialValue = liveReceipt
+          ? (action.control === "text" ? liveReceipt.value.text : liveReceipt.value.selected.map(option => String(option.key)))
+          : initialInputStageValue(action, attachment);
         const failure = occurrence
           ? authoredInputErrors.get(`${getThread()?.id}\u0000${authoredInputKey(occurrence)}`)
           : null;
+        const registered = occurrence && implicitInputEntries.get(threadInputOccurrenceKey(getThread()?.id, occurrence));
+        const boundaryIdentity = registered && Object.hasOwn(registered, "liveIdentity")
+          ? registered.liveIdentity : liveInputIdentity(action.liveInput);
         authoredCapabilityState[mount.id] = {
+          liveAnswerScope: action.liveInput && occurrence ? JSON.stringify(occurrence) : null,
+          ...(boundaryIdentity !== undefined || liveReceipt ? {
+            inputBoundary: JSON.stringify([boundaryIdentity, liveReceipt?.operationKey ?? null]),
+          } : {}),
           // A presentation replacement transfers an existing pending standard
           // value. The same occurrence registry continues to own its epoch;
           // authored edit callbacks below keep it current until submission.
           value: occurrence && implicitInputEntries.has(threadInputOccurrenceKey(getThread()?.id, occurrence))
             && inputStages.has(threadInputOccurrenceKey(getThread()?.id, occurrence))
             ? inputStages.get(threadInputOccurrenceKey(getThread()?.id, occurrence))
-            : initialInputStageValue(action, attachment),
+            : initialValue,
           ...(failure ? { error: failure } : {}),
           // Locked while a Send is in flight, so no commit races its
           // reservation. A commit during a run goes to the next draft (ADR 0008).
-          disabled: inputConsumersExhausted(state, action) || mode === "review"
-            || !inputDraftController
-            || !loadedInputDraftThreads.has(String(getThread()?.id))
-            || occurrence === null
-            || sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
-            || threadHasInFlightSend(inFlightSendThreads, getThread()?.id),
+          disabled: inputConsumersExhausted(state, action) || occurrence === null
+            || (action.liveInput
+              ? mode !== "interactive" || !capabilities.canCompose || !liveAnswerController
+                || action.liveInput.eligible !== true || Boolean(liveReceipt)
+              : mode === "review" || !inputDraftController
+                || !loadedInputDraftThreads.has(String(getThread()?.id))
+                || sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)
+                || threadHasInFlightSend(inFlightSendThreads, getThread()?.id)),
         };
       }
     }
@@ -6486,12 +6712,17 @@ export function createProductWorkspace({
         else authoredInputEdits.delete(editKey);
         const occurrence = inputAction && interaction?.graphNodeId != null && visibleLayer?.layer?.id != null
           ? createInputOccurrence(interaction.graphNodeId, visibleLayer.layer.id, inputAction.id) : null;
-        composerInputEdits.set(editKey, occurrence ? isComposerInputOccurrence(occurrence) : true);
+        composerInputEdits.set(editKey, !inputAction?.liveInput && (occurrence ? isComposerInputOccurrence(occurrence) : true));
+        // A null edit only clears the authored field's editing bookkeeping.
+        // Replacing Answer on blur detaches its pointer-down target before
+        // pointer-up, so the browser never dispatches the delivery click.
+        if (inputAction?.liveInput && value !== null) renderAuthoredLiveAnswers(getState(), node, inputActions);
         if (submitted) trackAuthoredInputSubmit(threadId, submitted, refusalKey, occurrence);
         syncBoundInvokeControls(getState());
         syncComposer();
       },
       onInput: async (action, value, context) => {
+        if (action.liveInput) return;
         const thread = getThread();
         const interactionNodeId = currentInteraction(state, thread)?.graphNodeId;
         const layerId = currentLayerId(state, thread);
@@ -6554,8 +6785,7 @@ export function createProductWorkspace({
     }
     mountedAuthoredDetail = authoredDetail.authored ? authoredDetail : null;
     if (authoredDetail.authored) {
-      $("#nodeInputActions").replaceChildren();
-      $("#nodeInputActions").classList.add("hidden");
+      renderAuthoredLiveAnswers(state, node, inputActions);
       $("#detailActions").replaceChildren();
       $("#detailActions").classList.add("hidden");
     } else {

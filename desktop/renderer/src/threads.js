@@ -35,6 +35,7 @@ import {
   layerPathForVisibleLayer,
   reconcileCurrentProjection,
   humanTurns,
+  messageTurns,
   workspaceTurns,
   nativeInvocationCurrentPresentation,
 } from "./product-workspace/model.js";
@@ -111,6 +112,13 @@ function pendingInvocationOrigin(pending, actionInvocations = appState.actionInv
   return source == null ? null : invocationOriginForSource(
     source.origin, source.layer, actionInvocations, pending.interactionId,
   );
+}
+/**
+ * The turn a thread opens on. Invoked runs run beside the message turns and are reached from
+ * their source node, so the latest message turn opens; its nodes carry each run's state and Stop.
+ */
+function defaultTurn(state, thread) {
+  return messageTurns(state, thread).at(-1) ?? humanTurns(state, thread).at(-1);
 }
 function displayableLayer(layer) {
   return layer?.layer?.id != null && layer.layer.state !== "draft" && layer.layer.state !== "stopped"
@@ -642,7 +650,7 @@ export async function refreshState(
     String(interaction.id) === String(viewState.currentInteractionId)
   )) || (visibleInteraction?.inertInvocationCurrent ? threadInteractions.find(interaction =>
     String(interaction.id) === String(visibleInteraction.invocationSourceInteractionId)) : null)
-    || humanTurns({ interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }, { id: nextThreadId }).at(-1);
+    || defaultTurn({ interactions: threadInteractions, actionInvocations: nextActionInvocations, importedInvocationHistory: nextImportedHistory }, { id: nextThreadId });
   let restoredInvocationSource = null;
   const sourceEntry = visibleInteraction?.inertInvocationCurrent
     && String(selected?.id) === String(visibleInteraction.invocationSourceInteractionId)
@@ -1056,8 +1064,8 @@ export async function submitInteraction(
     inputIdentityRevision,
   );
   try {
-    // A child an agent launched is not a human turn: a follow-up or retry never targets it.
-    const latestInteraction = humanTurns(appState, { id: threadId }).at(-1);
+    // An invoked run is not a message turn: a follow-up or retry never targets it.
+    const latestInteraction = messageTurns(appState, { id: threadId }).at(-1);
     const { path, body: retryBody } = interactionSubmissionTarget(
       threadId,
       latestInteraction,
@@ -1832,15 +1840,17 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
       && !isRejectedActionPreparation(durable)
       && !invokeResultIsRetryable(durable.resultCompletionStatus)
     ) {
-      onboardingTutorialController()?.actionSucceeded({
+      const followsResult = tutorialFollowsInvokeResult(onboardingTutorialController()?.actionSucceeded({
         threadId,
         interactionId: sourceInteractionId,
         actionId: action.id,
         resultInteractionId: durable.resultInteractionId,
-      });
-      supersedePendingHistory({ presentationChanged: true });
-      trackPendingTurn(threadId, durable.resultInteractionId, intent, invocationSource);
-      await refreshState(threadId, { historyMode: "push" }).catch(() => {});
+      }), durable.resultInteractionId);
+      if (followsResult) {
+        supersedePendingHistory({ presentationChanged: true });
+        trackPendingTurn(threadId, durable.resultInteractionId, intent, invocationSource);
+      }
+      await refreshState(threadId, { historyMode: followsResult ? "push" : "replace" }).catch(() => {});
       return { interaction: { id: durable.resultInteractionId }, recovered: true };
     } else {
       renderThread();
@@ -1868,21 +1878,20 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     && response.interaction?.id
     && !invokeResultIsRetryable(response.interaction.completionStatus)
     && sourceIsStillSelected;
+  let followsResult = false;
   if (createdResultCanAdvance) {
-    onboardingTutorialController()?.actionSucceeded({
+    followsResult = tutorialFollowsInvokeResult(onboardingTutorialController()?.actionSucceeded({
       threadId,
       interactionId: sourceInteractionId,
       actionId: action.id,
       resultInteractionId: response.interaction.id,
-    });
-    supersedePendingHistory({ presentationChanged: true });
+    }), response.interaction.id);
+    if (followsResult) supersedePendingHistory({ presentationChanged: true });
   }
-  if (resumedOrCreated && response.interaction?.id && !invokeResultIsRetryable(response.interaction.completionStatus)) {
-    trackPendingTurn(threadId, response.interaction.id, intent, invocationSource);
-  }
+  if (followsResult) trackPendingTurn(threadId, response.interaction.id, intent, invocationSource);
   if (String(viewState.currentThreadId) === String(threadId)) {
     void refreshState(threadId, {
-      historyMode: createdResultCanAdvance ? "push" : "replace",
+      historyMode: followsResult ? "push" : "replace",
     }).catch(() => {
       // The activation is already acknowledged. A failed optional read must
       // not report a failed Invoke or offer a second activation of this key.
@@ -1890,6 +1899,16 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     });
   }
   return response;
+}
+
+/**
+ * Invoked runs run beside each other, so an invoke keeps the reader on the layer it came from:
+ * the node shows its run's state and Stop, and the reader can invoke more. Only the guided
+ * tutorial, which waits for this exact result, follows it.
+ */
+export function tutorialFollowsInvokeResult(tutorial, resultInteractionId) {
+  return tutorial?.phase === "awaiting-accepted-response"
+    && String(tutorial.interactionId) === String(resultInteractionId);
 }
 
 async function createOrReuseProject(selectedScope) {

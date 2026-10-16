@@ -869,6 +869,7 @@ impl World {
                         thread_icon_selection_eligible: false,
                         require_native_continuity: false,
                         native_history_anchor: None,
+                        fresh_native_session: None,
                         project_id: None,
                         product_interaction_id: child.id.value(),
                         thread_id: thread.id.value(),
@@ -2832,6 +2833,7 @@ async fn v4_import_reexport_preserves_call_only_own_draft_history() {
         thread_icon_selection_eligible: false,
         require_native_continuity: false,
         native_history_anchor: None,
+        fresh_native_session: None,
         project_id: None,
         product_interaction_id: world.child.id.value(),
         thread_id: world.thread.id.value(),
@@ -6025,8 +6027,6 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
     };
     // This fixture has no provider continuity receipt for its historical root;
     // seed an ordinary unsent Product draft, which owns no graph or execution.
-    let busy = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id) VALUES (?1,(SELECT COALESCE(MAX(sequence),0)+1 FROM interactions WHERE thread_id=?1),'Busy ordinary turn','1','not_started','auto')")
-        .bind(world.thread.id.value()).execute(&world.pool).await.unwrap().last_insert_rowid();
     let draft = world
         .product
         .commit_action_input_attachment(
@@ -6038,6 +6038,13 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
             },
             0,
         )
+        .await
+        .unwrap();
+    // Admission refuses before any reservation. An active message turn no longer refuses an
+    // invoke (#717), so this refuses the new interaction at the same point as an archived
+    // thread's trigger does. The fixture's own running work would block a real archive.
+    sqlx::query("CREATE TRIGGER refuse_admission BEFORE INSERT ON interactions BEGIN SELECT RAISE(ABORT,'thread_archived'); END")
+        .execute(&world.pool)
         .await
         .unwrap();
     let refused = invoke_action_with_authority(
@@ -6052,11 +6059,11 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
     .await;
     let error = match refused {
         Err(error) => error,
-        Ok(_) => panic!("active ordinary turn was admitted"),
+        Ok(_) => panic!("an archived thread admitted an invoke"),
     };
     assert_eq!(
         error.message(),
-        "Wait for the active interaction to finish."
+        "Open this archived chat again before starting work."
     );
     assert!(
         world
@@ -6087,8 +6094,7 @@ async fn user_reservation_precedes_native_prepare_and_recovers_a_failed_bind() {
             .unwrap(),
         draft
     );
-    sqlx::query("UPDATE interactions SET completion_status='stopped' WHERE id=?1")
-        .bind(busy)
+    sqlx::query("DROP TRIGGER refuse_admission")
         .execute(&world.pool)
         .await
         .unwrap();
@@ -7892,6 +7898,19 @@ async fn mutation_ack_world(
     Vec<relayer_graph_core::GraphAction>,
     relayer_graph_core::ActionId,
 ) {
+    mutation_ack_world_with_live(label, false).await
+}
+
+async fn mutation_ack_world_with_live(
+    label: &str,
+    live: bool,
+) -> (
+    World,
+    NodeId,
+    relayer_graph_core::LayerId,
+    Vec<relayer_graph_core::GraphAction>,
+    relayer_graph_core::ActionId,
+) {
     use relayer_graph_core::{InputAction, InputControl};
     let world = World::new(label, true).await;
     let parent = world
@@ -7903,6 +7922,13 @@ async fn mutation_ack_world(
         )
         .await
         .unwrap();
+    if live {
+        world
+            .graph
+            .activate_completion_authority(parent.id)
+            .await
+            .unwrap();
+    }
     let writer = world.graph.writer_for_subgraph(parent.id).await.unwrap();
     let node = writer
         .submit_node(&NodeDraft {
@@ -7977,7 +8003,14 @@ async fn mutation_ack_world(
     definition.reusable = None;
     definition.input_action_ids.clear();
     writer.add_action(&definition).await.unwrap();
-    writer.complete(parent.id).await.unwrap();
+    if live {
+        writer
+            .transition_current(0, "ask", CurrentTransition::Advance { layer_id: layer.id })
+            .await
+            .unwrap();
+    } else {
+        writer.complete(parent.id).await.unwrap();
+    }
     sqlx::query(
         "UPDATE interactions SET graph_node_id=?1,completion_status='accepted' WHERE id=?2",
     )
@@ -8417,4 +8450,117 @@ async fn verify_started_invoke_ack(fault: &str) {
         2
     );
     world.finish().await;
+}
+
+#[tokio::test]
+async fn delivered_input_cannot_be_committed_or_selected_by_ordinary_send() {
+    use relayer_graph_core::{LiveAnswerRequest, PresentingInputOccurrence, SubmittedInputValue};
+    for answered in [false, true] {
+        let (world, parent, layer, fields, _) =
+            mutation_ack_world_with_live("delivered-ordinary-boundary", true).await;
+        let writer = world.graph.writer_for_subgraph(parent).await.unwrap();
+        let occurrence = PresentingInputOccurrence {
+            presenting_interaction_node_id: parent,
+            presenting_layer_id: layer,
+            action_id: fields[1].id,
+        };
+        let headers =
+            HeaderMap::from_iter([(header::COOKIE, "relayer_control=control".parse().unwrap())]);
+        let request = |revision| {
+            serde_json::from_value::<crate::api::input_drafts::CommitActionInputRequest>(serde_json::json!({"occurrence":occurrence,"value":{"text":"Ordinary stage"},"expectedRevision":revision})).unwrap()
+        };
+        if answered {
+            let page = writer.live_answers(0).await.unwrap();
+            world
+                .graph
+                .accept_live_answer(
+                    parent,
+                    ThreadId::new(world.thread.id.value()).unwrap(),
+                    &LiveAnswerRequest {
+                        attempt_id: 1,
+                        authority_epoch: page.authority_epoch,
+                        expected_revision: 1,
+                        operation_key: "delivered".into(),
+                        occurrence: occurrence.clone(),
+                        value: SubmittedInputValue::Text {
+                            text: "Accepted live value".into(),
+                        },
+                    },
+                )
+                .await
+                .unwrap();
+        }
+        writer
+            .transition_current(1, "finish", CurrentTransition::Return { layer_id: layer })
+            .await
+            .unwrap();
+        // Reconstruct an already stored ordinary draft from before this admission
+        // repair. This intentionally uses Product storage after terminal graph
+        // acceptance: active live questions have no ordinary canonical occurrence.
+        let draft = world
+            .product
+            .commit_action_input_attachment(
+                world.thread.id,
+                &occurrence,
+                &fields[1],
+                &crate::product::ActionInputValue::Text {
+                    text: "Ordinary stage".into(),
+                },
+                0,
+            )
+            .await
+            .unwrap();
+        // This is the exact graph-derived filter used by ordinary Send and retry.
+        let eligible = crate::api::input_drafts::composer_occurrences(&world.state, &draft)
+            .await
+            .unwrap_or_else(|error| panic!("settled selection: {}", error.internal_diagnostic()));
+        assert_eq!(
+            eligible,
+            if answered {
+                vec![]
+            } else {
+                vec![occurrence.clone()]
+            }
+        );
+        let projected = crate::api::input_drafts::get(
+            State(world.state.clone()),
+            headers.clone(),
+            Path(world.thread.id.value()),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("read draft: {}", error.internal_diagnostic()));
+        assert_eq!(
+            serde_json::to_value(projected.0).unwrap()["attachments"][0]["composerEligible"],
+            !answered
+        );
+        let result = crate::api::input_drafts::commit(
+            State(world.state.clone()),
+            headers,
+            Path(world.thread.id.value()),
+            Json(request(1)),
+        )
+        .await;
+        if answered {
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("Delivered occurrence accepted ordinary edit"),
+            };
+            let response = axum::response::IntoResponse::into_response(error);
+            assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+            assert_eq!(
+                world
+                    .product
+                    .action_input_draft(world.thread.id)
+                    .await
+                    .unwrap(),
+                draft
+            );
+        } else {
+            assert!(
+                result.is_ok(),
+                "Unanswered settled question must retain ordinary editing"
+            );
+        }
+        world.finish().await;
+    }
 }

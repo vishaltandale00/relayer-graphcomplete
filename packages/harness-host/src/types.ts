@@ -56,7 +56,7 @@ export interface HarnessConfiguration {
   readonly modelDefaults?: HarnessModelDefaults;
   /** Explicit authority to expose agent-authored complete(inputGraph); root Complete is unaffected. */
   readonly complete?: HarnessCompleteConfiguration;
-  /** Product-owned graph authority. Omission is equivalent to search and preview disabled. */
+  /** Product-owned graph authority. Omission grants `query-v1` search with previews disabled. */
   readonly graphCapabilityProfile?: GraphCapabilityProfile;
   readonly settings: JsonObject;
 }
@@ -182,10 +182,29 @@ export interface HarnessTraceSink {
   attach(input: HarnessTraceAttachmentInput): Promise<TraceAttachmentRef>;
 }
 
+/**
+ * One accepted earlier interaction of the thread, as graph pointers. A fresh native session reads
+ * the turn's message from its interaction node and its answer from its layer.
+ */
+export interface HarnessThreadHistoryEntry {
+  readonly interactionNodeId: number;
+  /** The returned layer, read through the graph capability. Absent when the turn returned none. */
+  readonly responseLayerId?: number;
+}
+
+/**
+ * Product-owned: this root run starts a fresh native session. It runs beside the thread's other
+ * runs and never resumes or replaces the thread's native root session.
+ */
+export type HarnessNativeSessionMode = "fresh";
+
 export interface HarnessCompletionTraceContext {
   readonly threadIconSelection?: { readonly eligible: true };
   readonly requireNativeContinuity?: boolean;
   readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
+  readonly nativeSession?: HarnessNativeSessionMode;
+  /** The thread's accepted interactions in order, sent with a fresh root run. */
+  readonly threadHistory?: readonly HarnessThreadHistoryEntry[];
   readonly productInteractionId: number;
   readonly personalPresentationVersionId?: number;
   /** Product-owned key for the same stored pin, never the current configuration default. */
@@ -254,6 +273,10 @@ export interface HarnessRunContext {
   /** Trusted product assertion: a fresh native root would lose legacy context. */
   readonly requireNativeContinuity?: boolean;
   readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
+  /** A fresh root run never resumes or replaces the thread's native root session. */
+  readonly nativeSession?: HarnessNativeSessionMode;
+  /** The thread's accepted interactions in order. Present for a fresh root run. */
+  readonly threadHistory?: readonly HarnessThreadHistoryEntry[];
   /** GraphComplete provenance; provider session identity is deliberately separate. */
   readonly origin: CompletionOrigin;
   readonly inputGraph: GraphNode;

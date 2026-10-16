@@ -1,0 +1,1238 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+  "sourceOverlay": "merge-review-followup-source.json",
+  "baseCommit": "964e34886bb06a6140a86980299772e56d21beda",
+  "plan": "merge-review-followup-20261015.md#required-checkpoints",
+  "gates": [
+    {
+      "gate": "build",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 190.032,
+      "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-build.txt",
+        "sha256": "35b01036028639658a0756f47f4bbae790ced9596e7605ddb3361bd66df3ef56",
+        "bytes": 2375
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-build-result.json",
+        "sha256": "36f68d740a3ed718c17334be24007727a33fb923b206b1f4331f09b23d625f60",
+        "bytes": 274
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-build-source.json",
+        "sha256": "5f034d9e3d232446342b7fbbf40bd6e376629c8e995b7b626b6e548f47699f15",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "annotation-capture",
+      "command": [
+        "node",
+        "--input-type=module",
+        "-e",
+        "import {runElectronProof} from \"./scripts/electron-proof-process.mjs\"; await runElectronProof({executable:\"./node_modules/.bin/electron\",script:\"scripts/capture-followup-node-annotations.mjs\",label:\"Follow-up annotation evidence\",resultVariable:\"RELAYER_ANNOTATION_EVIDENCE_RESULT\",profileVariable:\"RELAYER_ANNOTATION_EVIDENCE_PROFILE\"});"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 16.729,
+      "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-annotation-capture.txt",
+        "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+        "bytes": 1017
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-annotation-capture-result.json",
+        "sha256": "640f241393b927a8a5101ebc8a44e8afb683169abe8e75e619a8b9e6a33e167c",
+        "bytes": 645
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-annotation-capture-source.json",
+        "sha256": "5f034d9e3d232446342b7fbbf40bd6e376629c8e995b7b626b6e548f47699f15",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "social-capture",
+      "command": [
+        "npm",
+        "run",
+        "evidence:share-preview"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 2.432,
+      "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-social-capture.txt",
+        "sha256": "828a0c1b91e8b720bd1aa1e1a7f339f413aecbad90ca5af04acc5a909a439431",
+        "bytes": 14188
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-social-capture-result.json",
+        "sha256": "2dd9d08751f9b0003f3d7d5d460c3f594613db0cbdce231d4f828b297c340de0",
+        "bytes": 289
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-social-capture-source.json",
+        "sha256": "5f034d9e3d232446342b7fbbf40bd6e376629c8e995b7b626b6e548f47699f15",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "renderer-receipts",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/followup-annotation-evidence.test.mjs",
+        "test/desktop-social-preview-evidence.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 6.138,
+      "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Test Files  2 passed (2)",
+          "Tests  2 passed (2)"
+        ],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-renderer-receipts.txt",
+        "sha256": "440647f93e815f71e38e53673cf61fc14fc826d0dc2746cb75a64a65e14d054c",
+        "bytes": 253
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-renderer-receipts-result.json",
+        "sha256": "3f02c1f4c6f29180fdf5964e51fc0cba3063ef82246c0ad3dddfa6aff9a540bb",
+        "bytes": 423
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-renderer-receipts-source.json",
+        "sha256": "5f034d9e3d232446342b7fbbf40bd6e376629c8e995b7b626b6e548f47699f15",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "full-check",
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 2065.932,
+      "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [
+          "test result: ok. 396 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 140.54s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 49 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 7.45s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.80s",
+          "test result: ok. 41 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 149.74s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.36s",
+          "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.60s",
+          "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.78s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.02s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.07s",
+          "test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 26.14s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.88s",
+          "test result: ok. 17 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.33s",
+          "test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.59s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.79s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.35s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.74s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.19s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.47s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.54s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 42 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.64s",
+          "test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.80s",
+          "test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.03s",
+          "test result: ok. 9 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 2.07s",
+          "test result: ok. 116 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 25.71s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s",
+          "test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.90s",
+          "test result: ok. 21 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.50s",
+          "test result: ok. 47 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.41s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.21s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.81s",
+          "test result: ok. 26 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 13.61s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.33s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.21s",
+          "test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 16.76s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.20s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.79s",
+          "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.48s",
+          "test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.20s",
+          "test result: ok. 24 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 64.92s",
+          "test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 4.07s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s",
+          "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s"
+        ],
+        "testSummaries": [
+          "Test Files  3 failed | 323 passed | 1 skipped (327)",
+          "Tests  3 failed | 4322 passed | 3 skipped (4328)"
+        ],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-full-check.txt",
+        "sha256": "b9ee5abf9b81a7a0e88d2d03e0619e22059232e34af8566241a45435f303aa74",
+        "bytes": 253944
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-full-check-result.json",
+        "sha256": "a1787608cd9a4d8333f22195e2b9160f7693cd7f6b9edb53e0be9233aefa43ee",
+        "bytes": 275
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-full-check-source.json",
+        "sha256": "5f034d9e3d232446342b7fbbf40bd6e376629c8e995b7b626b6e548f47699f15",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "eval-web",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 168.6,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [
+          "interrupted startup: pending native child terminated and profile lock released",
+          "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+          "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+          "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+          "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+          "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+          "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+          "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+          "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+          "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+          "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+          "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+          "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+          "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+          "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+          "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, same-revision approval/resume screenshots, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, same-revision approval/resume screenshots, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+          "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+          "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+        ],
+        "currentMarkers": [
+          {
+            "authored": false,
+            "code": "authority_generation_expired"
+          },
+          {
+            "authored": false,
+            "revisions": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "statuses": [
+              "running",
+              "running",
+              "running",
+              "running",
+              "waiting_for_approval",
+              "running",
+              "running"
+            ]
+          },
+          {
+            "authored": false,
+            "gaps": [
+              {
+                "reason": "presentation_changed_during_capture",
+                "revision": 1
+              }
+            ]
+          },
+          {
+            "authored": true,
+            "code": "authority_generation_expired"
+          },
+          {
+            "authored": true,
+            "revisions": [
+              1,
+              1,
+              1,
+              1,
+              1,
+              1,
+              2
+            ],
+            "statuses": [
+              "running",
+              "running",
+              "running",
+              "running",
+              "waiting_for_approval",
+              "running",
+              "running"
+            ]
+          },
+          {
+            "authored": true,
+            "gaps": []
+          }
+        ]
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-eval-web.txt",
+        "sha256": "8a4924addecca4b6c7b2d3ce9c2751d46a985e79395bf3432da952784878c276",
+        "bytes": 6426
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-eval-web-result.json",
+        "sha256": "f6bcc6955f5ad83966f223b20bee66dd19a6bc0aefc78658248d80bd291fc904",
+        "bytes": 280
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-eval-web-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "compiled-runtime",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 68.882,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Test Files  1 passed (1)",
+          "Tests  12 passed (12)"
+        ],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-compiled-runtime.txt",
+        "sha256": "5621d99d0d5cb61fb47326eaae4bf732b3e3ba69cd9c1025d112eaf124ba8cf9",
+        "bytes": 380
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-compiled-runtime-result.json",
+        "sha256": "e7aaea7955c32d82e04360bd37ded724b50407283c121990427dd438633d746c",
+        "bytes": 294
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-compiled-runtime-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "electron-input",
+      "command": [
+        "node",
+        "scripts/run-node-input-actions-test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 34.026,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "nodeInput": {
+          "passed": true,
+          "paidInferenceCalls": 0
+        }
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-electron-input.txt",
+        "sha256": "cbe7b48ce984adfcae4832b3a8bb29750a84953e3670ea3b0c28fca45df2204e",
+        "bytes": 71120
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-electron-input-result.json",
+        "sha256": "031fb8e88f623aff16841b4eae63aaf76ac685c7331180736c296cc9a3ec86cc",
+        "bytes": 297
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-electron-input-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "electron-stop",
+      "command": [
+        "node",
+        "scripts/run-desktop-stop-test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 10.013,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": [],
+        "stop": {
+          "passed": true,
+          "results": [
+            {
+              "provider": "codex",
+              "duplicateClickAbortCount": 1,
+              "lifecycle": "stopped",
+              "attempt": "cancelled"
+            },
+            {
+              "provider": "prime",
+              "duplicateClickAbortCount": 1,
+              "lifecycle": "stopped",
+              "attempt": "cancelled"
+            }
+          ]
+        }
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-electron-stop.txt",
+        "sha256": "a4ce776ad2a7e986881a12fbaa76ed042041de475ae5db88b01bc292e2e2e179",
+        "bytes": 333
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-electron-stop-result.json",
+        "sha256": "232fefd2374cc51b1060fac9ecb9045bfaf133d9bcd0a14f49e78d6c63df7021",
+        "bytes": 291
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-electron-stop-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "secret-boundary",
+      "command": [
+        "npm",
+        "run",
+        "test:codex-secret-boundary"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 12.416,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Test Files  1 passed (1)",
+          "Tests  2 passed (2)"
+        ],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-secret-boundary.txt",
+        "sha256": "112a625870cb158435c0efd41ac6a9e51dc5a4e5ad42950556301e5e62f10f63",
+        "bytes": 428
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-secret-boundary-result.json",
+        "sha256": "baa90aeec7506072d98080e29b4f0f9319026707aa8ce9efc0632f5193551edb",
+        "bytes": 294
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-secret-boundary-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "python",
+      "command": [
+        "env",
+        "PYTHONPATH=python/relayer-graph/src",
+        "/opt/homebrew/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "python/relayer-graph/tests"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 4.05,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [
+          "Ran 99 tests in 3.615s"
+        ],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-python.txt",
+        "sha256": "eafca0591fc983d4b3c442233bf6023e491396fed406c730a3c3e77856ff7518",
+        "bytes": 198
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-python-result.json",
+        "sha256": "568635657b4575ea12f87c7525c606b824de75085a5cf728ffa78dba96542d8d",
+        "bytes": 409
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-python-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "ladybug-receipts",
+      "command": [
+        "npm",
+        "run",
+        "lint:ladybug-receipt"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 1.689,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-ladybug-receipts.txt",
+        "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+        "bytes": 927
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-ladybug-receipts-result.json",
+        "sha256": "35a64a55060c2c66eeecfd3707b1a4127b05ed77689e4e5a4de3419c2551575a",
+        "bytes": 287
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-ladybug-receipts-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    },
+    {
+      "gate": "prd",
+      "command": [
+        "npm",
+        "run",
+        "prd:check-readability"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 0.397,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "environment": {
+        "RUST_TEST_THREADS": "4",
+        "VITEST_MAX_WORKERS": "2"
+      },
+      "innerOutcome": {
+        "nativeSuiteResults": [],
+        "testSummaries": [],
+        "passChapters": []
+      },
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-prd.txt",
+        "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+        "bytes": 166
+      },
+      "result": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-prd-result.json",
+        "sha256": "809360ce23a258e58cc25f6ce4f722746a6669f315f5f424ca426b7aae215652",
+        "bytes": 288
+      },
+      "testedSource": {
+        "path": ".relayer/merge-actor-boundaries-review-followup-prd-source.json",
+        "sha256": "bf86db9ad09fe4f81bc6acb77d84d01d408d965e848d21a671e67fb244998e55",
+        "bytes": 14236
+      }
+    }
+  ],
+  "focused": [
+    {
+      "record": {
+        "path": ".relayer/native-live-pair-handoff.json",
+        "sha256": "d31bfbad98fd6a6f3706bece60e6a67b7dde30997de224db6b0d8272955f3be8",
+        "bytes": 4689
+      },
+      "scope": "Implementation focused handoff; independent review is separate. Whole-source/final binary certification comes from the assembled gates.",
+      "data": {
+        "role": "implementation handoff, not independent self-certification",
+        "sourceDigest": "60a8be97cfaaf0f9902b4120356bd9bde5a8af0ad16e9a349254e120a2e7f332",
+        "sourceFiles": [
+          {
+            "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+            "sha256": "00a2b6b3d709d066172013768e21acdcc4d3c20e5b5053f8e9e4df08a18bb2a2"
+          },
+          {
+            "path": "crates/relayer-app-server/src/api/live_answers.rs",
+            "sha256": "9f3506da6641ead401cf6c181fa29471cffc0690e3f432e8cc1ff9767791a89c"
+          },
+          {
+            "path": "crates/relayer-app-server/src/api/threads.rs",
+            "sha256": "8dc0610f3f1518a8ee0ada9db33a40510559c37433922bece218c12213fd31a1"
+          },
+          {
+            "path": "crates/relayer-app-server/src/product/execution.rs",
+            "sha256": "a4af5d6df4c61c79cf1e6e5676d35a4e040cc29c276492ea575eb29b9d77baa9"
+          },
+          {
+            "path": "crates/relayer-app-server/src/product/models.rs",
+            "sha256": "0a0ea20dd73c5eca0a5771582de706ad0d074e10dd18ecec42a96eddf71e61ab"
+          },
+          {
+            "path": "crates/relayer-app-server/src/product/service.rs",
+            "sha256": "59e51f5fb0cdbefffa27c593b35d49a6badada6b43a91ba60c28a5fbb904450a"
+          },
+          {
+            "path": "crates/relayer-app-server/src/runtime.rs",
+            "sha256": "55dadb8bf6fb04e7cfe77c0e9f4eea545ae3c0734d34d3ef36016936b69e895f"
+          },
+          {
+            "path": "crates/relayer-app-server/src/storage/sqlite/attempts.rs",
+            "sha256": "6254638b890ce92b2d331ed5f6bae90a02971738f211d0bd7b0fc1727ed92564"
+          },
+          {
+            "path": "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
+            "sha256": "ed468b6771a2048816b5ed050f5e8a63ce3f3797f4e7be9e9840d1d0b9a8f451"
+          },
+          {
+            "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0048_attempt_live_answer_authority.sql",
+            "sha256": "6457d0d332aa29c149576a26970e5669bd1f94a00990342824af22887b93e503"
+          },
+          {
+            "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+            "sha256": "d11c5f6e06fddfb24d41675c65ceeafbc38e34810329628e7b1b669eb5630354"
+          },
+          {
+            "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+            "sha256": "df9eb4dfcc009b9bf6e3fa95dc0ec113594e099e776285a6a2bb6512da6646ee"
+          },
+          {
+            "path": "crates/relayer-graph-server/src/lib.rs",
+            "sha256": "ca322ae8531232a95046be460f2de14f02de6ede1fff4ec94c6d555a63f14034"
+          }
+        ],
+        "parentFrozenSourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+        "logs": [
+          {
+            "path": ".relayer/native-live-pair-projection.txt",
+            "sha256": "326d7769f5c1cd6becfd9070e763f9ec2cd65f00d7818311ccc9fc3ab2fb8369"
+          },
+          {
+            "path": ".relayer/native-live-pair-product-final.txt",
+            "sha256": "a98c578c273dc53685eb3ccf78612216c9ae26329893d48f447b2ed16c6d8907"
+          },
+          {
+            "path": ".relayer/native-live-pair-product-v3.txt",
+            "sha256": "2b03eeccacdbe4f98d99a38df09b7d88c8a749341ad8cb68cc7ab17e0fd4363c"
+          },
+          {
+            "path": ".relayer/native-live-pair-unit.txt",
+            "sha256": "03f79071ccf1624fa94d2b0a3dd8f76c389377e3bc89bce4e201a848bb686d0b"
+          },
+          {
+            "path": ".relayer/native-live-pair-unit-final.txt",
+            "sha256": "86f684d71360984cab70ded4dd37303a39d4460a4ac76eb2ff89cf58ddd0f8ad"
+          },
+          {
+            "path": ".relayer/native-live-pair-migration-final.txt",
+            "sha256": "260199752ccb2c313c426b65ac330334d4b3df6eb9bb0e6c9c315179a0753fc0"
+          },
+          {
+            "path": ".relayer/native-live-pair-remint-final.txt",
+            "sha256": "a6a2b94f4f6352206475c58dbc68c158ae6dbe41b9a3fa17579c0b2196f2ff27"
+          }
+        ],
+        "passedFocusedCounts": {
+          "productRoutes": 2,
+          "atomicAttemptBinding": 1,
+          "migration47to48Reopen": 1,
+          "exactTokenEpochRemint": 1
+        },
+        "pending": [
+          "parent fresh-built actualbrowser chain/fullcheck/build/CI"
+        ],
+        "failuresPreserved": [
+          "first Product run: new column absent from exact schema inventory; schema precondition failed before scenarios",
+          "second Product run: exact schema new column ordering incorrect; same schema precondition",
+          "short --exact unit precursor selected zero tests; no proof claimed"
+        ],
+        "ownCodeReview": "root and transport_prompt_review independently reviewed native source; this file records implementation handoff only",
+        "testBinaries": [
+          {
+            "path": "/Volumes/2T-SSD/cargo/communication-baseline-private/debug/deps/relayer_app_server-733ddbd63f237ca9",
+            "sha256": "f51a1291eb3f75ba84ef307467b4c6d61ed344b3e84a23e3ec9f6d83eda0ddfb"
+          },
+          {
+            "path": "/Volumes/2T-SSD/cargo/communication-baseline-private/debug/deps/relayer_graph_server-e6ae9a530b5ae837",
+            "sha256": "8b5435fe8b5680be33e8428c4bd6b23ab5e4c07a822a2ae6470a913f46df61f4"
+          }
+        ]
+      }
+    },
+    {
+      "record": {
+        "path": ".relayer/merge-js-pagination-source.json",
+        "sha256": "86ad00d2acb4368cacf0533f40e5b8b1af71c136e1e09a181e741c3fd9d25186",
+        "bytes": 1470
+      },
+      "scope": "Implementation focused handoff; independent review is separate. Whole-source/final binary certification comes from the assembled gates.",
+      "data": {
+        "scope": "Five changed actor JS source/test paths only, not whole workspace or build closure",
+        "digest": "477105ec87f168d9041a3ebd06081f4e02e12306faa6ac8732abe0953a75ccb8",
+        "files": [
+          {
+            "path": "desktop/eval-main/human-task-service.mjs",
+            "sha256": "78c3cae5647c8f3f940f50a5edb9849609c826e4305b002666b07b38ee97ab2e"
+          },
+          {
+            "path": "desktop/eval-main/task-actor-browser.mjs",
+            "sha256": "6bc85ab3ca2c462296c244e0635083c5c1ab681ca05b3a92bcb7fbce00094cc5"
+          },
+          {
+            "path": "desktop/eval-main/web-host.mjs",
+            "sha256": "3ea99024634cac950dd947acc92dc18452fe225d7a7c6c6e038c43a2dfc11457"
+          },
+          {
+            "path": "test/eval-human-task.test.mjs",
+            "sha256": "cbc338ad1d8a8698de0f8b0eb478c390d3562cebf2b6775abce83d4e13272f43"
+          },
+          {
+            "path": "test/eval-task-actor.test.mjs",
+            "sha256": "e4f39dbab965b1a44f70eb2c2d323ba87f23add87371bd9665403a4702032114"
+          }
+        ],
+        "verification": {
+          "command": [
+            "node",
+            "node_modules/vitest/vitest.mjs",
+            "run",
+            "--maxWorkers=1",
+            "test/eval-human-task.test.mjs",
+            "test/eval-task-actor.test.mjs",
+            "test/eval-web-host.test.mjs"
+          ],
+          "log": ".relayer/merge-js-pagination-warm.txt",
+          "passed": 141,
+          "failed": 0,
+          "vitestSeconds": 10.19
+        },
+        "qualification": "Actual native Product pagination and real browser approval scenario are independently root-owned; full check/build pending final source freeze."
+      }
+    },
+    {
+      "record": {
+        "path": ".relayer/merge-late-review-guidance-message-result.json",
+        "sha256": "848da9c03f5af9938a0b4a7641fc420589ea7dec75b1e8aad76d71c5cf567249",
+        "bytes": 1447
+      },
+      "scope": "Implementation focused handoff; independent review is separate. Whole-source/final binary certification comes from the assembled gates.",
+      "data": {
+        "sourceDigest": "65160e192bf8dde2287debdd55a230fbaa3774b049534fbc20722393eb1e9654",
+        "files": [
+          {
+            "path": "desktop/renderer/src/product-workspace/workspace.js",
+            "sha256": "81c57e1f19a6ae9cffc1a8884e6ef070220de7c0205ae6d3da920b632054680f"
+          },
+          {
+            "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+            "sha256": "94dda262ad4cecb426c87d16a2173b30e5110993cd1662427e42a7df6ca11ddd"
+          },
+          {
+            "path": "test/graph-authoring-replay.test.mjs",
+            "sha256": "3168a79300e2d48152d937a994cb58bd6e86f335c2004ec33fde5e0f4773607d"
+          },
+          {
+            "path": "test/node-detail-runtime.test.mjs",
+            "sha256": "61a49229a89652a0cb719e49b548346e4a41216914b5b1a0d4b55715ea3882a3"
+          }
+        ],
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--maxWorkers=1",
+          "test/graph-authoring-replay.test.mjs",
+          "test/node-detail-runtime.test.mjs",
+          "packages/harness-host/test/graph-authoring-repair-examples.test.ts"
+        ],
+        "exitCode": 0,
+        "testsPassed": 79,
+        "filesPassed": 3,
+        "log": {
+          "path": ".relayer/merge-late-review-guidance-message-final.txt",
+          "sha256": "2b788bfab9a282841bc12ec29b1765acced6f58d0a144235e7ec1c6a5c8636fb",
+          "bytes": 259
+        },
+        "qualification": "Focused deterministic portfolio only; full check/build/heavy evidence and adversarial review belong to the combined root change. No paid inference, commits, or pushes."
+      }
+    }
+  ],
+  "retainedAttempts": [
+    {
+      "log": {
+        "path": ".relayer/merge-js-review-red.txt",
+        "sha256": "d51b21f8bfd8d93365ee2f05b8bae586b3fbdffe645ea5ac8656a8bdfdc84ca8",
+        "bytes": 2455
+      },
+      "qualification": "Initial red reproduced status suppression and request cancellation stalls. The queued actorEvent fixture initially used human mode; final simulated-mode fixture corrects that precondition. No standalone proof claim for the invalid admission assertion."
+    },
+    {
+      "log": {
+        "path": ".relayer/merge-js-pagination-red.txt",
+        "sha256": "f4623aca28c30e01ca5fe5940f34292686d9aa799dbb7527d35b780fa629e6a4",
+        "bytes": 2999
+      },
+      "qualification": "New pagination boundary regressions fail against the original first-page implementation. Final tests also place matching receipt50 on pageone to prove later failures cannot persist partial resolution."
+    },
+    {
+      "log": {
+        "path": ".relayer/native-live-pair-projection.txt",
+        "sha256": "326d7769f5c1cd6becfd9070e763f9ec2cd65f00d7818311ccc9fc3ab2fb8369",
+        "bytes": 2710
+      },
+      "qualification": "FAILED before target scenario: new migration omitted from exact schema inventory in that intermediate source."
+    },
+    {
+      "log": {
+        "path": ".relayer/native-live-pair-product-final.txt",
+        "sha256": "a98c578c273dc53685eb3ccf78612216c9ae26329893d48f447b2ed16c6d8907",
+        "bytes": 2662
+      },
+      "qualification": "FAILED before target scenario: exact schema column ordering did not match the appended column. Inventory and fixture terminal CHECK fields corrected before final source."
+    },
+    {
+      "log": {
+        "path": ".relayer/native-live-pair-unit.txt",
+        "sha256": "03f79071ccf1624fa94d2b0a3dd8f76c389377e3bc89bce4e201a848bb686d0b",
+        "bytes": 1342
+      },
+      "qualification": "Compiled final unit binary, but short --exact filter selected zero tests; not a proof pass. Full module paths subsequently ran actual nonzero tests."
+    },
+    {
+      "log": {
+        "path": ".relayer/merge-actor-boundaries-merge-approval-warm.txt",
+        "sha256": "1ac6a5f342d84feb33e577c021ab5a2a412c0e06204212036ed812b2591d4f6d",
+        "bytes": 866
+      },
+      "qualification": "Intermediate native browser approval cycle passed using the prior native binary. It does not certify the final activation/attempt pairing; the final assembled web gate must do that."
+    }
+  ],
+  "captureReview": {
+    "reviewers": [
+      "root",
+      "actor_renderer_review"
+    ],
+    "verdict": "PASS visual/source binding",
+    "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+    "images": [
+      {
+        "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+        "sha256": "ad63964fee36a0f05735fcca6313410c09854d227aed2a3a9553a49736721845",
+        "bytes": 154011
+      },
+      {
+        "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+        "sha256": "7004d96179eb6fde4228e331a152018ef1a6ce545af64925a1bccc875f328fa1",
+        "bytes": 154410
+      },
+      {
+        "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+        "sha256": "e9cc5e70176011c497ca8b0e9db601b324dd95c2545e1c7dc6c3bbf80a6ea787",
+        "bytes": 169731
+      },
+      {
+        "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+        "sha256": "31a824de100e8ec893abe256f5d35d3665e312b9e760a9a36235789ef4493cac",
+        "bytes": 161863
+      },
+      {
+        "path": "docs/evidence/desktop-social-preview/light.png",
+        "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+        "bytes": 68977
+      },
+      {
+        "path": "docs/evidence/desktop-social-preview/dark.png",
+        "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+        "bytes": 62710
+      }
+    ],
+    "receipts": [
+      {
+        "path": "docs/evidence/followup-node-annotations/receipt.json",
+        "sha256": "170d31be9d2475fb012f94aa6108d67c55a83c5a8cd7087bb49340b8fe7949f8",
+        "bytes": 3381
+      },
+      {
+        "path": "docs/evidence/desktop-social-preview/receipt.json",
+        "sha256": "d68c1b2c39748cfe0e5a4b2bfd4e59ecf3ee254750a271d6ae0fd46df34002c1",
+        "bytes": 17657
+      }
+    ],
+    "observed": "A missing add control; B visible add control; C editable expected annotation; D confirmed composer pill. Both social themes legible. Full101-file renderer identity checked.",
+    "cleanup": {
+      "record": {
+        "path": ".relayer/merge-review-followup-capture-cleanup.json",
+        "sha256": "1ab4dd05061d905eacadb4d03e17ff3d05a6e5f5fb42f34db09b5fbcc67ae533",
+        "bytes": 1413
+      },
+      "data": {
+        "observedAtUnixSeconds": 1792075233.423764,
+        "captureWindowUnixSeconds": [
+          1792075207.0820923,
+          1792075223.8110924
+        ],
+        "windowDirectoryMethod": "macOS birthtime, capture duration/end result receipt, 2-second endpoint allowance",
+        "captureWindowDirectoriesRemaining": [],
+        "captureScriptProcessesRemaining": [],
+        "fixtureWindowProcessesRemaining": [],
+        "argumentsExported": false,
+        "qualification": "Post-exit observation: no matching capture script or newly created profile/data directory remains. This is not a complete historical descendant PID inventory or proof about unrelated test processes. Parent exit/result and awaited profile removal are separately recorded by actual runner.",
+        "capturedBinaryHashes": {
+          "target/debug/relayer-graph-server": "14a65fb76ce4b93266a6cde86376bba03bbf93cd3694df7e5c91270cb05b6fb0",
+          "target/debug/relayer-app-server": "f48cc3655191bc45b4558df581f9f371e77ee5bd2a5605f452bd37adf1962234"
+        },
+        "binaryProvenance": {
+          "buildResult": ".relayer/merge-actor-boundaries-review-followup-build-result.json",
+          "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+          "sequence": "Serial pipeline: build \u2192 annotation capture/parent exit \u2192 social capture \u2192 receipt checks \u2192 full check. Capture hashes identify the binaries used then; later mutable Cargo artifacts need not retain those hashes."
+        }
+      }
+    },
+    "qualification": "Actual PNGs, inner outcomes, parent exit and bounded post-exit inventory; no complete historical descendant-PID claim. Binary hashes identify serialized build/capture time, not later mutable target artifacts."
+  },
+  "qualifications": [
+    "Only completed results appear. Pending/failed gates are not passes; inspect actual inner outcomes and focused source scope.",
+    "No paid inference, calibrated task/graph quality, performance or signed release claim. Historical reports retain original source binding.",
+    "Fresh exact-head hosted check/freshness and a final unresolved-thread read are required before the user-authorized merge; never bypass branch protection.",
+    "Capture/build/native reuse is limited to unchanged executable closures across the explicit two-test-only delta; no local wholecheck pass or performance proof is claimed."
+  ],
+  "electronCleanup": {
+    "record": {
+      "path": ".relayer/merge-review-followup-electron-cleanup.json",
+      "sha256": "8d08cff45f37efa892ede407b562694230af71fff1bbd33498358f92df5a3dda",
+      "bytes": 1049
+    },
+    "data": {
+      "observedAtUnixSeconds": 1792077693.121502,
+      "windows": [
+        {
+          "gate": "review-followup-electron-input",
+          "start": 1792077648.1940837,
+          "end": 1792077682.2200837,
+          "prefixes": [
+            "relayer-electron-proof-",
+            "relayer-node-input-actions-"
+          ],
+          "script": "test-desktop-node-input-actions.mjs",
+          "directoriesRemaining": [],
+          "processesRemaining": []
+        },
+        {
+          "gate": "review-followup-electron-stop",
+          "start": 1792077682.6355965,
+          "end": 1792077692.6485965,
+          "prefixes": [
+            "relayer-electron-proof-",
+            "relayer-stop-electron-"
+          ],
+          "script": "test-desktop-stop.mjs",
+          "directoriesRemaining": [],
+          "processesRemaining": []
+        }
+      ],
+      "qualification": "Bounded post-exit matching script or capture-time fixture/profile prefix inventory; no raw argv exported and no complete historical descendant-PID inventory claimed. Actual canonical parents separately confirmed successful inner result, child exit and awaited profile removal."
+    }
+  },
+  "testOnlyCorrection": {
+    "beforeSourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+    "afterSourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+    "changes": [
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "beforeSha256": "736a01f3c5e1bf359fd6cd2b9b65c1e51b5721fa6a623773803916e0bba15642",
+        "afterSha256": "6343226a2ee79132932c135551b3abeb77ea75825b8427419d4d70fc4d6648b6"
+      },
+      {
+        "path": "packages/harness-host/test/prime-agent.test.ts",
+        "beforeSha256": "45fafba1e77f579ac5db5058b8fe7187239208b313a0251180bb501f021cbd66",
+        "afterSha256": "e4d3b46b4d7a2ec9487a692c46651e02fda733b03435c88ee9b5092b90cf1229"
+      }
+    ],
+    "qualification": "Only Prime/Codex tests changed after the failed full check and successful build/captures. Production, renderer and native closures are byte-identical; build, capture and native outcomes retain their original20058 snapshot identity. The failed wholecheck is not upgraded to a pass. Both complete test files and typecheck rerun; remaining gates observe finald074 source. Fresh hosted exact-head wholeportfolio required."
+  },
+  "failedFullCheck": {
+    "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+    "outcome": "FAILED",
+    "nativeWorkspace": {
+      "passed": 782,
+      "failed": 0,
+      "suiteResults": 30
+    },
+    "crashFeature": {
+      "passedExecutions": 367,
+      "failed": 0,
+      "suiteResults": 26,
+      "overlapsWorkspace": true
+    },
+    "vitest": {
+      "passed": 4322,
+      "failed": 3,
+      "skipped": 3,
+      "filesPassed": 323,
+      "filesFailed": 3,
+      "filesSkipped": 1
+    },
+    "failures": [
+      "unchanged10,000-layer expansion-depth test15219ms exceeds unchanged15000ms limit",
+      "Prime whole-prompt public-field-name ban",
+      "Codex whole-prompt public-field-name ban"
+    ],
+    "depthComparison": {
+      "sourceDigest": "20058fb40a79b8137324d3883dceed2012834988b075e652dc7740dc5e8e826c",
+      "baselineCommit": "8c8e05694c69c40ad5f173e9613a7ef739846f41",
+      "files": [
+        {
+          "path": "test/public-share-viewer.test.mjs",
+          "sha256": "98aef53c029ec30982dff1f29aaadf382dcd94dfc45d7a5440a00c2973d3c4d8",
+          "identicalToBaselineAndPriorDiagnostic": true
+        },
+        {
+          "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+          "sha256": "17d6110d208162544756b8b3a2a3ed5a4b16e407b65253844ef689e2c3257c9a",
+          "identicalToBaselineAndPriorDiagnostic": true
+        },
+        {
+          "path": "desktop/renderer/src/product-workspace/edge-shapes.js",
+          "sha256": "eb207d003e6b7c1c5d7f257946f90da9e5613a0c927507d658964b4c69556b45",
+          "identicalToBaselineAndPriorDiagnostic": true
+        }
+      ],
+      "priorEvidence": {
+        "path": "docs/evidence/current-pointer-simulated-user/merge-live-integrity-verification.json",
+        "sha256": "fb31703982b828abbd7dca606694aa580ab507f89061adaa7e28184c57f07309"
+      },
+      "priorDiagnostic": {
+        "sourceDigest": "e11205945c39432a123521bbb9de004c6b74d60d88ba186ca349e03a8c501b87",
+        "files": [
+          {
+            "path": "test/public-share-viewer.test.mjs",
+            "sha256": "98aef53c029ec30982dff1f29aaadf382dcd94dfc45d7a5440a00c2973d3c4d8",
+            "identicalToMain": true
+          },
+          {
+            "path": "desktop/renderer/src/public-share-viewer/snapshot.js",
+            "sha256": "17d6110d208162544756b8b3a2a3ed5a4b16e407b65253844ef689e2c3257c9a",
+            "identicalToMain": true
+          },
+          {
+            "path": "desktop/renderer/src/product-workspace/edge-shapes.js",
+            "sha256": "eb207d003e6b7c1c5d7f257946f90da9e5613a0c927507d658964b4c69556b45",
+            "identicalToMain": true
+          }
+        ],
+        "timings": [
+          {
+            "cycle": false,
+            "serializationMs": 42.631417,
+            "parseMs": 19387.559458,
+            "bytes": 5249907
+          },
+          {
+            "cycle": true,
+            "serializationMs": 32.305208000001585,
+            "parseMs": 461.2560420000009,
+            "bytes": 5250111
+          }
+        ],
+        "qualification": "Direct Node diagnostic using exact test helpers and same production parser; no Vitest/HappyDOM imports. Semantic assertions preserved, no time bound or production change."
+      },
+      "qualification": "Current full-check depth failure remains FAILED. Prior direct semantic diagnostic covers identical parser/test/import bytes but never proves15-second bound. No timeout/parser change; fresh exact-head hosted CI must execute unchanged case normally and pass. Hosted failure requires diagnosis, not waiver."
+    },
+    "qualification": "The two assertion failures have a separately reviewed test-only correction and complete149-test rerun. The depth failure remains failed; byte-identical main code and prior semantic diagnostic do not prove its time bound. Fresh hosted CI must pass unchanged; hosted failure requires diagnosis."
+  },
+  "privacyCorrectionExecution": {
+    "record": {
+      "path": ".relayer/merge-followup-input-privacy-result.json",
+      "sha256": "0cd1b3f034607d56758c1ea0c3c5e25b717d50bbb20b9d354742d9664ed2d393",
+      "bytes": 1887
+    },
+    "data": {
+      "schemaVersion": 1,
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "testFiles": [
+        {
+          "path": "packages/harness-host/test/codex-basic.test.ts",
+          "sha256": "6343226a2ee79132932c135551b3abeb77ea75825b8427419d4d70fc4d6648b6"
+        },
+        {
+          "path": "packages/harness-host/test/prime-agent.test.ts",
+          "sha256": "e4d3b46b4d7a2ec9487a692c46651e02fda733b03435c88ee9b5092b90cf1229"
+        }
+      ],
+      "testOnly": true,
+      "portfolio": {
+        "command": [
+          "node",
+          "node_modules/vitest/vitest.mjs",
+          "run",
+          "--maxWorkers=1",
+          "packages/harness-host/test/prime-agent.test.ts",
+          "packages/harness-host/test/codex-basic.test.ts"
+        ],
+        "exitCode": 0,
+        "filesPassed": 2,
+        "testsPassed": 149,
+        "innerDurationSeconds": 10.54,
+        "log": {
+          "path": ".relayer/merge-followup-input-privacy-portfolio.txt",
+          "sha256": "4aeebee8fea9d975a8ac5dec3bdd472f99918ebfe0d1f26cba632c35c44619e2",
+          "bytes": 260
+        }
+      },
+      "typecheck": {
+        "command": [
+          "npm",
+          "run",
+          "check",
+          "-w",
+          "@relayer/harness-host"
+        ],
+        "exitCode": 0,
+        "log": {
+          "path": ".relayer/merge-followup-input-privacy-types.txt",
+          "sha256": "66fc74fd49508a68cf1a166a3e067bd9e24295c01234b72a9387f801acd42c7c",
+          "bytes": 53
+        }
+      },
+      "boundary": "Exact independent normalized semantic JSON/order, scoped metadata-key exclusion, and whole-prompt canary-value exclusion for explicitly adversarial extra-field decorated context; canonical and sealed inputs unchanged.",
+      "reviewers": [
+        "actor_renderer_review",
+        "design_authority_review"
+      ],
+      "qualification": "Both actual-diff subsumption reviews reported PASS by parent. No production edits or paid inference. The previous whole-check failure remains failed; these are separate corrected test/typecheck outcomes."
+    }
+  },
+  "requiredHostedProof": {
+    "status": "pending after follow-up push",
+    "requireExactHead": true,
+    "contexts": [
+      "check",
+      "merge-freshness-status"
+    ],
+    "reviewThreadsMustBeResolved": true,
+    "qualification": "Never reuse964e3488CI as proof for this follow-up; unchanged failing depth case must pass normally."
+  }
+}

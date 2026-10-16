@@ -7,6 +7,7 @@ mod error;
 mod input_drafts;
 mod input_operator_sessions;
 mod interaction_graph;
+mod live_answers;
 mod model_settings;
 mod projects;
 mod state;
@@ -262,6 +263,7 @@ pub(crate) fn router(
             "/api/threads/{thread_id}/input-draft",
             get(input_drafts::get),
         )
+        .route("/api/threads/{thread_id}/interactions/{id}/live-answers", get(live_answers::get).post(live_answers::answer))
         .route(
             "/api/threads/{thread_id}/input-draft/attachments",
             axum::routing::put(input_drafts::commit),

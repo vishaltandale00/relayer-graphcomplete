@@ -584,16 +584,7 @@ impl SqliteProductStore {
         let model_provider_id: Option<String> = source.try_get("model_provider_id")?;
         let provider_model_id: Option<String> = source.try_get("provider_model_id")?;
         let model_family_id: Option<i64> = source.try_get("model_family_id")?;
-        let interaction_in_progress: bool = sqlx::query_scalar(super::HUMAN_TURN_IN_PROGRESS)
-            .bind(thread_id.value())
-            .fetch_one(&mut *transaction)
-            .await?;
-        if interaction_in_progress && !recursive {
-            return Err(StorageError::Catalog(CatalogError::invalid(
-                "interaction_in_progress",
-                "Wait for the active interaction to finish.",
-            )));
-        }
+        // An invoked run starts a fresh native session, so it runs beside any active turn.
         let source_status: String = source.try_get("completion_status")?;
         let source_has_graph = source.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
         let source_accepted = source_status == "accepted" && source_has_graph;
@@ -887,8 +878,12 @@ async fn user_preparation_recoverable_on(
     connection: &mut SqliteConnection,
     result: InteractionId,
 ) -> Result<bool, StorageError> {
-    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM action_invocations ai JOIN interactions result ON result.id=ai.result_interaction_id JOIN invocation_input_submission_receipts receipt ON receipt.result_interaction_id=result.id WHERE result.id=?1 AND ai.authoritative=1 AND ai.agent_invoked=0 AND ai.invocation_key!='legacy' AND result.graph_node_id IS NULL AND NOT EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM completion_executions e WHERE e.interaction_id=result.id) AND NOT EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND (a.outcome!='model_failed' OR a.effect_boundary!='none')) AND (result.completion_status IN ('not_started','submitted') OR result.completion_status='failed' AND ai.prepared_graph_node_id IS NOT NULL AND EXISTS(SELECT 1 FROM interaction_attempts a WHERE a.interaction_id=result.id AND a.outcome='model_failed' AND a.effect_boundary='none')))")
-        .bind(result.value()).fetch_one(connection).await?)
+    Ok(
+        sqlx::query_scalar(concat!("SELECT ", recoverable_user_preparation!("?1")))
+            .bind(result.value())
+            .fetch_one(connection)
+            .await?,
+    )
 }
 
 #[cfg(test)]
@@ -1704,17 +1699,13 @@ mod tests {
             Err(StorageError::PersonalPresentationConflict(_))
         ));
 
-        let ordinary = match store
-            .insert_action_invocation(thread.root_interaction_id, 43, "User action")
-            .await
-        {
-            Ok(_) => panic!("ordinary invocation unexpectedly bypassed active interaction"),
-            Err(error) => error,
-        };
-        match ordinary {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
-        }
+        // A user's invoke starts a fresh session too, so the active turn does not hold it.
+        assert!(matches!(
+            store
+                .insert_action_invocation(thread.root_interaction_id, 43, "User action")
+                .await,
+            Ok(ActionInvocationInsertOutcome::Created { .. })
+        ));
 
         let legacy_thread = store
             .insert_thread_with_initial_interaction(NewThreadRecord {
@@ -2245,7 +2236,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn active_turn_blocks_a_second_action_interaction() {
+    async fn invoked_runs_start_beside_an_active_turn() {
         let temporary = tempfile::Builder::new()
             .prefix("relayer-active-turn-action-invocation-")
             .tempdir()
@@ -2278,16 +2269,23 @@ mod tests {
             .await
             .unwrap();
 
-        let error = store
-            .insert_action_invocation(thread.root_interaction_id, 41, "Must wait")
-            .await
-            .err()
-            .unwrap();
-        match error {
-            StorageError::Catalog(error) => assert_eq!(error.code(), "interaction_in_progress"),
-            other => panic!("unexpected error: {other}"),
+        // Each invoke starts a fresh session, so neither the running message turn nor the
+        // other invoke's running result holds it back.
+        for (action_id, text) in [(41, "First action"), (42, "Second action")] {
+            let created = store
+                .insert_action_invocation(thread.root_interaction_id, action_id, text)
+                .await
+                .unwrap_or_else(|error| panic!("an active turn held a user's invoke: {error}"));
+            let ActionInvocationInsertOutcome::Created { interaction, .. } = created else {
+                panic!("the invoke's result is new");
+            };
+            sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+                .bind(interaction.id.value())
+                .execute(&store.pool)
+                .await
+                .unwrap();
         }
-        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 2);
+        assert_eq!(store.list_interactions(thread.id).await.unwrap().len(), 4);
 
         store.pool.close().await;
     }

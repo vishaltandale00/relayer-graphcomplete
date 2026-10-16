@@ -65,10 +65,12 @@ export function initializeHumanTasks({ api, show, toast }) {
   }
   async function inspect(id, onlyStatusChange = false) {
     selected = id;
+    // Explicit selection closes the form immediately. Background lifecycle
+    // reads must not override a later choice to start another task.
+    if (!onlyStatusChange) root.querySelector("#humanNewTask").open = false;
     const task = await api.humanTask(id);
     if (selected !== id || (onlyStatusChange && task.status === displayedStatus)) return;
     displayedStatus = task.status;
-    root.querySelector("#humanNewTask").open = false;
     root.querySelector("#humanTaskDetail").classList.remove("hidden");
     const reviewable = ["completed", "failed", "interrupted"].includes(task.status);
     const active = task.status === "active";

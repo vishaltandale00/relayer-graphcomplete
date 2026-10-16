@@ -19,6 +19,9 @@ export type HarnessApprovalResolutionActor = "user" | "session_grant" | "harness
 export type HarnessApprovalRequestTerminationOutcome = "expired" | "aborted";
 
 export const MAX_HARNESS_APPROVAL_RETAINED_EVENTS = 1_024;
+/** The bound across every interaction's stream in one live session. */
+export const MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS = 4_096;
+const ABANDONED_STREAM_GRACE_MS = 60_000;
 export const MAX_HARNESS_APPROVAL_TERMINAL_TOMBSTONES = 256;
 export const MAX_HARNESS_APPROVAL_SESSION_GRANTS = 128;
 
@@ -94,6 +97,12 @@ export interface HarnessApprovalCoordinatorOptions {
   readonly harnessSessionId?: string;
   readonly now?: () => string;
   readonly requestId?: () => string;
+  /**
+   * How long an idle, unacknowledged stream is kept before the session bound may drop it. Its
+   * observer reads the final events within moments of its run ending, so a stream idle this
+   * long has no observer left.
+   */
+  readonly abandonedStreamGraceMs?: number;
 }
 
 export class HarnessApprovalCoordinatorError extends Error {
@@ -111,6 +120,13 @@ export class HarnessApprovalRequestTerminatedError extends Error {
     super(`Harness approval request ${resolution.requestId} ${resolution.outcome}`);
     this.name = "HarnessApprovalRequestTerminatedError";
   }
+}
+
+interface ApprovalEventStream {
+  readonly events: HarnessApprovalEvent[];
+  nextSequence: number;
+  /** When its latest event was appended, by the coordinator's clock. */
+  lastEventAt: number;
 }
 
 interface PendingApproval {
@@ -132,8 +148,11 @@ export class HarnessApprovalCoordinator {
   private readonly pending = new Map<string, PendingApproval>();
   private readonly terminal = new Map<string, HarnessApprovalResolution>();
   private readonly grants: HarnessApprovalSessionGrant[] = [];
-  private readonly retainedEvents: HarnessApprovalEvent[] = [];
-  private nextSequence = 1;
+  /**
+   * One event stream per interaction, each sequenced from 1. Interactions in a thread can run at
+   * once, and each product observer reads and acknowledges only its own interaction's stream.
+   */
+  private readonly streams = new Map<number, ApprovalEventStream>();
   private closed = false;
 
   constructor(private readonly options: HarnessApprovalCoordinatorOptions) {
@@ -154,6 +173,11 @@ export class HarnessApprovalCoordinator {
     if (this.activeCompletions.has(authority.completeCallId)) {
       throw new HarnessApprovalCoordinatorError("invalid_approval_request", `Duplicate harness completion ID: ${authority.completeCallId}`);
     }
+    // A new attempt of an interaction starts from an empty stream. An earlier attempt's stream
+    // that nothing will acknowledge must not leak its completion call into the new observer.
+    if (!this.interactionActive(authority.interactionId) && !this.interactionPending(authority.interactionId)) {
+      this.streams.delete(authority.interactionId);
+    }
     this.activeCompletions.set(authority.completeCallId, authority.interactionId);
     return Object.freeze({
       request: async (input: HarnessApprovalRequestInput, options?: HarnessApprovalRequestOptions) => {
@@ -161,6 +185,47 @@ export class HarnessApprovalCoordinator {
           throw new HarnessApprovalCoordinatorError("approval_completion_inactive", "Harness approval completion is no longer active");
         }
         return this.request(authority, input, options);
+      },
+    });
+  }
+
+  /**
+   * A completion no product observer reads: an agent's child the product never recorded. Each
+   * request ends at once as aborted with `rationale`, so the provider sees why instead of
+   * waiting for a decision nobody can make. Nothing is retained, so its id never enters `streams`.
+   */
+  beginUnobservedCompletion(authority: HarnessApprovalCompletionAuthority, rationale: string): HarnessApprovalChannel {
+    if (this.closed) throw new HarnessApprovalCoordinatorError("approval_completion_inactive", "Harness approval session is closed");
+    if (!Number.isSafeInteger(authority.interactionId) || authority.interactionId < 1 || authority.completeCallId.trim() === "") {
+      throw new HarnessApprovalCoordinatorError("invalid_approval_request", "Harness approval completion authority is invalid");
+    }
+    const terminationRationale = approvalRationale(rationale, "unobserved completion rationale");
+    return Object.freeze({
+      request: async (input: HarnessApprovalRequestInput) => {
+        let request: HarnessApprovalRequest;
+        try {
+          request = createHarnessApprovalRequest(input, {
+            requestId: this.nextRequestId(),
+            threadId: this.options.threadId,
+            interactionId: authority.interactionId,
+            completeCallId: authority.completeCallId,
+            harnessSessionId: this.harnessSessionId,
+            createdAt: this.now(),
+          });
+        } catch (error) {
+          throw new HarnessApprovalCoordinatorError(
+            "invalid_approval_request",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
+        throw new HarnessApprovalRequestTerminatedError({
+          requestId: request.requestId,
+          correlation: publicCorrelation(request),
+          outcome: "aborted",
+          actor: "host",
+          resolvedAt: this.now(),
+          rationale: terminationRationale,
+        });
       },
     });
   }
@@ -231,23 +296,28 @@ export class HarnessApprovalCoordinator {
     return resolution;
   }
 
-  snapshot(after = 0): HarnessApprovalSnapshot {
+  snapshot(interactionId: number, after = 0): HarnessApprovalSnapshot {
+    if (!Number.isSafeInteger(interactionId) || interactionId < 1) {
+      throw new HarnessApprovalCoordinatorError("invalid_approval_request", "Approval event interaction ID must be a positive integer");
+    }
     if (!Number.isSafeInteger(after) || after < 0) {
       throw new HarnessApprovalCoordinatorError("invalid_approval_request", "Approval event cursor must be a non-negative integer");
     }
-    const latestSequence = this.nextSequence - 1;
+    const stream = this.streams.get(interactionId);
+    const latestSequence = stream === undefined ? 0 : stream.nextSequence - 1;
     const snapshot = {
       harnessSessionId: this.harnessSessionId,
       latestSequence,
-      pendingRequests: Object.freeze([...this.pending.values()].map(({ request }) => publicRequest(request))),
-      events: Object.freeze(this.retainedEvents.filter(({ sequence }) => sequence > after)),
+      pendingRequests: Object.freeze([...this.pending.values()]
+        .filter(({ request }) => request.correlation.interactionId === interactionId)
+        .map(({ request }) => publicRequest(request))),
+      events: Object.freeze((stream?.events ?? []).filter(({ sequence }) => sequence > after)),
     };
-    // Rust cursors are completion-local and restart from zero. Reset only after
-    // returning an exact final acknowledgement, never while a completion can race it.
-    if (after === latestSequence && this.activeCompletions.size === 0 && this.pending.size === 0) {
-      this.retainedEvents.length = 0;
-      this.terminal.clear();
-      this.nextSequence = 1;
+    // Rust cursors are completion-local and restart from zero. Drop the stream only after
+    // returning an exact final acknowledgement, never while its completion can race it.
+    if (after === latestSequence && !this.interactionActive(interactionId) && !this.interactionPending(interactionId)) {
+      this.streams.delete(interactionId);
+      this.forgetTerminal(interactionId);
     }
     return snapshot;
   }
@@ -295,7 +365,9 @@ export class HarnessApprovalCoordinator {
     }
     // Every pending request has one requested event and reserves one terminal
     // event. Refuse new work rather than drop an unacknowledged event.
-    if (this.retainedEvents.length + this.pending.size + 2 > MAX_HARNESS_APPROVAL_RETAINED_EVENTS) {
+    const retained = this.streams.get(authority.interactionId)?.events.length ?? 0;
+    if (retained + this.pendingCount(authority.interactionId) + 2 > MAX_HARNESS_APPROVAL_RETAINED_EVENTS
+      || !this.reserveSessionBacklog(authority.interactionId)) {
       return Promise.reject(new HarnessApprovalCoordinatorError(
         "approval_event_backlog_full",
         "Harness approval event backlog is full; wait for product acknowledgement before requesting another approval",
@@ -410,10 +482,63 @@ export class HarnessApprovalCoordinator {
   }
 
   private append(event: Omit<HarnessApprovalRequestedEvent, "sequence"> | Omit<HarnessApprovalResolvedEvent, "sequence">): void {
-    const sequence = this.nextSequence++;
-    this.retainedEvents.push(event.type === "requested"
+    const interactionId = event.type === "requested"
+      ? event.request.correlation.interactionId
+      : event.resolution.correlation.interactionId;
+    let stream = this.streams.get(interactionId);
+    if (stream === undefined) {
+      stream = { events: [], nextSequence: 1, lastEventAt: 0 };
+      this.streams.set(interactionId, stream);
+    }
+    stream.lastEventAt = Date.parse(this.now());
+    const sequence = stream.nextSequence++;
+    stream.events.push(event.type === "requested"
       ? { sequence, type: event.type, request: event.request }
       : { sequence, type: event.type, resolution: event.resolution });
+  }
+
+  /**
+   * Keeps the session's retained events, across every stream, within its bound. A stream whose
+   * completion ended with nothing pending, and that no observer acknowledged within the grace
+   * period, is abandoned, so the oldest such streams are dropped first; live work is refused
+   * only when the remaining streams fill it.
+   */
+  private reserveSessionBacklog(interactionId: number): boolean {
+    const now = Date.parse(this.now());
+    let retained = 0;
+    for (const stream of this.streams.values()) retained += stream.events.length;
+    for (const [candidate, stream] of this.streams) {
+      if (retained + this.pending.size + 2 <= MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS) break;
+      if (candidate === interactionId || this.interactionActive(candidate) || this.interactionPending(candidate)) continue;
+      if (now - stream.lastEventAt < (this.options.abandonedStreamGraceMs ?? ABANDONED_STREAM_GRACE_MS)) continue;
+      this.streams.delete(candidate);
+      this.forgetTerminal(candidate);
+      retained -= stream.events.length;
+    }
+    return retained + this.pending.size + 2 <= MAX_HARNESS_APPROVAL_SESSION_RETAINED_EVENTS;
+  }
+
+  private interactionActive(interactionId: number): boolean {
+    for (const active of this.activeCompletions.values()) if (active === interactionId) return true;
+    return false;
+  }
+
+  private interactionPending(interactionId: number): boolean {
+    return this.pendingCount(interactionId) > 0;
+  }
+
+  private pendingCount(interactionId: number): number {
+    let count = 0;
+    for (const { request } of this.pending.values()) {
+      if (request.correlation.interactionId === interactionId) count += 1;
+    }
+    return count;
+  }
+
+  private forgetTerminal(interactionId: number): void {
+    for (const [requestId, resolution] of [...this.terminal]) {
+      if (resolution.correlation.interactionId === interactionId) this.terminal.delete(requestId);
+    }
   }
 }
 

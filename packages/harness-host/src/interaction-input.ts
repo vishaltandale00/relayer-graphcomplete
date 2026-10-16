@@ -1,4 +1,5 @@
 import type { ArtifactNoteInteractionInput } from "./artifact-notes.js";
+import type { HarnessRunContext } from "./types.js";
 
 /** Serialize only the normalized interaction input shared by every harness. */
 export function renderInteractionInput(input: ArtifactNoteInteractionInput): string {
@@ -27,3 +28,18 @@ export const INTERACTION_INPUT_GUIDANCE = `New Invoke actions are single-call by
 export const SUBCOMPLETION_INTEGRATION_GUIDANCE = `For a sealed invocation, inspect completionContract.input.invocationReferences: its exact parentNodeId and actionSnapshot identify the callable's source and enclosing analysis. Read that accepted Node, its source Layer and the latest relevant analysis links. Your Returned Layer must integrate your contribution into the overall analysis, with supporting content in nested Layers when useful; a detached specialist answer or result button alone is insufficient. Keep earlier contributions, comparisons, recommendations and conclusions coherent with the new finding. Add the required response navigation on the exact authorized parent Node, preserving existing controls; for rich details use the presentation replacement API and repair stale revisions by rereading. Do not edit accepted semantic Node content, rewrite old Layer topology, or broaden authority. A parent that is still unpublished must publish before this integration can be accepted. Advance validates but does not publish the staged parent update; Return publishes the integration atomically with your result.`;
 
 export const INVOCATION_PUBLICATION_GUIDANCE = `Before executing or waiting for a prepared child's Current or Return, publish the enclosing source Node and its Layer through your own Advance (or Return). You may prepare the Invocation from your owned draft first, but that preparation does not publish it. A child cannot publish its required parent integration while that source remains unpublished. Do not launch a child and wait for its progress before publishing the parent: this would make each wait for the other. Use the normal response root and prospective Return requirements when advancing, then launch and watch the child through the provider's existing native execution.`;
+
+/**
+ * A fresh root run has no native memory of its thread. It receives the thread's accepted
+ * interactions in order and reads anything else through the graph. Empty for every other run.
+ */
+export function renderThreadHistory(context: HarnessRunContext | undefined, language: "javascript" | "python"): string {
+  if (context?.nativeSession !== "fresh") return "";
+  const readNode = language === "javascript" ? "await graph.getNode(interactionNodeId)" : "await graph.get_node(interaction_node_id)";
+  const readLayer = language === "javascript" ? "await graph.getLayer(responseLayerId)" : "await graph.get_layer(response_layer_id)";
+  return `
+This run starts a fresh session. It has no memory of earlier turns in this thread; they are in the thread's graph. The thread's latest accepted interactions, oldest first, are:
+${JSON.stringify(context.threadHistory ?? [], null, 2)}
+Read a turn's message with ${readNode} and its answer with ${readLayer}. Search the thread for older turns. Other runs in this thread can be working at the same time. Their work becomes readable once they advance or return it.
+`;
+}

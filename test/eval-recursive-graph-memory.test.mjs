@@ -102,7 +102,6 @@ async function gradeFixture(mutate = () => {}) {
   ];
   const execution = {
     harnessConfiguration: {
-      graphCapabilityProfile: { search: "query-v1" },
       complete: { agentAuthored: true },
     },
     turns: [0, 1, 2].map(() => ({ candidateTrace: { completionBrokerAvailable: true } })),
@@ -199,35 +198,28 @@ describe("recursive graph-memory Eval evidence", () => {
     expect(extraChild.turns[2].checks.find(({ name }) => name === "final-child-attached")?.passed).toBe(false);
   });
 
-  it.each([
-    { search: "disabled", agentAuthored: false },
-    { search: "query-v1", agentAuthored: false },
-    { search: "disabled", agentAuthored: true },
-  ])("grades capability-conditional mechanics for search=$search recursion=$agentAuthored", async ({ search: searchMode, agentAuthored }) => {
-    const grade = await gradeFixture(({ outputs, events, execution }) => {
-      execution.harnessConfiguration = {
-        graphCapabilityProfile: { search: searchMode },
-        complete: { agentAuthored },
-      };
+  it("grades the recursion-disabled cell with search still required", async () => {
+    const grade = await gradeFixture(({ outputs, execution }) => {
+      execution.harnessConfiguration = { complete: { agentAuthored: false } };
       execution.turns.forEach((turn) => {
-        turn.candidateTrace.completionBrokerAvailable = agentAuthored;
+        turn.candidateTrace.completionBrokerAvailable = false;
       });
-      if (searchMode === "disabled") {
-        for (const turnEvents of events) {
-          for (let index = turnEvents.length - 1; index >= 0; index -= 1) {
-            if (turnEvents[index].path === "/api/graph/search") turnEvents.splice(index, 1);
-          }
-        }
-      }
-      if (!agentAuthored) {
-        execution.semanticChildren = [];
-        const invoke = outputs[2].rootLayer.actions.find((action) => action.kind === "invoke");
-        invoke.targetLayerId = null;
-      }
+      execution.semanticChildren = [];
+      const invoke = outputs[2].rootLayer.actions.find((action) => action.kind === "invoke");
+      invoke.targetLayerId = null;
     });
 
     const failed = grade.turns.flatMap((turn) => turn.checks).filter((check) => !check.passed);
     expect(failed, JSON.stringify(failed, null, 2)).toEqual([]);
+
+    const withoutSearch = await gradeFixture(({ events }) => {
+      for (const turnEvents of events) {
+        for (let index = turnEvents.length - 1; index >= 0; index -= 1) {
+          if (turnEvents[index].path === "/api/graph/search") turnEvents.splice(index, 1);
+        }
+      }
+    });
+    expect(withoutSearch.turns[1].checks.find(({ name }) => name === "prior-work-search")?.passed).toBe(false);
   });
 
   it("allows recursion-enabled cells to record zero children while failing a resolved invoke in recursion-off", async () => {

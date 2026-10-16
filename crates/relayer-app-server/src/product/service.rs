@@ -2864,6 +2864,27 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn is_invoked_run(
+        &self,
+        interaction_id: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .is_invoked_run(interaction_id)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn accepted_thread_history(
+        &self,
+        thread_id: ThreadId,
+        excluding: InteractionId,
+    ) -> Result<Vec<crate::product::ThreadHistoryEntry>, ProductError> {
+        self.storage
+            .accepted_thread_history(thread_id, excluding)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn invocation_graph_source(
         &self,
         interaction_id: InteractionId,
@@ -2961,6 +2982,19 @@ impl ProductService {
             .fail_interaction_completion(interaction_id, harness_configuration_name, error)
             .await
             .map_err(Into::into)
+    }
+
+    pub(crate) async fn live_answer_attempt_epoch(
+        &self,
+        interaction_id: super::InteractionId,
+        attempt_id: i64,
+    ) -> Result<Option<u64>, ProductError> {
+        self.storage
+            .live_answer_attempt_epoch(interaction_id, attempt_id)
+            .await?
+            .map(u64::try_from)
+            .transpose()
+            .map_err(|_| ProductError::Invalid("Invalid live-answer authority epoch".into()))
     }
 
     pub(crate) async fn begin_interaction_attempt(

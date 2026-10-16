@@ -6,46 +6,34 @@ import { loadHarnessConfiguration } from "../packages/harness-host/src/configura
 
 const repositoryRoot = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const cells = Object.freeze([
-  ["codex-eval-lantern-search-disabled-recursion-disabled", "disabled", false],
-  ["codex-eval-lantern-search-query-v1-recursion-disabled", "query-v1", false],
-  ["codex-eval-lantern-search-disabled-recursion-enabled", "disabled", true],
-  ["codex-eval-lantern-search-query-v1-recursion-enabled", "query-v1", true],
+  ["codex-eval-lantern-search-query-v1-recursion-disabled", false],
+  ["codex-eval-lantern-search-query-v1-recursion-enabled", true],
 ]);
 
 function controlledConfiguration(configuration) {
   const controlled = structuredClone(configuration);
   delete controlled.name;
-  delete controlled.graphCapabilityProfile;
   delete controlled.complete;
   return controlled;
 }
 
-describe("Lantern graph-search × agent-authored recursion configurations", () => {
-  it("defines a normalized Codex 2x2 whose cells vary only by the declared factors", async () => {
-    const configurations = await Promise.all(cells.map(async ([name, search, agentAuthored]) => {
+describe("Lantern agent-authored recursion configurations", () => {
+  it("defines a normalized, search-enabled Codex pair whose cells vary only by recursion", async () => {
+    const configurations = await Promise.all(cells.map(async ([name, agentAuthored]) => {
       const configuration = await loadHarnessConfiguration(
         resolve(repositoryRoot, "harnesses", `${name}.yaml`),
       );
       expect(configuration.name).toBe(name);
-      expect(configuration.graphCapabilityProfile).toEqual({ search });
+      expect(configuration.graphCapabilityProfile).toEqual({ search: "query-v1" });
       expect(configuration.complete).toEqual({ agentAuthored });
       return configuration;
     }));
 
-    expect(configurations.map(({ graphCapabilityProfile, complete }) => ({
-      search: graphCapabilityProfile.search,
-      agentAuthored: complete.agentAuthored,
-    }))).toEqual([
-      { search: "disabled", agentAuthored: false },
-      { search: "query-v1", agentAuthored: false },
-      { search: "disabled", agentAuthored: true },
-      { search: "query-v1", agentAuthored: true },
-    ]);
-
-    const [control, ...otherCells] = configurations.map(controlledConfiguration);
-    expect(otherCells).toEqual([control, control, control]);
+    const [control, treatment] = configurations.map(controlledConfiguration);
+    expect(treatment).toEqual(control);
     expect(control).toMatchObject({
       implementation: "codex.basic",
+      graphCapabilityProfile: { search: "query-v1" },
       modelRules: {
         allow: [{ adapterId: "codex-subscription", modelIdRegex: ".*" }],
         deny: [],

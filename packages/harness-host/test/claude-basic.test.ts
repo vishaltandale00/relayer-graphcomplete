@@ -197,7 +197,23 @@ describe("ClaudeBasicHarness", () => {
     } } : {}) });
     expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
     expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
-    expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+    expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
+    expect(prompt).toContain("graph.getLiveAnswers(cursor)");
+    expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
+    expect(prompt).toContain("The sealed initial contract remains unchanged");
+    expect(prompt).not.toContain('value for their next ordinary interaction');
+    expect(prompt).toContain('Preserve the question when repairing its control');
+    expect(prompt).toContain('<textarea');
+    expect(prompt).toContain('viewer.artifactNode');
+    expect(prompt).toContain('discardLayer');
+    expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
     expect(prompt).toContain('graph.authoring("first-finding-');
     expect(prompt).toContain('target: prior.layer');
     expect(prompt).not.toContain("Advancing is optional");
@@ -642,6 +658,41 @@ describe("ClaudeBasicHarness", () => {
     expect(calls[2]?.options.resume).toBe("root-session");
   });
 
+  it("starts a fresh root run in its own session and shows it the thread's history", async () => {
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const harness = new ClaudeBasicHarness(factoryContext("acceptEdits", {
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    }), {
+      query: sequentialSdkQuery([
+        [{ type: "result", subtype: "success", result: "fresh", session_id: "fresh-session" }],
+        [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
+      ], (input) => calls.push(input)),
+      browserSdk: browserSdk(),
+    });
+    const access = managedAccess();
+
+    await harness.complete({
+      ...runContext(access),
+      nativeSession: "fresh",
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
+    });
+    expect(calls[0]?.options.resume).toBeUndefined();
+    expect(String(calls[0]?.prompt)).toContain('"interactionNodeId": 1');
+    expect(String(calls[0]?.prompt)).toContain("await graph.getNode(interactionNodeId)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(String(calls[0]?.prompt)).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
+    expect(harness.state()).toEqual({
+      claudeSessionId: "root-session",
+      claudeSessionProviderDefinitionId: "claude-work",
+      claudeSessionPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(access));
+    expect(calls[1]?.options.resume).toBe("root-session");
+  });
+
   it("rejects an invoked completion that succeeds without a durable session identity", async () => {
     const harness = new ClaudeBasicHarness(factoryContext("acceptEdits"), {
       query: sdkQuery([
@@ -656,8 +707,8 @@ describe("ClaudeBasicHarness", () => {
 
     const execution = harness.complete(context);
 
-    await expect(execution).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
-    await expect(execution.attached).rejects.toThrow("Claude invoked completion did not expose a durable native session identity");
+    await expect(execution).rejects.toThrow("Claude fresh or invoked completion did not expose a durable native session identity");
+    await expect(execution.attached).rejects.toThrow("Claude fresh or invoked completion did not expose a durable native session identity");
   });
 
   it.each([

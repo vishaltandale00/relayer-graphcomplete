@@ -64,8 +64,9 @@ struct HarnessCompleteConfiguration {
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum GraphSearchCapability {
-    #[default]
     Disabled,
+    // Omission grants bounded search; configurations opt out with an explicit `disabled`.
+    #[default]
     QueryV1,
 }
 
@@ -185,6 +186,10 @@ pub(crate) struct CompleteInteraction<'a> {
     pub(crate) thread_icon_selection_eligible: bool,
     pub(crate) require_native_continuity: bool,
     pub(crate) native_history_anchor: Option<&'a Value>,
+    /// The thread's accepted turns, sent with a run that starts a fresh native session. A run
+    /// started from an invoke action never resumes the thread's root session, so it runs beside
+    /// the thread's other turns. `None` resumes the root session as before.
+    pub(crate) fresh_native_session: Option<&'a [crate::product::ThreadHistoryEntry]>,
     pub(crate) project_id: Option<i64>,
     pub(crate) product_interaction_id: i64,
     pub(crate) thread_id: i64,
@@ -241,6 +246,7 @@ pub(crate) struct PreparedInvocation {
 pub(crate) struct PreparedInteraction {
     pub(crate) graph_node_id: i64,
     graph_token: String,
+    authority_epoch: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub(crate) harness_configuration_name: String,
     pub(crate) harness_configuration_digest: String,
     pub(crate) permission_profile_id: String,
@@ -257,6 +263,16 @@ pub(crate) struct PreparedInteraction {
 }
 
 impl PreparedInteraction {
+    pub(crate) fn live_answer_authority_epoch(&self) -> Option<u64> {
+        match self
+            .authority_epoch
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            0 => None,
+            epoch => Some(epoch),
+        }
+    }
+
     /// The policy this execution was prepared under, which its admission must match.
     pub(crate) fn harness_policy(&self) -> Option<&ExecutionHarnessPolicy> {
         self.harness_policy.as_ref()
@@ -944,6 +960,7 @@ impl RuntimeClient {
         Ok(PreparedInteraction {
             graph_node_id: interaction.node.id,
             graph_token: Uuid::new_v4().to_string(),
+            authority_epoch: Default::default(),
             harness_policy: command.harness_policy.cloned(),
             harness_configuration_name: selected.configuration.name.clone(),
             harness_configuration_digest: harness_configuration_digest.to_owned(),
@@ -1034,7 +1051,13 @@ impl RuntimeClient {
             .await
             .unwrap_or(Err(RuntimeError::Timeout("graph capability activation")))
             {
-                Ok(response) if response.graph_token == prepared.graph_token => return Ok(()),
+                Ok(response) if response.graph_token == prepared.graph_token => {
+                    prepared.authority_epoch.store(
+                        response.authority_epoch.unwrap_or(0),
+                        std::sync::atomic::Ordering::Release,
+                    );
+                    return Ok(());
+                }
                 Ok(_) if attempt < CONTROL_RETRY_ATTEMPTS => {}
                 Ok(_) => {
                     return Err(RuntimeError::Protocol(
@@ -1111,6 +1134,11 @@ impl RuntimeClient {
             });
             if command.thread_icon_selection_eligible {
                 complete_body["traceContext"]["threadIconSelection"] = serde_json::json!({"eligible": true});
+            }
+            if let Some(history) = command.fresh_native_session {
+                complete_body["traceContext"]["nativeSession"] = Value::from("fresh");
+                complete_body["traceContext"]["threadHistory"] = serde_json::to_value(history)
+                    .map_err(|error| RuntimeError::Protocol(format!("thread history: {error}")))?;
             }
             if let Some(version_id) = prepared.personal_presentation_version_id {
                 complete_body["traceContext"]["personalPresentationVersionId"] =
@@ -1466,15 +1494,19 @@ impl RuntimeClient {
         Ok(())
     }
 
+    /// The approval events of one interaction. Interactions in a thread can run at once, so
+    /// each observer reads only its own interaction's stream.
     pub(crate) async fn approval_events(
         &self,
         thread_id: i64,
+        interaction_id: i64,
         after_sequence: u64,
     ) -> Result<ApprovalEventSnapshot, RuntimeError> {
         let mut url = self
             .harness_url
             .join(&format!("sessions/{thread_id}/approval-events"))?;
         url.query_pairs_mut()
+            .append_pair("interactionId", &interaction_id.to_string())
             .append_pair("after", &after_sequence.to_string());
         let response = self
             .client
@@ -1484,10 +1516,6 @@ impl RuntimeClient {
             .await?;
         let value = response_json(response, StatusCode::OK).await?;
         Ok(serde_json::from_value(value)?)
-    }
-
-    pub(crate) async fn cancel_completion(&self, thread_id: i64) -> Result<bool, RuntimeError> {
-        self.cancel_completion_request(thread_id, None).await
     }
 
     pub(crate) async fn cancel_invoked_completion(
@@ -2370,6 +2398,54 @@ impl RuntimeClient {
         Ok(serde_json::from_value(value)?)
     }
 
+    pub(crate) async fn live_answers_after(
+        &self,
+        node_id: i64,
+        after_sequence: i64,
+    ) -> Result<relayer_graph_core::LiveAnswerPage, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{node_id}/live-answers?afterSequence={after_sequence}"
+            ))
+            .await?,
+        )?)
+    }
+
+    pub(crate) async fn live_answer_presentation(
+        &self,
+        node_id: i64,
+        layer_id: i64,
+    ) -> Result<relayer_graph_core::LiveAnswerPresentation, RuntimeError> {
+        Ok(serde_json::from_value(
+            self.control_get(&format!(
+                "api/control/interactions/{node_id}/live-answer-presentation/{layer_id}"
+            ))
+            .await?,
+        )?)
+    }
+
+    pub(crate) async fn accept_live_answer(
+        &self,
+        node_id: i64,
+        thread_id: i64,
+        answer: &relayer_graph_core::LiveAnswerRequest,
+    ) -> Result<relayer_graph_core::LiveAnswer, RuntimeError> {
+        let response = self
+            .client
+            .post(
+                self.graph_url
+                    .join(&format!("api/control/interactions/{node_id}/live-answers"))?,
+            )
+            .bearer_auth(&self.graph_control_token)
+            .timeout(CONTROL_REQUEST_TIMEOUT)
+            .json(&serde_json::json!({"threadId":thread_id,"answer":answer}))
+            .send()
+            .await?;
+        Ok(serde_json::from_value(
+            response_json(response, StatusCode::OK).await?,
+        )?)
+    }
+
     async fn control_get(&self, path: &str) -> Result<Value, RuntimeError> {
         let response = self
             .client
@@ -2417,7 +2493,7 @@ impl RuntimeClient {
         let response: RemintCapabilityResponse = self
             .post(
                 self.graph_url.join("api/control/capabilities")?,
-                &serde_json::json!({"nodeId": node_id}),
+                &materialization_capability_request(node_id),
                 &self.graph_control_token,
                 StatusCode::OK,
             )
@@ -2726,6 +2802,8 @@ struct ExecutionAdmissionResponse {
 #[serde(rename_all = "camelCase")]
 struct RemintCapabilityResponse {
     graph_token: String,
+    #[serde(default)]
+    authority_epoch: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -2906,6 +2984,14 @@ fn versioned_identifier(value: &str) -> bool {
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
         && version.parse::<u32>().is_ok_and(|version| version > 0)
+}
+
+/// Product-owned materialization writes only its own definition, so it never needs search.
+fn materialization_capability_request(node_id: i64) -> Value {
+    serde_json::json!({
+        "nodeId": node_id,
+        "graphCapabilityProfile": { "search": "disabled" },
+    })
 }
 
 fn effective_execution_digest(
@@ -3498,6 +3584,7 @@ mod tests {
         let prepared = PreparedInteraction {
             graph_node_id: 41,
             graph_token: "child-token".into(),
+            authority_epoch: Default::default(),
             harness_policy: None,
             harness_configuration_name: "test".into(),
             harness_configuration_digest: "sha256:test".into(),
@@ -4055,6 +4142,7 @@ mod tests {
             thread_icon_selection_eligible: false,
             require_native_continuity: false,
             native_history_anchor: None,
+            fresh_native_session: None,
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
@@ -4104,6 +4192,7 @@ mod tests {
             thread_icon_selection_eligible: false,
             require_native_continuity: false,
             native_history_anchor: None,
+            fresh_native_session: None,
             project_id: None,
             product_interaction_id: 99,
             thread_id: 1,
@@ -4248,6 +4337,7 @@ mod tests {
             thread_icon_selection_eligible: false,
             require_native_continuity: false,
             native_history_anchor: None,
+            fresh_native_session: None,
             project_id: None,
             product_interaction_id: 77,
             thread_id: 1,
@@ -4655,6 +4745,7 @@ mod tests {
             thread_icon_selection_eligible: false,
             require_native_continuity: false,
             native_history_anchor: None,
+            fresh_native_session: None,
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
@@ -4708,6 +4799,14 @@ mod tests {
         harness_task.abort();
     }
 
+    #[test]
+    fn materialization_capability_requests_no_search_despite_the_query_v1_default() {
+        assert_eq!(
+            super::materialization_capability_request(7),
+            json!({ "nodeId": 7, "graphCapabilityProfile": { "search": "disabled" } })
+        );
+    }
+
     #[tokio::test]
     async fn retries_capability_revocation_when_session_registration_fails() {
         let revocations = Arc::new(AtomicUsize::new(0));
@@ -4723,9 +4822,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    // The catalog's explicit opt-out reaches the graph server unchanged.
                     assert_eq!(
                         body["graphCapabilityProfile"],
-                        json!({ "search": "query-v1" })
+                        json!({ "search": "disabled" })
                     );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
@@ -4769,7 +4869,7 @@ mod tests {
                         "implementation": "test",
                         "implementationVersion": 1,
                         "permissionBindings": { "auto": {} },
-                        "graphCapabilityProfile": { "search": "query-v1" },
+                        "graphCapabilityProfile": { "search": "disabled" },
                         "settings": {}
                     },
                     "digest": "sha256:test"
@@ -4799,6 +4899,7 @@ mod tests {
                 thread_icon_selection_eligible: false,
                 require_native_continuity: false,
                 native_history_anchor: None,
+                fresh_native_session: None,
                 project_id: None,
                 product_interaction_id: 1,
                 thread_id: 1,
@@ -4828,8 +4929,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn thread_icon_eligibility_is_forwarded_only_when_requested_and_capabilities_are_revoked()
-    {
+    async fn thread_icon_eligibility_and_fresh_sessions_are_forwarded_only_when_requested_and_capabilities_are_revoked()
+     {
         let revocations = Arc::new(AtomicUsize::new(0));
         let observed_revocations = revocations.clone();
         let attachments = Arc::new(AtomicUsize::new(0));
@@ -4863,9 +4964,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    // The catalog omits graphCapabilityProfile, which grants bounded search.
                     assert_eq!(
                         body["graphCapabilityProfile"],
-                        json!({ "search": "disabled" })
+                        json!({ "search": "query-v1" })
                     );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
@@ -4900,8 +5002,18 @@ mod tests {
                                 body["traceContext"]["threadIconSelection"],
                                 json!({"eligible": true})
                             );
+                            assert!(body["traceContext"].get("nativeSession").is_none());
+                            assert!(body["traceContext"].get("threadHistory").is_none());
                         } else {
                             assert!(body["traceContext"].get("threadIconSelection").is_none());
+                            assert_eq!(body["traceContext"]["nativeSession"], "fresh");
+                            assert_eq!(
+                                body["traceContext"]["threadHistory"],
+                                json!([
+                                    { "interactionNodeId": 5, "responseLayerId": 6 },
+                                    { "interactionNodeId": 8 }
+                                ])
+                            );
                         }
                         assert_eq!(body["graph"]["nodeId"], 41);
                         assert_eq!(body["traceContext"]["personalPresentationVersionId"], 90);
@@ -4972,12 +5084,23 @@ mod tests {
             version_interaction_node_id: 90,
             root_layer_id: 91,
         };
+        let history = [
+            crate::product::ThreadHistoryEntry {
+                interaction_node_id: 5,
+                response_layer_id: Some(6),
+            },
+            crate::product::ThreadHistoryEntry {
+                interaction_node_id: 8,
+                response_layer_id: None,
+            },
+        ];
         for eligible in [true, false] {
             let completed = runtime
                 .complete(CompleteInteraction {
                     thread_icon_selection_eligible: eligible,
                     require_native_continuity: false,
                     native_history_anchor: None,
+                    fresh_native_session: (!eligible).then_some(history.as_slice()),
                     project_id: None,
                     product_interaction_id: 1,
                     thread_id: 1,

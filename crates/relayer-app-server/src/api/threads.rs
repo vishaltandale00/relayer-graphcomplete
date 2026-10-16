@@ -2579,6 +2579,7 @@ async fn admit_recursive_child(
         thread_icon_selection_eligible: false,
         require_native_continuity: false,
         native_history_anchor: None,
+        fresh_native_session: None,
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
         thread_id: thread.id.value(),
@@ -2609,6 +2610,7 @@ async fn admit_recursive_child(
     let attempt = state
         .product
         .begin_interaction_attempt(crate::product::BeginInteractionAttempt {
+            live_answer_authority_epoch: None,
             interaction_id: interaction.id,
             attempt_admission_id: attempt_admission_id.clone(),
             harness_name: &thread.harness_configuration_name,
@@ -4461,6 +4463,7 @@ async fn prepare_interaction(
         thread_icon_selection_eligible: false,
         require_native_continuity: false,
         native_history_anchor: None,
+        fresh_native_session: None,
         project_id: thread.project_id.map(ProjectId::value),
         product_interaction_id: interaction.id.value(),
         thread_id: thread.id.value(),
@@ -5105,6 +5108,7 @@ mod tests {
                 thread_icon_selection_eligible: false,
                 require_native_continuity: false,
                 native_history_anchor: None,
+                fresh_native_session: None,
                 project_id: None,
                 product_interaction_id: child.id.value(),
                 thread_id: thread.id.value(),

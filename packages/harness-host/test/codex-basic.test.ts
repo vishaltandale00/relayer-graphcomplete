@@ -136,6 +136,22 @@ describe("CodexBasicHarness", () => {
     expect(brokerAuthorized).toContain("If child.result rejects with any other error, as it may for a child reported with an error, you cannot read that child's work; present that part as not done, without quoting the error or inventing findings.");
   });
 
+  it("allows published-Current Return in the delivered fallback prompt", async () => {
+    let prompt = "";
+    const settings = { ...codexBasicConfiguration.settings };
+    delete settings.promptProfile;
+    const harness = new CodexBasicHarness({
+      ...context("auto"), configuration: { ...codexBasicConfiguration, settings },
+    }, { codexPathOverride: "/managed/codex", runAppServerTurn: async (options) => {
+      prompt = options.prompt;
+      return { threadId: "fallback-thread", turnId: "turn-1", status: "completed" };
+    } });
+    await harness.complete(runContext(1, "token"));
+    expect(prompt).toContain("The graph is complete only after a successful terminal graph.submit or returnCurrent.");
+    expect(prompt).not.toContain("The graph is complete only after graph.submit succeeds.");
+    expect(prompt).toContain("finish-published-current");
+  });
+
   it.each([undefined, "layered-navigation-v1", "layered-navigation-multi-agent-v1"])("uses the communication contract by default in actual %s turns", async (promptProfile) => {
     for (const brokerAvailable of [false, true]) {
       let prompt = "";
@@ -153,8 +169,26 @@ describe("CodexBasicHarness", () => {
         url: "http://127.0.0.1:43125/api/completions", token: "fixture-broker-token-1234567890123456",
       } } : {}) });
       expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
+      expect(prompt).toContain("returnCurrent");
+      expect(prompt).not.toContain("The graph is complete only after graph.submit succeeds.");
       expect(prompt).toContain("read each changed current.currentLayerId with graph.getLayer");
-      expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+      expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
+      expect(prompt).toContain("graph.getLiveAnswers(cursor)");
+      expect(prompt).toContain("graph.waitForLiveAnswers(cursor)");
+      expect(prompt).toContain("The sealed initial contract remains unchanged");
+      expect(prompt).not.toContain('value for their next ordinary interaction');
+      expect(prompt).toContain('Preserve the question when repairing its control');
+      expect(prompt).toContain('<textarea');
+      expect(prompt).toContain('viewer.artifactNode');
+      expect(prompt).toContain('discardLayer');
+      expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
       expect(prompt).toContain("native helpers are not separate GraphComplete completions");
       expect(prompt).toContain("Do not fabricate findings or publish empty status merely to advance.");
       expect(prompt).toContain('await graph.advanceCurrent(written.rootLayer, current.headRevision, "first-finding-publication")');
@@ -656,8 +690,8 @@ describe("CodexBasicHarness", () => {
         expect(submittedPrompt).toContain("ordinary Codex workspace tools under the configured permission policy");
         expect(submittedPrompt).toContain("LayerLayoutObject takes the placements array, the edge shape and an optional array of edge routes");
         expect(submittedPrompt).toContain("never assign layout.version");
-        // The pinned launcher strips the environment and reads no files, so it keeps whole reruns.
-        expect(submittedPrompt).toContain("edit the same program and rerun it with the same clientKey values");
+        // The pinned launcher repairs remaining drafts from source without replaying accepted phases.
+        expect(submittedPrompt).toContain("skip every phase already accepted by Advance. Edit the remaining program and rerun it with the same clientKey values");
         expect(submittedPrompt).not.toContain("rerunGraphProgram");
         expect(submittedEnvironment.RELAYER_GRAPH_AUTHORING_NODE).toBeUndefined();
       }
@@ -726,6 +760,8 @@ describe("CodexBasicHarness", () => {
       expect(submittedPrompt).toContain("Prefer a unique exact-match edit for a small fix");
       expect(submittedPrompt).toContain('await rerunGraphProgram("<id>", [{ find: "exact text from that program", replace: "fixed text" }])');
       expect(submittedPrompt).toContain("Each find must match exactly one place in that program");
+      expect(submittedPrompt).toContain('rerunGraphProgram requires a non-empty edits array');
+      expect(submittedPrompt).toContain('Do not delete the same declaration twice');
       expect(submittedPrompt).toContain("Preserve the supplied import URL byte for byte");
       expect(submittedPrompt).toContain("reconstruct a fresh graph-only draft");
       expect(submittedPrompt).toContain("outcome is unknown");
@@ -800,7 +836,7 @@ describe("CodexBasicHarness", () => {
     expect(submittedPrompt).toContain("verify that requested workspace effects have actually occurred");
     expect(submittedPrompt).toContain("A flat answer is valid");
     expect(submittedPrompt).toContain("Author in whatever order fits the task");
-    expect(submittedPrompt).toContain("final graph call must be await graph.submit(1)");
+    expect(submittedPrompt).toContain("Finish with await graph.submit(1), or the published-Current Return alternative");
     expect(submittedPrompt).toContain("graph.getNode(1)");
     expect(submittedPrompt).toContain("graph.getNeighbors(1)");
     expect(submittedPrompt).toContain("ordinary graph.submit(1) automatically fulfills any lease");
@@ -860,7 +896,13 @@ describe("CodexBasicHarness", () => {
       return { threadId: "context-thread", turnId: "turn-1", status: "completed" };
     });
 
-    await harness.complete(attachedRunContext(1, "token"));
+    const run = attachedRunContext(1, "token");
+    // Adversarial extra fields exercise the serializer's whitelist. These are
+    // not canonical InteractionContext fields or sealed-contract provenance.
+    const extraFields = { sourceNodeId: 9_876_540_321, sourceLayerId: 9_876_540_322 };
+    await harness.complete({ ...run, interactionInput: { ...run.interactionInput,
+      contexts: run.interactionInput.contexts.map(context => ({ ...context, ...extraFields })),
+    } });
 
     expect(prompt).toContain('"message": "Question"');
     expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
@@ -868,8 +910,20 @@ describe("CodexBasicHarness", () => {
     expect(prompt).toContain("product assigns no semantic precedence");
     expect(prompt).toContain("including in native child agents");
     expect(prompt).toContain("graph.getInteractionInput()");
-    expect(prompt).not.toContain("sourceNodeId");
-    expect(prompt).not.toContain("sourceLayerId");
+    const sections = [...prompt.matchAll(/Normalized interaction input:\n([\s\S]*?)\n\n/g)];
+    expect(sections).toHaveLength(1);
+    const normalized = sections[0]![1]!;
+    expect(JSON.parse(normalized)).toEqual({
+      interactionPermissions: { version: "2", enabled: true, permissions: [{ kind: "navigate.add", nodeId: 20 }, { kind: "navigate.add", nodeId: 21 }] },
+      message: "Question",
+      contexts: [
+        { targetNode: { id: 20, kind: "concept", icon: "box", title: "First target", detail: "First detail", state: "accepted" }, annotations: ["first annotation", "second annotation"] },
+        { targetNode: { id: 21, kind: "concept", icon: "box", title: "Second target", detail: "Second detail", state: "accepted" }, annotations: ["third annotation"] },
+      ],
+    });
+    expect(normalized).not.toContain("sourceNodeId");
+    expect(normalized).not.toContain("sourceLayerId");
+    for (const canary of Object.values(extraFields)) expect(prompt).not.toContain(String(canary));
   });
 
   it("passes the preview and program folders, and teaches previews only when the host granted one", async () => {
@@ -1163,6 +1217,46 @@ describe("CodexBasicHarness", () => {
       codexThreadPersonalPresentationVersionId: null,
       codexThreadHome: expect.any(String),
     });
+  });
+
+  it("starts a fresh root run in its own Codex thread and shows it the thread's history", async () => {
+    const submissions: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({
+      ...context("auto"),
+      savedState: {
+        codexThreadId: "root-thread",
+        codexThreadPersonalPresentationVersionId: null,
+      },
+    }, {
+      codexPathOverride: "/managed/codex",
+      runAppServerTurn: async (options) => {
+        submissions.push(options);
+        const threadId = options.savedThreadId ?? `fresh-thread-${submissions.length}`;
+        await options.onThreadId(threadId);
+        return { threadId, turnId: `turn-${submissions.length}`, status: "completed" };
+      },
+    });
+
+    await harness.complete({
+      ...runContext(2, "fresh-token"),
+      nativeSession: "fresh",
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
+    });
+    expect(submissions[0]?.savedThreadId).toBeUndefined();
+    expect(submissions[0]?.prompt).toContain("This run starts a fresh session");
+    expect(submissions[0]?.prompt).toContain('"interactionNodeId": 1');
+    expect(submissions[0]?.prompt).toContain("await graph.getNode(interactionNodeId)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(submissions[0]?.prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
+    expect(submissions[0]?.prompt).toContain("await graph.getLayer(responseLayerId)");
+    expect(harness.state()).toEqual({
+      codexThreadId: "root-thread",
+      codexThreadPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(3, "root-token"));
+    expect(submissions[1]?.savedThreadId).toBe("root-thread");
+    expect(submissions[1]?.prompt).not.toContain("This run starts a fresh session");
   });
 
   it("fails recursive Codex execution closed without fresh admission and access", async () => {

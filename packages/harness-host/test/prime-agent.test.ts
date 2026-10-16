@@ -37,7 +37,23 @@ describe("PrimeAgentHarness", () => {
         expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
         expect(prompt).toContain("read each changed current.current_layer_id with graph.get_layer");
         expect(prompt).toContain("skip Exception values before reading current.current_layer_id");
-        expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+        expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
+        expect(prompt).toContain("graph.get_live_answers(cursor)");
+        expect(prompt).toContain("graph.wait_for_live_answers(cursor)");
+        expect(prompt).toContain("The sealed initial contract remains unchanged");
+        expect(prompt).not.toContain('value for their next ordinary interaction');
+        expect(prompt).toContain('Preserve the question when repairing its control');
+        expect(prompt).toContain('<textarea');
+        expect(prompt).toContain('viewer.artifact_node');
+        expect(prompt).toContain('discard_layer');
+        expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
         expect(prompt).toContain('graph.authoring("first-finding-');
         expect(prompt).toContain('target=GraphLayer.from_dict(prior["layer"])');
         expect(prompt).toContain('operation_key="first-finding-publication"');
@@ -782,11 +798,11 @@ describe("PrimeAgentHarness", () => {
     expectGraphPresentationGuidance(prompts[0]!.text);
     expectGraphAuthoringRules(prompts[0]!.text);
     // The submit call directly follows the sentence that introduces it.
-    expect(prompts[0]!.text).toContain("Finish the root execution only by calling:\n\nawait graph.submit(11)");
+    expect(prompts[0]!.text).toContain("Finish the root execution with a terminal submission (or the published-Current Return alternative above):\n\nawait graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one new root navigate action");
     expect(prompts[0]!.text).toContain("add_navigate_action(node, \"View evidence\"");
     expect(prompts[0]!.text).toContain("Keep snapshot and local keys stable");
-    expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
+    expect(prompts[0]!.text).toContain("skip every phase already accepted by Advance. Edit and rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
     expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
     await expect(hostHandlers[0]?.({}, invocation(first))).resolves.toEqual({
@@ -900,6 +916,58 @@ describe("PrimeAgentHarness", () => {
     await harness.complete(runContext(43, "root-token"));
     expect(root.promptAndWait).toHaveBeenCalledOnce();
     expect(root.disposeAsync).not.toHaveBeenCalled();
+  });
+
+  it("runs a fresh root run in its own session and shows it the thread's history", async () => {
+    const scopes: ControlledRunScope[] = [];
+    const root = primeSession("/tmp/root-prime-session.jsonl");
+    const fresh = primeSession("/tmp/fresh-root.jsonl");
+    const sessions = [root, fresh];
+    const create = vi.fn(() => "fresh-root");
+    const open = vi.fn(() => "saved-root");
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7,
+      workingDirectory: "/tmp/project",
+      ...fullPermission,
+      configuration,
+      savedState: {
+        primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
+        primeAgentSessionPersonalPresentationVersionId: null,
+      },
+    }, { loadModule: async () => ({
+      ...controlledRunScopeApi(scopes),
+      SessionManager: { create, open },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => nativeServices()),
+      createAgentSessionFromServices: vi.fn(async () => {
+        const session = sessions.shift();
+        if (session === undefined) throw new Error("unexpected Prime session creation");
+        return { session };
+      }),
+    }) as never });
+
+    await harness.complete({
+      ...familyRunContext(41, "fresh-token", 0),
+      nativeSession: "fresh",
+      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
+    });
+    expect(root.promptAndWait).not.toHaveBeenCalled();
+    expect(fresh.promptAndWait).toHaveBeenCalledOnce();
+    const prompt = String(vi.mocked(fresh.promptAndWait).mock.calls[0]?.[0]);
+    expect(prompt).toContain('"interactionNodeId": 1');
+    expect(prompt).toContain("await graph.get_node(interaction_node_id)");
+    // Pointers only: the turn's message stays in the graph.
+    expect(prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
+    expect(prompt).toContain("await graph.get_layer(response_layer_id)");
+    expect(fresh.disposeAsync).toHaveBeenCalledOnce();
+    expect(harness.state()).toEqual({
+      primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
+      primeAgentSessionPersonalPresentationVersionId: null,
+    });
+
+    await harness.complete(runContext(43, "root-token"));
+    expect(root.promptAndWait).toHaveBeenCalledOnce();
+    expect(String(vi.mocked(root.promptAndWait).mock.calls[0]?.[0])).not.toContain("This run starts a fresh session");
   });
 
   it("cancels and quiesces only the exact invoked Prime session before disposing it", async () => {
@@ -1920,7 +1988,7 @@ describe("PrimeAgentHarness", () => {
     expectGraphAuthoringRules(prompt);
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("writer persists drafts");
-    expect(prompt).toContain("final acceptance requires await graph.submit(11)");
+    expect(prompt).toContain("final acceptance requires successful terminal submission: await graph.submit(11)");
     expect(prompt).toContain("await graph.get_node(11)");
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
@@ -2060,7 +2128,7 @@ describe("PrimeAgentHarness", () => {
     } finally { await harness.dispose(); }
   });
 
-  it("includes Python graph-search guidance only for a query-v1 capability profile", async () => {
+  it("includes Python graph-search guidance unless the capability profile disables search", async () => {
     let disabledPrompt = "";
     const disabled = await createHarness(primeSession("/tmp/search-disabled.jsonl", {
       agent: { state: { thinkingLevel: "off" } },
@@ -2093,8 +2161,9 @@ describe("PrimeAgentHarness", () => {
 
     expect(disabledPrompt).not.toContain("Graph search is available");
     expect(disabledPrompt).not.toContain("GraphSearchRequest");
-    expect(omittedPrompt).not.toContain("Graph search is available");
-    expect(omittedPrompt).not.toContain("GraphSearchRequest");
+    // Omission is the query-v1 default; only an explicit disabled profile withholds guidance.
+    expect(omittedPrompt).toContain("Graph search is available");
+    expect(omittedPrompt).toContain("GraphSearchRequest");
     expect(enabledPrompt).toContain("Graph search is available");
     expect(enabledPrompt).toContain("await graph.search(GraphSearchRequest(...))");
     expect(enabledPrompt).toContain("query_contract_version=1");
@@ -2411,7 +2480,13 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    await harness.complete(attachedRunContext(11, "token"));
+    const run = attachedRunContext(11, "token");
+    // Adversarial extra fields exercise the serializer's whitelist. These are
+    // not canonical InteractionContext fields or sealed-contract provenance.
+    const extraFields = { sourceNodeId: 9_876_540_321, sourceLayerId: 9_876_540_322 };
+    await harness.complete({ ...run, interactionInput: { ...run.interactionInput,
+      contexts: run.interactionInput.contexts.map(context => ({ ...context, ...extraFields })),
+    } });
 
     expect(prompt).toContain('"message": "Question"');
     expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
@@ -2419,8 +2494,19 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("product assigns no semantic precedence");
     expect(prompt).toContain("including in native child agents");
     expect(prompt).toContain("await graph.get_interaction_input()");
-    expect(prompt).not.toContain("sourceNodeId");
-    expect(prompt).not.toContain("sourceLayerId");
+    const sections = [...prompt.matchAll(/Normalized interaction input:\n([\s\S]*?)\n\n/g)];
+    expect(sections).toHaveLength(1);
+    const normalized = sections[0]![1]!;
+    expect(JSON.parse(normalized)).toEqual({
+      message: "Question",
+      contexts: [
+        { targetNode: { id: 20, kind: "concept", icon: "box", title: "First target", detail: "First detail", state: "accepted" }, annotations: ["first annotation", "second annotation"] },
+        { targetNode: { id: 21, kind: "concept", icon: "box", title: "Second target", detail: "Second detail", state: "accepted" }, annotations: ["third annotation"] },
+      ],
+    });
+    expect(normalized).not.toContain("sourceNodeId");
+    expect(normalized).not.toContain("sourceLayerId");
+    for (const canary of Object.values(extraFields)) expect(prompt).not.toContain(String(canary));
   });
 
   it("does not start a prompt when the run was already cancelled", async () => {

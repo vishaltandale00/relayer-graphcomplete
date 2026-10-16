@@ -11,6 +11,15 @@ use crate::{
 use sqlx::Row;
 
 impl SqliteProductStore {
+    pub(crate) async fn live_answer_attempt_epoch(
+        &self,
+        interaction_id: crate::product::InteractionId,
+        attempt_id: i64,
+    ) -> Result<Option<i64>, StorageError> {
+        Ok(sqlx::query_scalar::<_, Option<i64>>("SELECT live_answer_authority_epoch FROM interaction_attempts WHERE id=?1 AND interaction_id=?2")
+            .bind(attempt_id).bind(interaction_id.value()).fetch_optional(&self.pool).await?.flatten())
+    }
+
     pub(crate) async fn record_pre_execution_model_failure(
         &self,
         failure: PreExecutionModelFailure<'_>,
@@ -226,12 +235,13 @@ impl SqliteProductStore {
             .bind(receipt.interaction_id.value()).fetch_one(&mut *transaction).await?;
         let admitted_plan_json = serde_json::to_string(&receipt.admitted_plan)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
-        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary,attempt_admission_id,admitted_plan_json,admitted_plan_digest,execution_lease_id) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'running','unknown',?14,?15,?16,?17)")
+        let id = sqlx::query("INSERT INTO interaction_attempts(interaction_id,attempt_number,started_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary,attempt_admission_id,admitted_plan_json,admitted_plan_digest,execution_lease_id,live_answer_authority_epoch) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,'running','unknown',?14,?15,?16,?17,?18)")
             .bind(receipt.interaction_id.value()).bind(attempt_number).bind(timestamp).bind(receipt.route.family_id.value())
             .bind(receipt.model_plan.family_revision).bind(receipt.harness_name).bind(harness_revision).bind(harness_digest)
             .bind(receipt.route.provider_id.as_str()).bind(&receipt.route.adapter_id).bind(receipt.adapter_version).bind(&receipt.route.model_id)
             .bind(&receipt.route.access_contract).bind(&receipt.attempt_admission_id).bind(admitted_plan_json)
             .bind(&receipt.admitted_plan.digest).bind(receipt.execution_lease_id)
+            .bind(receipt.live_answer_authority_epoch.map(i64::try_from).transpose().map_err(|_| StorageError::IncompatibleSchema("live-answer authority epoch is out of range".into()))?)
             .execute(&mut *transaction).await?.last_insert_rowid();
         transaction.commit().await?;
         Ok(id)
@@ -548,6 +558,7 @@ mod tests {
     ) -> BeginInteractionAttempt<'a> {
         let (model_plan, admitted_plan) = plans(route);
         BeginInteractionAttempt {
+            live_answer_authority_epoch: None,
             interaction_id,
             attempt_admission_id: "00000000-0000-0000-0000-000000000001".into(),
             harness_name: "codex-basic",
@@ -1326,6 +1337,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn live_answer_attempt_binding_is_atomic_immutable_and_survives_settlement() {
+        let (_directory, store, interaction_id, route) = seeded_store().await;
+        let mut admission = receipt(interaction_id, &route);
+        admission.live_answer_authority_epoch = Some(7);
+        let attempt = store
+            .begin_interaction_attempt(admission, "10")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .live_answer_attempt_epoch(interaction_id, attempt)
+                .await
+                .unwrap(),
+            Some(7)
+        );
+        assert_eq!(
+            store
+                .live_answer_attempt_epoch(
+                    InteractionId::from_database(interaction_id.value() + 1),
+                    attempt
+                )
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(
+            sqlx::query(
+                "UPDATE interaction_attempts SET live_answer_authority_epoch=8 WHERE id=?1"
+            )
+            .bind(attempt)
+            .execute(&store.pool)
+            .await
+            .is_err()
+        );
+        store
+            .finish_interaction_attempt(attempt, "accepted", None, "graph_write", "11")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .live_answer_attempt_epoch(interaction_id, attempt)
+                .await
+                .unwrap(),
+            Some(7)
+        );
+    }
+
+    #[tokio::test]
     async fn restart_closes_running_attempt_with_unknown_effect_and_never_replays_it() {
         let (_database, store, interaction_id, route) = seeded_store().await;
         let attempt = store
@@ -1977,6 +2036,74 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    /// An invoked run runs beside the message turns, so a message returned to unsent stays
+    /// retryable after a later invoke; only a later message turn makes its draft stale.
+    #[tokio::test]
+    async fn a_later_invoked_run_never_makes_a_returned_message_stale() {
+        for later_is_invoke in [true, false] {
+            let (_database, store, interaction_id, route) = seeded_store().await;
+            let attempt = store
+                .begin_interaction_attempt(receipt(interaction_id, &route), "10")
+                .await
+                .unwrap();
+            store
+                .fail_interaction_completion_with_attempt(
+                    FailedInteractionCompletion {
+                        attempt_id: attempt,
+                        interaction_id,
+                        harness_configuration_name: "codex-basic",
+                        error: "provider timeout",
+                        outcome: "model_failed",
+                        failure_category: "provider_timeout",
+                        effect_boundary: "none",
+                        return_to_unsent: true,
+                        graph_node_id: None,
+                    },
+                    "11",
+                )
+                .await
+                .unwrap();
+            let later = sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) SELECT thread_id,1,'later','12','running' FROM interactions WHERE id=?1")
+                .bind(interaction_id.value())
+                .execute(&store.pool)
+                .await
+                .unwrap()
+                .last_insert_rowid();
+            if later_is_invoke {
+                sqlx::query("INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required,authoritative,agent_invoked) VALUES (?1,41,?2,'12',1,1,0)")
+                    .bind(interaction_id.value())
+                    .bind(later)
+                    .execute(&store.pool)
+                    .await
+                    .unwrap();
+            }
+            let selection = crate::product::InteractionModelSelection {
+                family_id: route.family_id,
+                provider_id: route.provider_id.clone(),
+                model_id: route.model_id.clone(),
+            };
+            let retried = store
+                .claim_interaction_retry(
+                    interaction_id,
+                    attempt,
+                    retry_input("retry"),
+                    &selection,
+                    "codex-basic",
+                )
+                .await;
+            if later_is_invoke {
+                assert!(retried.unwrap(), "a later invoked run made the draft stale");
+            } else {
+                match retried {
+                    Err(StorageError::Catalog(error)) => {
+                        assert_eq!(error.code(), "interaction_retry_stale")
+                    }
+                    other => panic!("a later message turn left the draft retryable: {other:?}"),
+                }
+            }
+        }
     }
 
     #[tokio::test]

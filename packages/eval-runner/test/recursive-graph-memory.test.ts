@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   RECURSIVE_GRAPH_MEMORY_CASE_ID,
-  RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
+  RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR,
   recursiveGraphMemoryEvalCase,
 } from "../src/cases/recursive-graph-memory.js";
 
@@ -11,12 +11,10 @@ describe("recursive graph-memory Eval case", () => {
     expect(RECURSIVE_GRAPH_MEMORY_CASE_ID).toBe("empty-project.recursive-graph-memory.launch-readiness");
     expect(recursiveGraphMemoryEvalCase.prompts).toHaveLength(3);
     expect(recursiveGraphMemoryEvalCase.requiredHarnessConfigurationNames).toEqual(
-      RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET,
+      RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR,
     );
-    expect(RECURSIVE_GRAPH_MEMORY_HARNESS_QUARTET).toEqual([
-      "codex-eval-lantern-search-disabled-recursion-disabled",
+    expect(RECURSIVE_GRAPH_MEMORY_HARNESS_PAIR).toEqual([
       "codex-eval-lantern-search-query-v1-recursion-disabled",
-      "codex-eval-lantern-search-disabled-recursion-enabled",
       "codex-eval-lantern-search-query-v1-recursion-enabled",
     ]);
     expect(recursiveGraphMemoryEvalCase.requiredChecks).toEqual([

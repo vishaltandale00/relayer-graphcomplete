@@ -1,0 +1,1 @@
+{"passed":true,"evidence":"/Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete/.relayer/evidence/issue-506-stop","results":[{"provider":"codex","duplicateClickAbortCount":1,"lifecycle":"stopped","attempt":"cancelled"},{"provider":"prime","duplicateClickAbortCount":1,"lifecycle":"stopped","attempt":"cancelled"}]}
