@@ -1013,7 +1013,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       "READ-001 preserves the source; opening the discoverable invoked result remains a user choice");
     for (const snapshot of snapshots) {
       assert.deepEqual(Object.keys(snapshot).sort(), [...["availableActions", "controls", "screenshot", "text"], ...(snapshot.completionJudgeFeedback ? ["completionJudgeFeedback"] : [])].sort());
-      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot.controls.some(control => control.name === "Close node details") ? ["scroll"] : []), ...(snapshot === snapshots[6] ? [] : ["finish"])]);
+      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot === snapshots[6] ? [] : ["finish"])]);
       for (const control of snapshot.controls) assert.deepEqual(Object.keys(control).sort(), ["name", "ref", "role"]);
     }
     assert.ok(task.events.filter(event => event.kind === "actor_observation").every(event => !event.observation.screenshot && event.observation.screenshotArtifact));

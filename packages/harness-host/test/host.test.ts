@@ -1658,20 +1658,26 @@ describe("HarnessHost", () => {
       expect(admission.admittedPlan).toEqual(roleContractFixture.expectedAdmittedPlan);
       expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
       expect(release).toHaveBeenCalledTimes(2);
+      const unicodePlan = structuredClone(roleContractFixture.inputPlan) as HarnessModelPlan;
+      unicodePlan.roster.find(route => !route.roles!.some(role => role.name === "orchestrator"))!.roles = [{ name: "🧠".repeat(80), description: "🧠".repeat(240) }];
+      const unicodeAdmission = await host.admitModelPlanExecution(1, 30, "attempt-unicode",
+        unicodePlan, new AbortController().signal, roleContractFixture.policy);
+      expect(unicodeAdmission.admittedPlan.roster.some(route => route.roles?.some(role => role.name === "🧠".repeat(80) && role.description === "🧠".repeat(240)))).toBe(true);
+      expect(await host.releaseProviderExecution(unicodeAdmission.executionLeaseId)).toBe(true);
     } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }
   });
 
   it("rejects inconsistent role versions and root assignments before acquiring any provider access", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-family-role-rejection-"));
     const acquire = vi.fn();
-    const host = new HarnessHost({ stateFile: join(directory, "state.json"), controlToken: "control",
+    const running = await startHarnessHost({ stateFile: join(directory, "state.json"), controlToken: "control",
       accessBroker: { acquire }, implementations: { test: () => ({ complete: async () => {}, state: emptyState }) } });
+    const host = running.host;
     const root = { roles: [{ name: "orchestrator" }], providerId: "provider-a", adapterId: "openai-api",
       accessContract: "secret@1", modelId: "gpt" };
     const specialist = { ...root, modelId: "small", roles: [{ name: "review", description: "Evidence" }] };
     const plan: HarnessModelPlan = { schemaVersion: 2, familyId: 1, familyRevision: 1, orchestrator: root, roster: [specialist, root] };
     try {
-      await host.initialize();
       await host.createSession({ threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
         configuration: { ...testConfiguration, executionAccessContracts: ["secret@1"] } });
       const malformed = [
@@ -1687,15 +1693,23 @@ describe("HarnessHost", () => {
           [{ name: " review" }],
           [{ name: "review", description: "x".repeat(241) }],
           [{ name: "review", grants: "full" }],
+          ...["\ud800", "\udfff"].flatMap(surrogate => [
+            [{ name: `review${surrogate}` }],
+            [{ name: "review", description: `Evidence${surrogate}` }],
+          ]),
         ].map(roles => ({ ...plan, roster: [{ ...specialist, roles }, root] })),
       ];
       for (const invalid of malformed) {
-        await expect(host.admitModelPlanExecution(1, 29, "attempt-invalid", invalid as HarnessModelPlan,
-          new AbortController().signal, { configurationRevision: 1, configurationDigest: `sha256:${"a".repeat(64)}`,
-            executionAccessContracts: ["secret@1"] })).rejects.toThrow(/modelPlan|model role/u);
+        const response = await fetch(`${running.url}/sessions/1/execution-leases`, {
+          method: "POST", headers: { Authorization: "Bearer control", "Content-Type": "application/json" },
+          body: JSON.stringify({ interactionId: 29, attemptAdmissionId: "attempt-invalid", modelPlan: invalid,
+            harnessPolicy: { configurationRevision: 1, configurationDigest: `sha256:${"a".repeat(64)}`, executionAccessContracts: ["secret@1"] } }),
+        });
+        expect(response.ok).toBe(false);
+        expect(JSON.stringify(await response.json())).toMatch(/modelPlan|model role/u);
       }
       expect(acquire).not.toHaveBeenCalled();
-    } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }
+    } finally { await running.close(); await rm(directory, { recursive: true, force: true }); }
   });
 
   it("claims an invoked child's family admission exactly as a root run's", async () => {

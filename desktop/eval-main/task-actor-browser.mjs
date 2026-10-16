@@ -296,7 +296,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         // never flatten full DOM paragraphs hidden under scroll/clipping.
         const text = "Use the attached screenshot and these currently visible controls.";
         const inspector = document.getElementById("inspectorContent");
-        return { text, canScroll: Boolean(inspector && visibleRect(inspector)), elements: controls, controls: controls.map((element) => ({ name: actorControlName(element), role: element.getAttribute("role") || element.tagName.toLowerCase() })) };
+        return { text, canScroll: Boolean(inspector && visibleRect(inspector) && inspector.scrollHeight > inspector.clientHeight + 1), elements: controls, controls: controls.map((element) => ({ name: actorControlName(element), role: element.getAttribute("role") || element.tagName.toLowerCase() })) };
       }, working);
       try {
         const text = await (await snapshot.getProperty("text")).jsonValue();
@@ -370,7 +370,12 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           if (!await inspector.isVisible()) throw Object.assign(new Error("No visible node detail is available to scroll."), {
             code: "actor_control_unavailable", actionDispatched: false,
           });
-          // Visibility can change after observation. Only the check above proves
+          const canMove = await inspector.evaluate((element, direction) => element.scrollHeight > element.clientHeight + 1
+            && (direction === "up" ? element.scrollTop > 0 : element.scrollTop + element.clientHeight < element.scrollHeight - 1), action.value);
+          if (!canMove) throw Object.assign(new Error("Node detail cannot scroll farther in that direction."), {
+            code: "actor_control_unavailable", actionDispatched: false,
+          });
+          // Visibility can change after observation. Only the checks above prove
           // no input; a failed hover or wheel remains an ambiguous browser failure.
           await inspector.hover({ timeout: 5000 });
           await page.mouse.wheel(0, action.value === "up" ? -600 : 600);

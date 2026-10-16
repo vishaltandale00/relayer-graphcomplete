@@ -21,9 +21,9 @@ export async function proveActorScroll({ controller, page, expected }) {
     }
     await page.locator("#inspectorContent").waitFor({ state: "hidden" });
   };
-  const rejectsWithoutInput = async () => {
+  const rejectsWithoutInput = async (action = scroll) => {
     const before = await page.evaluate(() => window.__taskActorInputEvidence.checkpoint());
-    await assert.rejects(controller.act(scroll), {
+    await assert.rejects(controller.act(action), {
       code: "actor_control_unavailable", actionDispatched: false,
     });
     assert.equal(await page.evaluate(() => window.__taskActorInputEvidence.checkpoint()), before);
@@ -37,8 +37,8 @@ export async function proveActorScroll({ controller, page, expected }) {
   const node = hidden.controls.find(control => control.name === label);
   assert.ok(node, "node is visible in the actor's actual control observation");
   await controller.act({ kind: "click", ref: node.ref });
-  const visible = await observe();
-  assert.equal(visible.availableActions.includes("scroll"), true, "visible details offer scroll");
+  const originalViewport = page.viewportSize();
+  const metrics = () => page.locator("#inspectorContent").evaluate(element => ({ top: element.scrollTop, remaining: element.scrollHeight - element.clientHeight - element.scrollTop, overflow: element.scrollHeight - element.clientHeight }));
   await page.evaluate(() => {
     window.__actorScrollProof = { trusted: 0, inDetails: 0 };
     window.__actorScrollListener = event => {
@@ -48,9 +48,31 @@ export async function proveActorScroll({ controller, page, expected }) {
     window.addEventListener("wheel", window.__actorScrollListener, true);
   });
   try {
+    // Resize the real workspace, keeping its accepted content and DOM untouched.
+    await page.setViewportSize({ width: originalViewport.width, height: 1600 });
+    await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+    assert.ok((await metrics()).overflow <= 1, "the short accepted detail fits the tall viewport");
+    assert.equal((await observe()).availableActions.includes("scroll"), false);
+    await rejectsWithoutInput();
+    for (const height of [500, 350, 250, 180]) {
+      await page.setViewportSize({ width: originalViewport.width, height });
+      await page.evaluate(() => new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done))));
+      if ((await metrics()).overflow > 1) break;
+    }
+    assert.ok((await metrics()).overflow > 1, "the same real content overflows the smaller inspector");
+    assert.equal((await observe()).availableActions.includes("scroll"), true);
+    await rejectsWithoutInput({ kind: "scroll", ref: "", value: "up" });
     await controller.act(scroll);
+    await page.waitForFunction(() => document.querySelector("#inspectorContent").scrollTop > 0);
     assert.deepEqual(await page.evaluate(() => window.__actorScrollProof), { trusted: 1, inDetails: 1 });
+    for (let n = 0; n < 10 && (await metrics()).remaining > 1; n++) await controller.act(scroll);
+    assert.ok((await metrics()).remaining <= 1, "trusted wheels reach the actual lower boundary");
+    await rejectsWithoutInput();
+    const bottom = (await metrics()).top;
+    await controller.act({ kind: "scroll", ref: "", value: "up" });
+    await page.waitForFunction(prior => document.querySelector("#inspectorContent").scrollTop < prior, bottom);
   } finally {
+    await page.setViewportSize(originalViewport);
     await page.evaluate(() => {
       window.removeEventListener("wheel", window.__actorScrollListener, true);
       delete window.__actorScrollListener; delete window.__actorScrollProof;
@@ -61,5 +83,5 @@ export async function proveActorScroll({ controller, page, expected }) {
   await closed();
   await rejectsWithoutInput();
   assert.equal((await observe()).availableActions.includes("scroll"), false);
-  console.log(`PASS ${expected ? "working" : "settled"} actor scroll: hidden availability, trusted visible-detail wheel and closed-panel nondispatch`);
+  console.log(`PASS ${expected ? "working" : "settled"} actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch`);
 }

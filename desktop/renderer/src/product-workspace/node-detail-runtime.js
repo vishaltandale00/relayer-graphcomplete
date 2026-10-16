@@ -606,7 +606,7 @@ img{max-inline-size:100%}
       return {
         // Capture the existing detail surface, including its authored prompt and
         // choices. Do not wrap or replace the author's visual layout.
-        element: host.parentElement ?? host,
+        element: host.closest("#inspectorContent") ?? host.parentElement ?? host,
         controlElement: element,
         occurrence,
         sourceNodeId: String(action.sourceNodeId),

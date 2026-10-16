@@ -48,7 +48,9 @@ describe("compiled Node Detail product runtime", () => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     const container = window.document.createElement("section");
     const host = window.document.createElement("div");
-    container.append(host); window.document.body.append(container);
+    const inspector = window.document.createElement("section");
+    inspector.id = "inspectorContent";
+    container.append(host); inspector.append(container); window.document.body.append(inspector);
     const detail = compiledPackage({ version: 1, components: [{ id: "form", order: 0, html: '<label>Actual question<textarea data-gc-mount="answer"></textarea></label><label>Second question<textarea data-gc-mount="second"></textarea></label>', css: "" }], mounts: ["answer", "second"].map(id => ({ id, componentId: "form", kind: "capability", host: "textarea", capability: { kind: "input", action: { clientKey: id } } })), assets: [] });
     const acceptedAction = { id: 11, sourceNodeId: 39, sourceLayerId: 10, kind: "input", control: "text", prompt: "UNRENDERED_CANONICAL_PROMPT" };
     const resolveAction = async reference => reference.clientKey === "second" ? { ...acceptedAction, id: 12 } : acceptedAction;
@@ -56,11 +58,15 @@ describe("compiled Node Detail product runtime", () => {
     expect(runtime.status).toBe("mounted");
     const input = host.shadowRoot.querySelector("textarea");
     expect(input.disabled).toBe(true);
-    for (const element of [container, host, ...host.shadowRoot.querySelectorAll("textarea")]) {
+    for (const element of [inspector, container, host, ...host.shadowRoot.querySelectorAll("textarea")]) {
       element.style.opacity = "1";
       element.getBoundingClientRect = () => ({ x: 10, y: 10, left: 10, top: 10, right: 310, bottom: 210, width: 300, height: 200 });
       element.checkVisibility = () => true;
     }
+    inspector.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, top: 0, right: 320, bottom: 220, width: 320, height: 220 });
+    Object.defineProperty(inspector, "scrollHeight", { value: 900 });
+    Object.defineProperty(inspector, "clientHeight", { value: 220 });
+    inspector.scrollTop = 80;
     const forged = window.document.createElement("div");
     forged.attachShadow({ mode: "open" }).innerHTML = '<textarea data-review-capture="input-action-999-10-11"></textarea>';
     window.document.body.append(forged);
@@ -69,8 +75,9 @@ describe("compiled Node Detail product runtime", () => {
     const ref = "input-action-33-10-11";
     expect(adapter.snapshot().controls.filter(control => control.kind === "capture-region").map(control => control.elementRef)).toEqual([ref, "input-action-33-10-12"]);
     expect(JSON.stringify(adapter.snapshot().controls)).not.toContain("UNRENDERED_CANONICAL_PROMPT");
-    await expect(adapter.capturePlan({ target: { kind: "element", elementRef: ref }, mode: "full" })).resolves.toMatchObject({ clip: { width: 300, height: 200 } });
+    await expect(adapter.capturePlan({ target: { kind: "element", elementRef: ref }, mode: "full" })).resolves.toMatchObject({ clip: { width: 320, height: 220 } });
     await adapter.restoreCapture();
+    expect(inspector.scrollTop).toBe(80);
     await expect(adapter.capturePlan({ target: { kind: "element", elementRef: "input-action-999-10-11" }, mode: "full" })).rejects.toThrow("Unknown review target");
     presentation = { ...presentation, presentingInteractionNodeId: 34 };
     expect(adapter.snapshot().controls.filter(control => control.kind === "capture-region")).toEqual([]);

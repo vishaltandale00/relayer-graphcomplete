@@ -75,7 +75,7 @@ outcomes were pending at review and are not certified by it.
 
 ## Executed local gates
 
-The final merged executable/source-test snapshot passed:
+The earlier `cc73f9cf` integration executable/source-test snapshot passed:
 
 - `npm run check`: complete aggregate, including 446 app-server unit tests,
   4,365 JavaScript tests (three skipped), secret boundary 2/2, Python 99,
@@ -140,3 +140,50 @@ remaining secret-boundary 2/2, Python 99, Ladybug and PRD-readability chapters.
 The previous browser and telemetry proof stays attributed to `cc73f9cf`;
 this follow-up changes only Rust plan ingress and its tests. Current hosted CI
 must pass before merge.
+
+
+## Final review repairs
+
+The follow-up review retained the same product meaning and subscription routing.
+Its seven executable boundaries map to these checkpoints; none requires paid
+inference or changes a permission default.
+
+| Changed seam | Production checkpoint and deterministic proof |
+| --- | --- |
+| Preparation versus fresh model-family route | A different orchestrator refuses the stale preparation before provider admission, clears prepared identity, records a coherent fresh-route failure and permits preparation again. `changed_orchestrator_refuses_stale_preparation_before_admission` uses real graph/Product storage and the execution service. |
+| Durable creation-request upgrade replay | A reopened app replays an authentic old three-field selection to the same thread; changed task text, subscription constraints or extra selection fields conflict. Extended `subscription_authority_refuses_family_change_between_validation_and_creation` API/storage journey. |
+| Host role ingress | Real HTTP lease admission rejects unpaired UTF-16 before acquiring access. Valid supplementary characters at 80/240 scalar limits survive real admitted-plan normalization. Harness-host rejection and producer-contract journeys. |
+| Family recovery destination | An unavailable/incompatible orchestrator with a connected provider opens Model Families; a disconnected provider retains Providers. Picker model tests and actual recovery-button click journeys. |
+| Family editor role lengths | 80/240 supplementary scalar values save unchanged; 81/241 fail without saving. Existing editor save/reopen journey, with obsolete UTF-16 maxlength restrictions removed. |
+| Compiled input full capture | Trusted occurrence capture uses the actual inspector overflow. A long accepted authored input produces ordered screenshots including its lower footer, restores scroll position and retains modal/stale/forged/read-only guards. Node-detail runtime tests plus `proveArtifactReview` in `test:eval-web`. |
+| Actor scroll authority | Hidden or fitting details offer no scroll; boundary refusals dispatch no input. The real browser journey resizes the same accepted content to overflow and checks trusted wheel movement in both directions, top/bottom refusal and working/settled Current correlation. `proveActorScroll` through `test:eval-web`. |
+
+The social-preview capture is regenerated for the changed renderer inventory.
+The unchanged follow-up annotation renderer retains its earlier source-bound
+receipt. Earlier review receipts and failed commands remain historical; the
+final repair review and gate outcomes are recorded separately in the PR.
+
+
+Adversarial reviewer `/root/repair_authority_review` found no concrete blockers
+in the [19-file final repair scope](merge-subscription-repair-review.json),
+SHA-256 `34c782a3931be6ff130ec81035a079f9435441e3834245f167d2628f5a8be0cd`.
+The reviewer checked authority, persistence, Unicode, UX and proof mappings,
+including the stronger scroll coverage replacing the old visibility premise.
+Both reviewer and primary agent visually inspected the actual last compiled
+input tile and saw the authored footer pixels. That tile came from a partial
+browser run whose later wrapper failure is preserved; it does not certify full
+browser completion. Full/heavy gates were still pending at the review; source
+changes invalidate this assertion.
+
+
+At the final repair commit, the build and focused five-file JavaScript suite
+passed (261 tests), as did the route-change regression, all 447 app-server unit
+tests, 50 export contracts and all 10 model-catalog API journeys. The required
+`npm run check` invocation stopped in unchanged `project_environment_flow`:
+a staged Git file was observed as zero tracked changes rather than one. That
+aggregate remains failed; the exact cause is not established. The native
+workspace and remaining deterministic chapters run separately, and full Eval
+browser completion and hosted CI remain required before merge. Earlier capture
+fixture CSS errors, its later observation-wrapper failure and the obsolete
+short-scroll availability assertion are retained as failed attempts in the
+private ledger. No production bounds or assertions were weakened to pass them.

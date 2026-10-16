@@ -148,6 +148,96 @@ async fn subscription_authority_refuses_family_change_between_validation_and_cre
         replay["id"].as_i64().unwrap(),
         created["id"].as_i64().unwrap()
     );
+    // Simulate an authentic durable request written before family-only selections.
+    // Reopen the production app: replay must compare intent, not obsolete routing hints.
+    let payload: String = sqlx::query_scalar(
+        "SELECT payload FROM thread_creation_requests WHERE request_id='subscription-task'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let mut legacy: Value = serde_json::from_str(&payload).unwrap();
+    legacy["modelSelection"] = json!({"familyId":id,"providerId":"codex","modelId":"gpt-5.6-sol"});
+    sqlx::query(
+        "UPDATE thread_creation_requests SET payload=?1 WHERE request_id='subscription-task'",
+    )
+    .bind(legacy.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    drop(app);
+    let app = open_app(&database, directory.path()).await;
+    // Startup deliberately clears runtime availability until discovery republishes it.
+    let mut snapshot = provider_snapshot_for("codex", "codex", None);
+    snapshot["adapterId"] = json!("codex-subscription");
+    snapshot["accessContract"] = json!("managed-runtime@1");
+    assert_eq!(
+        app.clone()
+            .oneshot(bearer_request(
+                "PUT",
+                "/api/internal/provider-catalog",
+                Some(snapshot)
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    sqlx::query("UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'").execute(&pool).await.unwrap();
+
+    let replay = app
+        .clone()
+        .oneshot(cookie_request(
+            "POST",
+            "/api/threads",
+            Some(request.clone()),
+        ))
+        .await
+        .unwrap();
+    assert_eq!(replay.status(), StatusCode::OK);
+    assert_eq!(response_json(replay).await["id"], created["id"]);
+    let mut changed_message = request.clone();
+    changed_message["initialMessage"] = json!("Different intent");
+    assert_eq!(
+        app.clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/threads",
+                Some(changed_message)
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    let mut corrupt_legacy = legacy.clone();
+    corrupt_legacy["modelSelection"]["extraAuthority"] = json!(true);
+    sqlx::query(
+        "UPDATE thread_creation_requests SET payload=?1 WHERE request_id='subscription-task'",
+    )
+    .bind(corrupt_legacy.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        app.clone()
+            .oneshot(cookie_request(
+                "POST",
+                "/api/threads",
+                Some(request.clone())
+            ))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::CONFLICT
+    );
+    sqlx::query(
+        "UPDATE thread_creation_requests SET payload=?1 WHERE request_id='subscription-task'",
+    )
+    .bind(legacy.to_string())
+    .execute(&pool)
+    .await
+    .unwrap();
     let mut unconstrained = request;
     unconstrained
         .as_object_mut()

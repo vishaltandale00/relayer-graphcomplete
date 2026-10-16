@@ -9377,3 +9377,80 @@ async fn delivered_input_cannot_be_committed_or_selected_by_ordinary_send() {
         world.finish().await;
     }
 }
+
+#[tokio::test]
+async fn changed_orchestrator_refuses_stale_preparation_before_admission() {
+    use crate::product::{
+        InteractionExecutionService, ModelFamilyMember, ModelFamilyRole, UpdateModelFamilyCommand,
+    };
+    let world = World::new("changed-prepared-route", true).await;
+    // Fixture a user-editable family around the real, already bound preparation.
+    // Membership, selection and prepared identity remain exactly as prepared.
+    sqlx::query("UPDATE model_families SET kind='custom',system_key=NULL WHERE id=1")
+        .execute(&world.pool)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO provider_models(provider_id,model_id,label,provider_order,visible,available,provider_default,metadata_json) VALUES ('codex','replacement-model','Replacement',1,1,1,0,'{}')").execute(&world.pool).await.unwrap();
+    let selection = world.child.model_selection.as_ref().unwrap();
+    world
+        .product
+        .update_model_family(UpdateModelFamilyCommand {
+            id: selection.family_id,
+            name: None,
+            enabled: true,
+            members: Some(vec![ModelFamilyMember {
+                provider_id: selection.provider_id.clone(),
+                model_id: "replacement-model".into(),
+                roles: vec![ModelFamilyRole::orchestrator()],
+                position: 0,
+            }]),
+        })
+        .await
+        .unwrap();
+    let service = InteractionExecutionService::new(
+        world.product.clone(),
+        world.runtime.clone(),
+        world.state.permission_catalog.clone(),
+        world.state.standalone_workspaces_directory.clone(),
+        world.state.approval_decisions.clone(),
+        None,
+        world.state.completion_brokers.clone(),
+    );
+    service
+        .execute_prepared_interaction(
+            world.thread.clone(),
+            world.child.clone(),
+            world.seeded.clone(),
+        )
+        .await;
+    assert_eq!(
+        *world.harness.admitted_policy_revision.lock().unwrap(),
+        None
+    );
+    assert!(world.harness.granted.lock().unwrap().is_empty());
+    assert!(!world.harness.session_requested.load(Ordering::SeqCst));
+    assert_eq!(*world.harness.prov.lock().unwrap(), "none");
+    let unsent = world.product.get_interaction(world.child.id).await.unwrap();
+    assert_eq!(unsent.completion_status, "not_started");
+    assert!(unsent.graph_node_id.is_none());
+    let attempt = unsent.latest_attempt.as_ref().unwrap();
+    assert_eq!(attempt.outcome, "model_failed");
+    assert_eq!(attempt.effect_boundary, "none");
+    assert_eq!(attempt.provider_id.as_str(), "codex");
+    assert_eq!(attempt.model_id, "replacement-model");
+    assert_eq!(attempt.adapter_id, "codex-subscription");
+    assert_eq!(attempt.access_contract, "managed-runtime@1");
+    assert!(attempt.admitted_plan.is_none());
+    let (_, current_route) = world
+        .product
+        .resolve_execution_model_plan(HARNESS, unsent.model_selection.as_ref().unwrap())
+        .await
+        .unwrap();
+    let next = prepare_and_claim_interaction(&world.state, &world.thread, &unsent, false, true)
+        .await
+        .unwrap_or_else(|error| panic!("prepare: {}", error.internal_diagnostic()))
+        .unwrap();
+    assert!(next.matches_model_selection(Some(&current_route)));
+    world.runtime.discard_prepared(next).await.unwrap();
+    world.finish().await;
+}

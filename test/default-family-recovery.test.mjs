@@ -436,6 +436,18 @@ describe("default family that needs model setup (PROV-008)", () => {
     picker.dispose();
   });
 
+  it("opens Model Families to repair a connected incompatible orchestrator", () => {
+    const settings = restored();
+    settings.providers[0].models.forEach(model => { model.available = false; });
+    const onOpenSettings = vi.fn();
+    const { root, picker } = mountPicker(settings, { onOpenSettings });
+    picker.open();
+    expect(root.textContent).toContain("Orchestrator unavailable");
+    root.querySelector("[data-model-picker-settings]").click();
+    expect(onOpenSettings).toHaveBeenCalledExactlyOnceWith("models");
+    picker.dispose();
+  });
+
   it("shows a disconnected provider's state, with Open Settings, and never another family", () => {
     const settings = disconnected();
     const modelSetup = defaultFamilyModelSetup(settings);

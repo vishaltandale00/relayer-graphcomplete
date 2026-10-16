@@ -43,7 +43,7 @@ export function familyModelSetup(settings, familyId, harnessId = settings?.defau
       familyId: family.id,
       familyName: family.name,
       providerId: orchestrator?.providerId,
-      action: "settings",
+      action: settings.providers?.find(provider => provider.id === orchestrator?.providerId)?.connected === false ? "settings" : "family-settings",
       label: "Orchestrator unavailable",
       message: `${family.name} cannot run because its orchestrator is unavailable or incompatible. Reconnect its provider or choose an available orchestrator in Settings.`,
       actionLabel: "Open Settings",

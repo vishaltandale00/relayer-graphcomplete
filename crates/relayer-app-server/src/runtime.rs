@@ -261,6 +261,13 @@ pub(crate) struct PreparedInteraction {
 }
 
 impl PreparedInteraction {
+    pub(crate) fn matches_model_selection(
+        &self,
+        selection: Option<&ExecutionModelSelection>,
+    ) -> bool {
+        self.model_selection.as_ref() == selection
+    }
+
     pub(crate) fn live_answer_authority_epoch(&self) -> Option<u64> {
         match self
             .authority_epoch

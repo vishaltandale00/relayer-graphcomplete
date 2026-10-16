@@ -359,7 +359,7 @@ export function createModelPicker({
   function renderModelSetupPanel(panel, families, modelSetup) {
     const refresh = onRefreshModels && modelSetup.action === "refresh"
       ? `<button type="button" class="secondary" data-model-picker-refresh aria-label="${escapeHtmlAttribute(refreshingModels ? modelSetup.busyName : modelSetup.actionName)}" aria-busy="${refreshingModels}" aria-disabled="${refreshingModels}">${refreshingModels ? "Refreshing…" : escapeHtml(modelSetup.actionLabel)}</button>`
-      : `<button type="button" class="secondary" data-model-picker-settings${modelSetup.action === "settings" ? ` aria-label="${escapeHtmlAttribute(modelSetup.actionName)}"` : ""}>Open Settings</button>`;
+      : `<button type="button" class="secondary" data-model-picker-settings${["settings", "family-settings"].includes(modelSetup.action) ? ` aria-label="${escapeHtmlAttribute(modelSetup.actionName)}"` : ""}>Open Settings</button>`;
     const otherFamilies = families.length
       ? familyFieldMarkup(families, null, modelSetup.familyName)
       : "";

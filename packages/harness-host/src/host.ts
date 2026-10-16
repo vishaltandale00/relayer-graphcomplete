@@ -3077,13 +3077,17 @@ function normalizeModelRoute(value: unknown): HarnessModelRoute {
   });
 }
 
+function hasLoneSurrogate(value: string): boolean {
+  return [...value].some(character => character.length === 1 && /[\uD800-\uDFFF]/u.test(character));
+}
+
 function normalizeModelRoles(value: unknown): readonly { readonly name: string; readonly description?: string }[] {
   if (!Array.isArray(value) || value.length > 32) throw new Error("Harness model roles are invalid");
   const names = new Set<string>();
   return Object.freeze(value.map((role: unknown) => {
     if (!isRecord(role) || typeof role.name !== "string" || [...role.name].length < 1 || [...role.name].length > 80
-      || role.name.trim() !== role.name
-      || (role.description !== undefined && (typeof role.description !== "string" || [...role.description].length > 240))
+      || role.name.trim() !== role.name || hasLoneSurrogate(role.name)
+      || (role.description !== undefined && (typeof role.description !== "string" || [...role.description].length > 240 || hasLoneSurrogate(role.description)))
       || Object.keys(role).some((key) => key !== "name" && key !== "description")
       || names.has(role.name.toLowerCase()) || (role.name.toLowerCase() === "orchestrator" && role.name !== "orchestrator")) {
       throw new Error("Harness model role is invalid or duplicated");

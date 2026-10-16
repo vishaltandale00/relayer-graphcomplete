@@ -49,6 +49,57 @@ const THREAD_COLUMNS: &str = concat!(
 
 const VISIBLE_THREAD: &str = "t.surface='conversation' AND (t.conversation_import_id IS NULL OR EXISTS(SELECT 1 FROM conversation_imports ci WHERE ci.id=t.conversation_import_id AND ci.state='published'))";
 
+fn same_creation_payload(stored: &str, requested: &str) -> bool {
+    if stored == requested {
+        return true;
+    }
+    let (Ok(mut legacy), Ok(current)) = (
+        serde_json::from_str::<serde_json::Value>(stored),
+        serde_json::from_str::<serde_json::Value>(requested),
+    ) else {
+        return false;
+    };
+    let Some(old_selection) = legacy
+        .get("modelSelection")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    let Some(new_selection) = current
+        .get("modelSelection")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return false;
+    };
+    let valid_hint = |key| {
+        old_selection
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|value| {
+                !value.is_empty()
+                    && value.trim() == value
+                    && value.chars().count() <= 200
+                    && !value.chars().any(char::is_control)
+            })
+    };
+    if old_selection.len() != 3
+        || new_selection.len() != 1
+        || old_selection
+            .get("familyId")
+            .and_then(serde_json::Value::as_i64)
+            .is_none_or(|id| id < 1)
+        || old_selection.get("familyId") != new_selection.get("familyId")
+        || !valid_hint("providerId")
+        || !valid_hint("modelId")
+    {
+        return false;
+    }
+    // Only the authentic pre-family-only selection shape loses its obsolete
+    // route hints. Every other draft field and constraint must still agree.
+    legacy["modelSelection"] = current["modelSelection"].clone();
+    legacy == current
+}
+
 impl SqliteProductStore {
     pub(crate) async fn list_archived_threads(&self) -> Result<Vec<Thread>, StorageError> {
         let rows = sqlx::query(&format!("{THREAD_COLUMNS} WHERE {VISIBLE_THREAD} AND t.archived_at IS NOT NULL ORDER BY t.archived_at DESC,t.id DESC"))
@@ -164,7 +215,7 @@ impl SqliteProductStore {
             .fetch_optional(&mut *transaction)
             .await?
         {
-            if row.try_get::<String, _>(1)? != payload {
+            if !same_creation_payload(&row.try_get::<String, _>(1)?, payload) {
                 return Err(StorageError::ThreadCreationConflict(
                     "creationRequestId already used for another draft".into(),
                 ));

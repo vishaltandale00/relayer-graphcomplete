@@ -431,7 +431,7 @@ it("blocks unavailable orchestrators without choosing a specialist or another fa
   catalog.families.push({ ...structuredClone(catalog.families[0]), id: 3, members: [{ providerId: "codex", modelId: "two", position: 0, roles: [{ name: "orchestrator" }] }] });
   expect(firstAvailableSelection(catalog, "codex-basic")).toBeNull();
   expect(normalizePickerSelection(catalog, { harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "two" })).toBeNull();
-  expect(modelPickerFamilyPresentation(catalog, "codex-basic", { harnessId: "codex-basic", familyId: 1 })).toMatchObject({ selectedFamily: null, modelSetup: { action: "settings", label: "Orchestrator unavailable" } });
+  expect(modelPickerFamilyPresentation(catalog, "codex-basic", { harnessId: "codex-basic", familyId: 1 })).toMatchObject({ selectedFamily: null, modelSetup: { action: "family-settings", label: "Orchestrator unavailable" } });
 });
 
 it("judges the designated orchestrator against the requested harness", () => {

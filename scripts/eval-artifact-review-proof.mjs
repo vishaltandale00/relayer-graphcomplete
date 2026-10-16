@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { RelayerGraphClient, NodeObject, LayerObject, LayerLayoutObject, NodePlacementObject, EdgeObject, html, detailCapability } from "@relayer/graph-client";
+import { RelayerGraphClient, NodeObject, LayerObject, LayerLayoutObject, NodePlacementObject, EdgeObject, html, css, detailCapability } from "@relayer/graph-client";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
@@ -31,7 +31,7 @@ export async function proveArtifactReview({ browser, directory }) {
         const edge = new EdgeObject([source, question], "delivery-question");
         const root = new LayerObject([source, question], [edge], new LayerLayoutObject([new NodePlacementObject(source, 0.25, 0.5), new NodePlacementObject(question, 0.75, 0.5)], "default"), "delivery-root", source);
         const input = { kind: "input", control: "text", prompt: "Which boundary should change?", label: "Boundary", sourceLayer: root, clientKey: "boundary" };
-        question.detailAuthoring.setComponent("question", html`<label>Which boundary should change?<textarea aria-label="Which boundary should change?" gc=${detailCapability.input("boundary", input)}></textarea></label>`);
+        question.detailAuthoring.setComponent("question", html`<label>Which boundary should change?<textarea aria-label="Which boundary should change?" gc=${detailCapability.input("boundary", input)}></textarea></label><section class="full-context">Read the full authored context before answering.</section><footer>END OF AUTHORED CONTEXT</footer>`, css`.full-context { height: 1500px; } footer { height: 100px; background-color: rgb(24, 160, 96); }`);
         await graph.submitNode(source);
         await graph.submitNode(question); questionNode = String(question.ref.id);
         await graph.createEdge(edge);
@@ -83,8 +83,32 @@ export async function proveArtifactReview({ browser, directory }) {
     const inputRegion = questionState.controls.find(control => control.kind === "capture-region" && control.elementRef.startsWith(`input-action-${turn.graphNodeId}-${before.layerId}-`));
     assert.ok(inputRegion, "compiled input exposes its exact accepted occurrence");
     questionActionId = inputRegion.actionId;
+    const inspector = page.locator("#inspectorContent");
+    await inspector.evaluate(element => { element.scrollTop = 40; });
+    const originalScroll = await inspector.evaluate(element => element.scrollTop);
+    const observedTiles = [];
+    // Observe actual capture positions without changing the production capture behavior.
+    await page.exposeFunction("recordCompiledCaptureTile", value => observedTiles.push(value));
+    await page.evaluate(() => {
+      window.__unwrappedPresentation = window.__evalPresentation;
+      const original = window.__evalPresentation.prepareCaptureTile.bind(window.__evalPresentation);
+      window.__evalPresentation = { ...window.__evalPresentation, prepareCaptureTile: async tile => {
+        const result = await original(tile);
+        const inspector = document.querySelector("#inspectorContent");
+        const footer = document.querySelector(".node-detail-runtime-host").shadowRoot.querySelector("footer").getBoundingClientRect();
+        const viewport = inspector.getBoundingClientRect();
+        await window.recordCompiledCaptureTile({ index: tile.index, top: inspector.scrollTop, footerVisible: footer.top >= viewport.top && footer.bottom <= viewport.bottom });
+        return result;
+      } };
+    });
     const inputShot = await opened.session.screenshot({ target: { kind: "element", elementRef: inputRegion.elementRef }, mode: "full", label: "Authored prompt and input" });
+    await page.evaluate(() => { window.__evalPresentation = window.__unwrappedPresentation; delete window.__unwrappedPresentation; });
     assert.equal(inputShot.ok, true);
+    assert.ok(inputShot.screenshot.tileCount > 1, "long authored input uses the real inspector overflow");
+    assert.equal(observedTiles.length, inputShot.screenshot.tileCount);
+    assert.ok(observedTiles.at(-1).top > observedTiles[0].top);
+    assert.equal(observedTiles.at(-1).footerVisible, true, "last actual screenshot tile contains the authored footer");
+    assert.equal(await inspector.evaluate(element => element.scrollTop), originalScroll, "capture restores inspector position");
     assert.equal(await page.locator(".node-detail-runtime-host textarea").isDisabled(), true);
     await page.getByText("Which boundary should change?", { exact: true }).waitFor();
     const inputRequest = { kind: "node", subject: { layerId: before.layerId, nodeId: questionNode }, actionSubjects: [{ actionId: questionActionId, occurrence: { presentingInteractionNodeId: turn.graphNodeId, presentingLayerId: Number(before.layerId), actionId: Number(questionActionId) } }], review: { evidence: { context: [inputShot.screenshot.screenshotId], detail: [inputShot.screenshot.screenshotId] }, semantic: { evidence: [] }, allocationSteps: [], findings: [], actions: [{ kind: "input", actionId: questionActionId, evidence: [inputShot.screenshot.screenshotId] }] } };
