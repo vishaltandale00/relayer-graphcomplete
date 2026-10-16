@@ -144,7 +144,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               await proveActorScroll({ controller: scrollView, page: browser.contexts().at(-1).pages()[0], expected });
             } finally { await scrollView.close(); }
           }
-          assert.deepEqual(observation.availableActions, ["click", "fill", "select", "scroll"]);
+          assert.deepEqual(observation.availableActions, ["click", "fill", "select"]);
           assert.ok(observation.screenshot);
           reactions.push(observation.currentUpdate.revision);
           const status = observation.currentUpdate.completionStatus;

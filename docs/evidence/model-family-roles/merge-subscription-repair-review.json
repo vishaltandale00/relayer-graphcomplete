@@ -1,7 +1,7 @@
 {
   "reviewer": "/root/repair_authority_review",
-  "reviewedAt": "2026-10-16T22:52:18.617782+00:00",
-  "headAtReview": "db6295be9ecc2a7f20dfb09d1c372950a10113fd",
+  "reviewedAt": "2026-10-16T22:56:24.554576+00:00",
+  "headAtReview": "e93c2cbbb3a5e3cdbcf25805e3d1c8df72ef4ee8",
   "digestAlgorithm": "SHA256(sorted relative path UTF-8 + NUL + file bytes + NUL)",
   "scope": [
     "crates/relayer-app-server/src/product/execution.rs",
@@ -18,14 +18,15 @@
     "packages/harness-host/test/host.test.ts",
     "scripts/eval-actor-scroll-proof.mjs",
     "scripts/eval-artifact-review-proof.mjs",
+    "scripts/eval-current-actor-proof.mjs",
     "scripts/test-eval-web.mjs",
     "test/default-family-recovery.test.mjs",
     "test/model-family-settings-refresh.test.mjs",
     "test/model-picker-model.test.mjs",
     "test/node-detail-runtime.test.mjs"
   ],
-  "scopeCount": 19,
-  "scopeSha256": "34c782a3931be6ff130ec81035a079f9435441e3834245f167d2628f5a8be0cd",
+  "scopeCount": 20,
+  "scopeSha256": "df6f8d78492533dbe5206bd657ae5397e04836666b9ce02e14b31975607a8578",
   "fileSha256": {
     "crates/relayer-app-server/src/product/execution.rs": "eb326caf8835f1053e4ae34e5e522fe2a1b77e92ea83cf592337149d76841616",
     "crates/relayer-app-server/src/runtime.rs": "b135c011377364b1eaa58a54207c21a222756bd4de0519c0bdb6b05592591f80",
@@ -38,9 +39,10 @@
     "desktop/renderer/src/model-picker.js": "29a3642a30f391b113ac6ca3c1330d44a4529bb5d9fab39938ab6e42929212ea",
     "desktop/renderer/src/product-workspace/node-detail-runtime.js": "eb0e1705cdc30a878c14c8986dd4d53bd8e8fd1d2b2b579f64f7f5d42e7cc85b",
     "packages/harness-host/src/host.ts": "cc1e256605544009ca53525596dfebd6d5a1920ffaaa153fc192977f22960fae",
-    "packages/harness-host/test/host.test.ts": "ad0a06adc1233866c377ed5221bce1178f6701bb1fbc52d7cbc0eb1c47a3a39f",
+    "packages/harness-host/test/host.test.ts": "e9b5504356690c21b74089ffff6d75c16bf1caad5dcc035b4579b924a8c59a1f",
     "scripts/eval-actor-scroll-proof.mjs": "a64e51b2be8603c09cf9eb8a241f6c130c1072969864bc98174f41b9c6abac90",
     "scripts/eval-artifact-review-proof.mjs": "cfaa6647ec769c15bbf20850631200d91b4e5365dc215037d389a4439186d21f",
+    "scripts/eval-current-actor-proof.mjs": "6fba4493664ec9447084b137984dcc996061f3b6376b7dd0e07ba49ed36a24a2",
     "scripts/test-eval-web.mjs": "6c0f9e5d38c7159234da47fa5085aeda41a4664fe42926c8ac41ec5ebebffb39",
     "test/default-family-recovery.test.mjs": "281a09615878afaf5056a1949adb542b91615d51d653dd69fe9ff87f4372278c",
     "test/model-family-settings-refresh.test.mjs": "c2a98e618c03794cf5ad490cb4ac5efce4ccd3b4224a3c471ef1a5950852c483",
@@ -54,6 +56,8 @@
     "Earlier failed browser attempts remain failures; the visually inspected last input tile came from a partial run that later failed outside input capture.",
     "The short-detail availability assertion corrects a false visibility-to-overflow premise; real short/overflow/directional/browser coverage replaces it without deleting tests.",
     "Previous review receipts remain historical for their exact source digests.",
-    "Any scoped source change invalidates this review."
+    "Any scoped source change invalidates this review.",
+    "Browser run3 passed working scroll, then failed a second obsolete short-content assertion; its one-line correction is included in this scope. Full browser run4 remains pending at audit.",
+    "The valid Unicode fixture now constructs immutable routes to pass host TypeScript checking. Earlier e93 CI and the local workspace check failed on its prior readonly assignment. Final host tsc passed; full gates remain separately attributed."
   ]
 }

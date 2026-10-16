@@ -165,8 +165,8 @@ final repair review and gate outcomes are recorded separately in the PR.
 
 
 Adversarial reviewer `/root/repair_authority_review` found no concrete blockers
-in the [19-file final repair scope](merge-subscription-repair-review.json),
-SHA-256 `34c782a3931be6ff130ec81035a079f9435441e3834245f167d2628f5a8be0cd`.
+in the [20-file final repair scope](merge-subscription-repair-review.json),
+SHA-256 `df6f8d78492533dbe5206bd657ae5397e04836666b9ce02e14b31975607a8578`.
 The reviewer checked authority, persistence, Unicode, UX and proof mappings,
 including the stronger scroll coverage replacing the old visibility premise.
 Both reviewer and primary agent visually inspected the actual last compiled
@@ -187,3 +187,15 @@ browser completion and hosted CI remain required before merge. Earlier capture
 fixture CSS errors, its later observation-wrapper failure and the obsolete
 short-scroll availability assertion are retained as failed attempts in the
 private ledger. No production bounds or assertions were weakened to pass them.
+
+
+The final proof-only correction also removes the same obsolete short-scroll
+assumption from the working-Current fixture. Its separate actual scrolling
+journey passed in both native-input and authored-input modes. The valid Unicode
+fixture constructs immutable routes after hosted TypeScript checking caught an
+invalid assignment to a readonly property; host `tsc --noEmit` then passed.
+Earlier CI/workspace-check failures remain failures. A later browser attempt
+passed native-input Current and both scrolling modes, then failed authored
+navigation while reporting temporarily unavailable visual assets during a
+parallel generated-package rebuild. No causal claim or production fix is made
+from that failure; a post-build browser run remains required.

@@ -1658,8 +1658,9 @@ describe("HarnessHost", () => {
       expect(admission.admittedPlan).toEqual(roleContractFixture.expectedAdmittedPlan);
       expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
       expect(release).toHaveBeenCalledTimes(2);
-      const unicodePlan = structuredClone(roleContractFixture.inputPlan) as HarnessModelPlan;
-      unicodePlan.roster.find(route => !route.roles!.some(role => role.name === "orchestrator"))!.roles = [{ name: "🧠".repeat(80), description: "🧠".repeat(240) }];
+      const unicodeSource = structuredClone(roleContractFixture.inputPlan) as HarnessModelPlan;
+      const unicodePlan: HarnessModelPlan = { ...unicodeSource, roster: unicodeSource.roster.map(route =>
+        route.roles!.some(role => role.name === "orchestrator") ? route : { ...route, roles: [{ name: "🧠".repeat(80), description: "🧠".repeat(240) }] }) };
       const unicodeAdmission = await host.admitModelPlanExecution(1, 30, "attempt-unicode",
         unicodePlan, new AbortController().signal, roleContractFixture.policy);
       expect(unicodeAdmission.admittedPlan.roster.some(route => route.roles?.some(role => role.name === "🧠".repeat(80) && role.description === "🧠".repeat(240)))).toBe(true);
