@@ -164,15 +164,28 @@ if (current !== null && !firstPublished) {
 // Publish further material findings or questions as new snapshots, preserving prior current.
 if (current !== null) current = await graph.getCurrent();
 const finalAuthor = graph.authoring("final-findings");
+// This example relates a result to its reasoning and evidence; it is not a node quota.
+// Choose the actual task's relationships. An atomic answer can remain one node.
 const finalLayer = finalAuthor.layer("summary");
 const summary = finalLayer.node("summary", { icon: "info", title: "Result", detail: "Replace with the completed result or the consequential question requiring the user's answer." });
+const reasoning = finalLayer.node("reasoning", { icon: "info", title: "Why this follows", detail: "Replace with the material reason, mechanism or tradeoff that explains this result." });
+const verification = finalLayer.node("verification", { icon: "info", title: "Evidence and limits", detail: "Replace with observed checks, sources or worked examples, and the limits of what they establish." });
+finalLayer.edge("result-reasoning", summary, reasoning);
+finalLayer.edge("result-verification", summary, verification);
+const supportLayer = finalAuthor.layer("supporting-evidence");
+const support = supportLayer.node("support", { icon: "info", title: "Supporting evidence", detail: "Replace with the actual check output, source extract or worked example supporting the result; distinguish observations from interpretation." });
+const inspectSupport = finalLayer.action("inspect-support", verification, { kind: "navigate", relation: "expand", label: "Inspect supporting evidence", target: supportLayer });
 summary.detailAuthoring.setComponent("main", html\`<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p></section>\`, sharedStyles);
+reasoning.detailAuthoring.setComponent("main", html\`<section><h2>Why this follows</h2><p>Replace with the material reasoning behind the result.</p></section>\`, sharedStyles);
+verification.detailAuthoring.setComponent("main", html\`<section><h2>Evidence and limits</h2><p>Replace with observed support and remaining limits.</p><button gc=\${detailCapability.expand("support-control", inspectSupport)}>Inspect supporting evidence</button></section>\`, sharedStyles);
+support.detailAuthoring.setComponent("main", html\`<section><h2>Supporting evidence</h2><p>Replace with concrete evidence that adds depth beyond the root.</p></section>\`, sharedStyles);
+supportLayer.layout([[support, 0.5, 0.5]], { edgeShape: "default", defaultNode: support });
 if (current?.currentLayerId != null) {
   const prior = await graph.getLayer(current.currentLayerId);
   const earlier = finalLayer.action("prior", summary, { kind: "navigate", relation: "reference", label: "Earlier findings", target: prior.layer });
-  summary.detailAuthoring.setComponent("main", html\`<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p><button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button></section>\`, sharedStyles);
+  summary.detailAuthoring.setComponent("history", html\`<button gc=\${detailCapability.reference("earlier-control", earlier)}>Earlier findings</button>\`, sharedStyles);
 }
-finalLayer.layout([[summary, 0.5, 0.5]], { edgeShape: "default", defaultNode: summary });
+finalLayer.layout([[summary, 0.5, 0.25], [reasoning, 0.25, 0.72], [verification, 0.75, 0.72]], { edgeShape: "default", defaultNode: summary });
 const finalWritten = await finalAuthor.write(finalLayer);
 // Advance leaves the interaction's root response action draft; retarget that same stable action.
 await graph.addAction(${interactionNodeId}, { kind: "navigate", relation: "expand", label: "Task findings", icon: "info", target: finalWritten.rootLayer, clientKey: "root-response" });
@@ -258,14 +271,27 @@ if current is not None and not first_published:
 if current is not None:
     current = await graph.get_current()
 final_author = graph.authoring("final-findings")
+# This example relates a result to its reasoning and evidence; it is not a node quota.
+# Choose the actual task's relationships. An atomic answer can remain one node.
 final_layer = final_author.layer("summary")
 summary = final_layer.node("summary", icon="info", title="Result", detail="Replace with the completed result or the consequential question requiring the user's answer.")
+reasoning = final_layer.node("reasoning", icon="info", title="Why this follows", detail="Replace with the material reason, mechanism or tradeoff that explains this result.")
+verification = final_layer.node("verification", icon="info", title="Evidence and limits", detail="Replace with observed checks, sources or worked examples, and the limits of what they establish.")
+final_layer.edge("result-reasoning", summary, reasoning)
+final_layer.edge("result-verification", summary, verification)
+support_layer = final_author.layer("supporting-evidence")
+support = support_layer.node("support", icon="info", title="Supporting evidence", detail="Replace with the actual check output, source extract or worked example supporting the result; distinguish observations from interpretation.")
+inspect_support = final_layer.action("inspect-support", verification, kind="navigate", relation="expand", label="Inspect supporting evidence", target=support_layer)
 summary.detail_authoring.set_component("main", html("<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p></section>"), shared_styles)
+reasoning.detail_authoring.set_component("main", html("<section><h2>Why this follows</h2><p>Replace with the material reasoning behind the result.</p></section>"), shared_styles)
+verification.detail_authoring.set_component("main", html(["<section><h2>Evidence and limits</h2><p>Replace with observed support and remaining limits.</p><button gc=", ">Inspect supporting evidence</button></section>"], action_capability("support-control", inspect_support)), shared_styles)
+support.detail_authoring.set_component("main", html("<section><h2>Supporting evidence</h2><p>Replace with concrete evidence that adds depth beyond the root.</p></section>"), shared_styles)
+support_layer.layout([(support, 0.5, 0.5)], edge_shape="default", default_node=support)
 if current is not None and current["currentLayerId"] is not None:
     prior = await graph.get_layer(current["currentLayerId"])
     earlier = final_layer.action("prior", summary, kind="navigate", relation="reference", label="Earlier findings", target=GraphLayer.from_dict(prior["layer"]))
-    summary.detail_authoring.set_component("main", html(["<section><h2>Result</h2><p>Replace with the completed result or consequential question.</p><button gc=", ">Earlier findings</button></section>"], action_capability("earlier-control", earlier)), shared_styles)
-final_layer.layout([(summary, 0.5, 0.5)], edge_shape="default", default_node=summary)
+    summary.detail_authoring.set_component("history", html(["<button gc=", ">Earlier findings</button>"], action_capability("earlier-control", earlier)), shared_styles)
+final_layer.layout([(summary, 0.5, 0.25), (reasoning, 0.25, 0.72), (verification, 0.75, 0.72)], edge_shape="default", default_node=summary)
 final_written = await final_author.write(final_layer)
 # Advance leaves the interaction's root response action draft; retarget that same stable action.
 await graph.add_navigate_action(${interactionNodeId}, "Task findings", final_written.root_layer, relation="expand", client_key="root-response", icon="info")

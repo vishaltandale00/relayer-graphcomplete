@@ -1,0 +1,169 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "77b1b296022b17c29b06aa0da24522ead3344617",
+  "scope": "Delivered JavaScript and Python communication examples shared by Codex, Claude and Prime. Published personal-presentation-v6 text and graph pin are unchanged.",
+  "sourceScopeDigest": "3e23ca09f5aa826da882aac7d683789e45a38e8b23a6dda7e564cdfdbcefa5f7",
+  "digestAlgorithm": "sha256(sorted relative path UTF-8 + NUL + exact file bytes + NUL)",
+  "checkpoints": [
+    {
+      "promise": "Examples demonstrate meaningful task-sensitive result/reason/evidence relationships without a node quota",
+      "productionSeam": "graph-presentation-guidance.ts currentCommunicationAuthoringRecipeJs/Python; Codex prompt paths, Claude buildLayeredNavigationPrompt, Prime primeVisualExample",
+      "checks": [
+        "harness-host codex-basic, claude-basic, prime-agent and graph-authoring-repair-examples tests (185 passed)",
+        "actual JavaScript and Python communication recipe execution through native GraphComplete (9 scenarios passed)"
+      ]
+    },
+    {
+      "promise": "A typed inspection control navigates to accepted distinct evidence with valid layout",
+      "productionSeam": "Scoped authoring closure compilation, expand mount/action identity and canonical Rust acceptance",
+      "checks": [
+        "existing recipe scenarios follow the actual targetLayerId and check accepted layer, supporting content, compiled detail, centered placement and default node"
+      ]
+    },
+    {
+      "promise": "Current, accepted history, replay and attached-node return authority remain valid",
+      "productionSeam": "Current communication example publication/finalization; stable replay keys; source-linked return actions",
+      "checks": [
+        "existing temporal/prior/replay/later/attached plain/attached rich/all-off recipe scenarios; preservation assertions retained"
+      ]
+    },
+    {
+      "promise": "Prime asset persistence, reopen and presentation promotion preserve the updated communication example",
+      "productionSeam": "Prime basic/deep visual integration through native authoring, asset export/import and interaction layer read API",
+      "checks": [
+        "test/prime-visual-integration.test.mjs: both existing basic/deep scenarios now inspect actual supporting-layer navigation instead of expecting the old single-node fixture; original asset, pin, reopen and history assertions retained"
+      ]
+    }
+  ],
+  "requiredVerificationPlan": [
+    "npm run build",
+    "npm run check",
+    "npm run test:eval-compiled-runtime",
+    "Three cases across three harnesses, updated examples only, with current-main actor/completion judge/graph judge; no baseline improvement claim"
+  ],
+  "ran": [
+    {
+      "command": "npm run build (isolated target, Node22.23.2)",
+      "result": "passed",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "four focused harness-host files",
+      "result": "185 passed",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "actual recipe scenarios with supporting-layer inspection",
+      "result": "9 passed;8 unrelated scenarios filtered",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "npm run check (isolated target)",
+      "result": "FAILED at cargo test:app-server library environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees (Unavailable versus Git;2secondinspectionbudget);395 otherapp-server librarytests passed. Latercheck chapters not reached.",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "same repository identity scenario isolated",
+      "result": "1 passed;1.46seconds. This does not certify the original full gate or prove its failure cause.",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime first pass",
+      "result": "FAILED:11passed,1app-server readiness timeout",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime after broad native tests stopped",
+      "result": "12passed. No source changes or timeout changes between these two runs.",
+      "sourceBaseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d"
+    },
+    {
+      "command": "Latest-main7-file focused portfolio (6a04aa98)",
+      "result": "206passed; all three harness delivery, both full native recipe files and workspace scroll tests",
+      "sourceBaseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041"
+    },
+    {
+      "command": "npm run build on6a04aa98",
+      "result": "passed; isolated target and Node22.23.2",
+      "sourceBaseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime on6a04aa98",
+      "result": "12passed",
+      "sourceBaseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041"
+    },
+    {
+      "command": "PR #739 CI on 5c9bda10, JavaScript suite",
+      "result": "FAILED: 4292 passed, 2 failed, 34 skipped. Both failures were obsolete one-node expectations in the Prime basic/deep visual integration fixtures."
+    },
+    {
+      "command": "Updated test/prime-visual-integration.test.mjs against unchanged production guidance/runtime",
+      "result": "2 passed (33.72 seconds); actual native asset/pin/reopen scenarios. No candidate inference rerun.",
+      "sourceBaseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041"
+    },
+    {
+      "command": "GitHub CI full portfolio on df771714a9a4b1b06545c8efdb2c38511520954b",
+      "result": "Passed all selected chapters including check, builds, fresh Rust tests, crash reconciliation, Python, Clippy, receipt integrity, Prime runtime packaging and PRD readability. Vitest: 327 files / 4314 tests passed; 34 skipped in the main run; separate secret-boundary file had 2 skipped. This CI evidence is distinct from the earlier failed local npm run check.",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/38837255157"
+    },
+    {
+      "command": "Rebased full selected GitHub CI on 2c19a999a1af6ba33d9240a61f93239281e2b155",
+      "result": "All selected chapters passed, required check and merge-freshness-status passed. Initial attempt hit unchanged ci-lbug-artifact beforeAll 10-second timeout; isolated14 scenarios passed on this head (7.02s total), then exactly one failed-job retry passed without source/timeout changes.",
+      "url": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/38839570398/attempts/2"
+    }
+  ],
+  "review": {
+    "reviewer": "/root/pilot_fix_authority_review",
+    "scopeDigest": "3e23ca09f5aa826da882aac7d683789e45a38e8b23a6dda7e564cdfdbcefa5f7",
+    "scope": "Rebased five-file scope: completion-scoped guidance, Current/history/replay, upstream fresh native sessions and approvals, retained e2e assertions. Only upstream latestHumanTurn to latestMessageTurn changes the prior reviewed file bytes.",
+    "verdict": "passed",
+    "unresolvedFindings": [],
+    "certification": "Scoped adversarial static rebase review recorded in PR #739; distinct from execution evidence",
+    "baseCommit": "77b1b296022b17c29b06aa0da24522ead3344617",
+    "reviewedState": "2c19a999a1af6ba33d9240a61f93239281e2b155; exact executable/test manifest above"
+  },
+  "notClaimed": [
+    "Measured improvement over latest-main examples",
+    "Default paid-inference tests",
+    "Release proof",
+    "Full inventory provider-readiness qualification"
+  ],
+  "liveEvidence": "Nine-session updated-only local Mac cohort admitted once, sequentially within each provider. At this snapshot, eight sessions were terminal and Prime proof remained active. For all three backend cases, the completion judge reported the endpoint reached and all four actual workspace gates passed. Codex and Claude proof received endpoint-reached judgments. Codex collaboration was incomplete; Claude and Prime collaboration exhausted the actor action budget with uncertain completion judgments. Separate graph-presentation judgments remain pending. Final live results are recorded in PR #739. The 135-session comparison is deferred.",
+  "unknowns": [
+    "Earlier local npm run check failed on base 5156d906 and later chapters were not reached; the pre-rebase PR source subsequently passed the full selected CI portfolio on df771714.",
+    "Machine load is a hypothesis for the timing failures, not an established cause"
+  ],
+  "upstreamUpdate": {
+    "from": "5156d906579625f1eda41bbcf0de7cc71827458d",
+    "to": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
+    "scope": "One upstream graph-scroll fix (#735), no Rust/provider/prompt changes; example source digest unchanged. Earlier verification is historical to5156; later latest-main-focused log qualifies final combined source."
+  },
+  "snapshotAt": "2026-10-16T02:07:29.322107+00:00",
+  "evidenceClaimReview": {
+    "reviewer": "/root/pilot_fix_authority_review",
+    "reviewedCommit": "df771714a9a4b1b06545c8efdb2c38511520954b",
+    "scope": "PR claims and evidence record versus actual private ledger, workspace checks, native test logs and completion judgments",
+    "finding": "Correct planned-versus-admitted session counts; qualify model endpoint judgments separately from actual workspace checks.",
+    "resolution": "This timestamped snapshot reports actual nine admitted / eight terminal / one active counts, preserves uncertain and incomplete outcomes, and leaves presentation grades pending. Final results belong to PR #739.",
+    "verdict": "Corrections recorded; original scoped source review remains valid because executable/test files are unchanged."
+  },
+  "sourceScopeFiles": {
+    "packages/harness-host/src/implementations/graph-presentation-guidance.ts": "47d2bfc02301e4a8332ebc721730f42a52f2c17a4e0fbeaa6a784ba45fff7b63",
+    "test/fixtures/structure-example-checks.mjs": "a107d4cd084e12ede0b6ef3d48837bab408dfcc5ec8d72935726d2944136c580",
+    "test/graph-authoring-replay.test.mjs": "be4fbba26ce1676a21e05ebe201061b21424cacf58b1c6ace36a77d53fda362a",
+    "test/prime-visual-integration.test.mjs": "80d6255bdaa5f2666de6d606faf2db507e23ecf2f7d4654e4bc9b20e7e088d85",
+    "test/recursive-complete-e2e.test.mjs": "dcb00748f8d4fd17ba7b5e2b4bc97f2ff022361ad8e8004365fe01db02e71076"
+  },
+  "rebaseUpdate": {
+    "from": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
+    "to": "77b1b296022b17c29b06aa0da24522ead3344617",
+    "patchEquivalence": "All three PR commits patch-identical by git range-diff; main changes retained.",
+    "previousScopeDigest": "75a81501d32b14da6a1d808c1a93c57302273f730dedf05f04986f2fd41ed470",
+    "historicalEvidence": "Earlier local/CI/live records retain their original source identity. No candidate inference replayed."
+  },
+  "liveEvidenceSource": {
+    "baseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
+    "frozenPlanSha256": "7c66c7f41ea12858484d1da3d1022185590b798339a1acf0c91f1047bee56927",
+    "scope": "Original updated-only local cohort. Historical candidate/actor results; no claim of live qualification for the later rebase."
+  }
+}

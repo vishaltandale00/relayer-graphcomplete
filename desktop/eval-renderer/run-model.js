@@ -17,10 +17,8 @@ export const recursiveCompleteHarnessPair = Object.freeze([
   "codex-eval-visual-node-details-treatment",
 ]);
 export const recursiveGraphMemoryCaseId = "empty-project.recursive-graph-memory.launch-readiness";
-export const recursiveGraphMemoryHarnessQuartet = Object.freeze([
-  "codex-eval-lantern-search-disabled-recursion-disabled",
+export const recursiveGraphMemoryHarnessPair = Object.freeze([
   "codex-eval-lantern-search-query-v1-recursion-disabled",
-  "codex-eval-lantern-search-disabled-recursion-enabled",
   "codex-eval-lantern-search-query-v1-recursion-enabled",
 ]);
 
@@ -35,10 +33,10 @@ export function judgeConfigurationCompatibleWithCases(cases, selectedCaseIds, ju
 export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurationNames, harnessConfigurations = []) {
   if (testCaseIds.includes(recursiveGraphMemoryCaseId)) {
     const availableNames = new Set(harnessConfigurations.map(({ name }) => name));
-    const quartet = recursiveGraphMemoryHarnessQuartet.filter((name) => availableNames.has(name));
+    const pair = recursiveGraphMemoryHarnessPair.filter((name) => availableNames.has(name));
     return {
       testCaseIds: [recursiveGraphMemoryCaseId],
-      harnessConfigurationNames: quartet.length === recursiveGraphMemoryHarnessQuartet.length ? quartet : [],
+      harnessConfigurationNames: pair.length === recursiveGraphMemoryHarnessPair.length ? pair : [],
     };
   }
   if (!testCaseIds.includes(recursiveCompleteCaseId)) {
@@ -53,7 +51,7 @@ export function isolateRecursiveCompleteSelection(testCaseIds, harnessConfigurat
 export function authorizeRecursiveCompleteSelection(selection, confirmLiveRun) {
   if (selection.testCaseIds.includes(recursiveGraphMemoryCaseId)) {
     const confirmed = confirmLiveRun(
-      "Run the four-cell Lantern comparison using twelve paid/live Codex root turns? The two recursion-enabled cells may launch additional model-controlled paid child executions through the connected product provider.",
+      "Run the two-cell Lantern recursion comparison using six paid/live Codex root turns? The recursion-enabled cell may launch additional model-controlled paid child executions through the connected product provider.",
     );
     if (!confirmed) return null;
     return {
@@ -61,7 +59,7 @@ export function authorizeRecursiveCompleteSelection(selection, confirmLiveRun) {
       liveAuthorization: {
         confirmed: true,
         credentialReference: "connected-product-provider",
-        rootProviderExecutions: 12,
+        rootProviderExecutions: 6,
         agentAuthoredChildren: true,
       },
     };

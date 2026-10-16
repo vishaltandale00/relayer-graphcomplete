@@ -4752,9 +4752,9 @@ async fn continue_held_admission(
                             key,
                             true,
                             CapacitySlot::Held,
+                            hold,
                         )
                         .await;
-                        drop(hold);
                     }
                     // A Stop removed it from the wait. It keeps its node until that Stop has
                     // settled, so the next run on the node starts only after it.
@@ -4775,9 +4775,7 @@ async fn continue_held_admission(
             return Ok(waiting_acknowledgement(state, interaction).await);
         }
     };
-    let started = run_held_action_interaction(state, thread, interaction, key, claimed, slot).await;
-    drop(hold);
-    started
+    run_held_action_interaction(state, thread, interaction, key, claimed, slot, hold).await
 }
 
 /// Admits a run to the capacity limit, retrying a storage failure with capped backoff until it
@@ -4798,9 +4796,42 @@ async fn admit_until_admitted(state: &ApiState, run: InteractionId) -> CapacityA
     }
 }
 
-/// Prepares and executes a run that holds its node and its capacity slot. The caller holds its
-/// preparing mark; the preparation itself is also scoped, so a request that goes away mid-way
-/// still frees its node and settles its Stop.
+/// Runs a held run's preparation inside #718's scoped preparation (`prepare_node_run`), which
+/// frees the node and settles a Stop if the request goes away mid-way. The caller's hold, which
+/// kept the run marked through its claim and its wait for capacity, ends as soon as that scope
+/// marks the run, so the mark ends exactly when preparation does (#720).
+async fn prepare_held_run<T>(
+    state: &ApiState,
+    key: NodeRunKey,
+    run: InteractionId,
+    hold: crate::api::node_runs::PreparingHold,
+    preparation: impl std::future::Future<Output = T>,
+) -> T {
+    prepare_node_run(state, key, run, async move {
+        drop(hold);
+        preparation.await
+    })
+    .await
+}
+
+/// A capacity slot a held run holds while it prepares (#720). It is released when dropped,
+/// whatever the exit, including a panic during preparation.
+struct HeldSlot {
+    state: ApiState,
+    slot: CapacitySlot,
+    run: InteractionId,
+}
+
+impl Drop for HeldSlot {
+    fn drop(&mut self) {
+        if tokio::runtime::Handle::try_current().is_ok() {
+            release_run_capacity(self.state.clone(), self.slot, self.run);
+        }
+    }
+}
+
+/// Prepares and executes a run that holds its node and its capacity slot. The caller's hold
+/// ends once the scoped preparation has marked the run.
 async fn run_held_action_interaction(
     state: &ApiState,
     thread: &Thread,
@@ -4808,11 +4839,18 @@ async fn run_held_action_interaction(
     key: NodeRunKey,
     claimed: bool,
     slot: CapacitySlot,
+    hold: crate::api::node_runs::PreparingHold,
 ) -> Result<Interaction, ApiError> {
-    let prepared = prepare_node_run(
+    let held_slot = HeldSlot {
+        state: state.clone(),
+        slot,
+        run: interaction.id,
+    };
+    let prepared = prepare_held_run(
         state,
         key,
         interaction.id,
+        hold,
         prepare_and_claim_interaction(state, thread, &interaction, claimed, false),
     )
     .await;
@@ -4829,7 +4867,7 @@ async fn run_held_action_interaction(
                 )
                 .await;
             }
-            release_run_capacity(state.clone(), slot, interaction.id);
+            drop(held_slot);
             release_node_run(state.clone(), key, interaction.id, true);
             return Err(error);
         }
@@ -4838,7 +4876,7 @@ async fn run_held_action_interaction(
         // Nothing started the run. A Stop that arrived while it prepared settles here; without
         // one it waits, holding its node, until it is retried or stopped.
         settle_unstarted_stop(state, thread.id, interaction.id).await;
-        release_run_capacity(state.clone(), slot, interaction.id);
+        drop(held_slot);
         release_node_run(state.clone(), key, interaction.id, true);
         return state
             .product
@@ -4870,7 +4908,7 @@ async fn run_held_action_interaction(
         // run's outcome is saved, whatever it is. A run whose outcome is never saved keeps its
         // node until a restart, which interrupts it, so no later run starts beside it.
         let _ = execution.await;
-        release_run_capacity(release_state.clone(), slot, run);
+        drop(held_slot);
         release_node_run(release_state, key, run, true);
     });
     match tokio::time::timeout_at(
@@ -6965,6 +7003,120 @@ mod tests {
                 fixture.finish();
             }
         }
+    }
+
+    /// PAR-011 (#720), the held path after #718's unwind-safe preparation. A held run keeps its
+    /// preparing mark from its claim through its wait for capacity, but the mark ends exactly
+    /// when its preparation does. If that preparation panics, its Stop still settles, its node
+    /// passes on, and its capacity slot is freed, whether the Stop arrived before or after.
+    #[tokio::test]
+    async fn a_held_run_whose_preparation_panics_frees_its_slot_node_and_mark() {
+        for stop_first in [true, false] {
+            let mut fixture = broker_fixture("held-abandoned-preparation", "active").await;
+            fixture.state.run_capacity = crate::api::RunCapacity::new(1);
+            let run = prepared_node_run(&fixture, "submitted").await;
+            let key = hold_node_preparation(&fixture, run).await;
+            assert!(matches!(
+                fixture
+                    .state
+                    .run_capacity
+                    .admit(&fixture.product, run)
+                    .await
+                    .unwrap(),
+                CapacityAdmission::Start
+            ));
+            let (entered, started) = tokio::sync::oneshot::channel();
+            let (fail, failure) = tokio::sync::oneshot::channel();
+            let preparing = {
+                let state = fixture.state.clone();
+                let hold = state.node_runs.hold_preparing(run);
+                tokio::spawn(async move {
+                    let _slot = HeldSlot {
+                        state: state.clone(),
+                        slot: CapacitySlot::Held,
+                        run,
+                    };
+                    prepare_held_run(&state, key, run, hold, async move {
+                        entered.send(()).unwrap();
+                        failure.await.unwrap();
+                        panic!("preparation failed while running");
+                    })
+                    .await;
+                })
+            };
+            started.await.unwrap();
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::COOKIE,
+                format!("{}=control", crate::api::CONTROL_COOKIE)
+                    .parse()
+                    .unwrap(),
+            );
+            let stop = || {
+                stop_interaction(
+                    State(fixture.state.clone()),
+                    headers.clone(),
+                    Path((fixture.thread.id.value(), run.value())),
+                )
+            };
+            if stop_first {
+                let _ = stop()
+                    .await
+                    .unwrap_or_else(|error| panic!("{}", error.message()));
+            }
+            fail.send(()).unwrap();
+            assert!(preparing.await.unwrap_err().is_panic());
+            assert!(!fixture.state.node_runs.is_preparing(run));
+            if !stop_first {
+                let _ = stop()
+                    .await
+                    .unwrap_or_else(|error| panic!("{}", error.message()));
+            }
+            let settled = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                loop {
+                    if fixture
+                        .product
+                        .get_interaction(run)
+                        .await
+                        .unwrap()
+                        .completion_status
+                        == "stopped"
+                        && fixture.state.node_runs.holder(key).await.is_none()
+                        && fixture
+                            .state
+                            .run_capacity
+                            .executing_for_test()
+                            .await
+                            .is_empty()
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await;
+            assert!(
+                settled.is_ok(),
+                "a held run whose preparation panicked kept its Stop, node or slot"
+            );
+            fixture.finish();
+        }
+
+        // While it prepares, only #718's scope marks the run: the outer hold has ended. So when
+        // that scope is abandoned, its cleanup never sees the run still preparing and skips the
+        // Stop, and the mark ends with the preparation, not when the request returns.
+        let fixture = broker_fixture("held-preparation-mark", "active").await;
+        let run = prepared_node_run(&fixture, "submitted").await;
+        let key = hold_node_preparation(&fixture, run).await;
+        let hold = fixture.state.node_runs.hold_preparing(run);
+        assert_eq!(fixture.state.node_runs.preparing_count(run), 1);
+        let state = fixture.state.clone();
+        prepare_held_run(&fixture.state, key, run, hold, async move {
+            assert_eq!(state.node_runs.preparing_count(run), 1);
+        })
+        .await;
+        assert!(!fixture.state.node_runs.is_preparing(run));
+        fixture.finish();
     }
 
     /// Losing a request is not proof that its graph creation did nothing. Without a durable

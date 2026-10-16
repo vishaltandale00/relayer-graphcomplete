@@ -64,8 +64,9 @@ struct HarnessCompleteConfiguration {
 #[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum GraphSearchCapability {
-    #[default]
     Disabled,
+    // Omission grants bounded search; configurations opt out with an explicit `disabled`.
+    #[default]
     QueryV1,
 }
 
@@ -2489,7 +2490,7 @@ impl RuntimeClient {
         let response: RemintCapabilityResponse = self
             .post(
                 self.graph_url.join("api/control/capabilities")?,
-                &serde_json::json!({"nodeId": node_id}),
+                &materialization_capability_request(node_id),
                 &self.graph_control_token,
                 StatusCode::OK,
             )
@@ -2980,6 +2981,14 @@ fn versioned_identifier(value: &str) -> bool {
             .chars()
             .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
         && version.parse::<u32>().is_ok_and(|version| version > 0)
+}
+
+/// Product-owned materialization writes only its own definition, so it never needs search.
+fn materialization_capability_request(node_id: i64) -> Value {
+    serde_json::json!({
+        "nodeId": node_id,
+        "graphCapabilityProfile": { "search": "disabled" },
+    })
 }
 
 fn effective_execution_digest(
@@ -4779,6 +4788,14 @@ mod tests {
         harness_task.abort();
     }
 
+    #[test]
+    fn materialization_capability_requests_no_search_despite_the_query_v1_default() {
+        assert_eq!(
+            super::materialization_capability_request(7),
+            json!({ "nodeId": 7, "graphCapabilityProfile": { "search": "disabled" } })
+        );
+    }
+
     #[tokio::test]
     async fn retries_capability_revocation_when_session_registration_fails() {
         let revocations = Arc::new(AtomicUsize::new(0));
@@ -4794,9 +4811,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    // The catalog's explicit opt-out reaches the graph server unchanged.
                     assert_eq!(
                         body["graphCapabilityProfile"],
-                        json!({ "search": "query-v1" })
+                        json!({ "search": "disabled" })
                     );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })
@@ -4840,7 +4858,7 @@ mod tests {
                         "implementation": "test",
                         "implementationVersion": 1,
                         "permissionBindings": { "auto": {} },
-                        "graphCapabilityProfile": { "search": "query-v1" },
+                        "graphCapabilityProfile": { "search": "disabled" },
                         "settings": {}
                     },
                     "digest": "sha256:test"
@@ -4933,9 +4951,10 @@ mod tests {
             .route(
                 "/api/control/capabilities",
                 routing::post(|Json(body): Json<Value>| async move {
+                    // The catalog omits graphCapabilityProfile, which grants bounded search.
                     assert_eq!(
                         body["graphCapabilityProfile"],
-                        json!({ "search": "disabled" })
+                        json!({ "search": "query-v1" })
                     );
                     Json(json!({"graphToken": body["graphToken"]}))
                 })

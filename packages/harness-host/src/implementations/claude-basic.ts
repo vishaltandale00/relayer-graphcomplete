@@ -4,6 +4,7 @@ import { basename, dirname, extname, resolve } from "node:path";
 import { z } from "zod";
 import type { GraphCapability } from "@relayer/graph-client";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
+import { grantsGraphSearch } from "../configuration.js";
 import type {
   Harness,
   HarnessExecutionAccess,
@@ -230,7 +231,7 @@ export class ClaudeBasicHarness implements Harness {
       this.completeModuleUrl,
       "Claude",
       includePersonalPresentation,
-      this.context.configuration.graphCapabilityProfile?.search === "query-v1",
+      grantsGraphSearch(this.context.configuration),
       this.dependencies.graphAuthoringNodePath,
     );
   }

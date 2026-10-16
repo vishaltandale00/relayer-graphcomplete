@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { nativeExecutionHandle, type NativeExecutionHandle } from "../completion-execution.js";
+import { grantsGraphSearch } from "../configuration.js";
 import { INTERACTION_INPUT_GUIDANCE, INVOCATION_PUBLICATION_GUIDANCE, SUBCOMPLETION_INTEGRATION_GUIDANCE, renderInteractionInput, renderThreadHistory } from "../interaction-input.js";
 import { redactTraceData } from "../trace.js";
 import { CURRENT_COMMUNICATION_GUIDANCE_JS, CURRENT_WORKSPACE_GUIDANCE, currentCommunicationAuthoringRecipeJs, GRAPH_PRESENTATION_GUIDANCE, NODE_ICON_GUIDANCE } from "./graph-presentation-guidance.js";
@@ -651,7 +652,7 @@ ${graphProgramRepairGuidance(programEditsAvailable(context, this.dependencies.gr
       this.completeModuleUrl,
       "Codex",
       includePersonalPresentation,
-      this.context.configuration.graphCapabilityProfile?.search === "query-v1",
+      grantsGraphSearch(this.context.configuration),
       this.dependencies.graphAuthoringNodePath,
     );
   }

@@ -544,7 +544,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("refreshes an omitted profile as explicit disabled but rejects a live search-authority change", async () => {
+  it("refreshes an omitted profile as explicit query-v1 but rejects a live search-authority change", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-live-graph-profile-"));
     let factoryCalls = 0;
     try {
@@ -560,24 +560,24 @@ describe("HarnessHost", () => {
       const descriptor = { threadId: 1, permissionProfileId: "auto", workingDirectory: directory };
 
       await host.createSession({ ...descriptor, configuration: testConfiguration });
-      await host.createSession({ ...descriptor, configuration: graphSearchConfiguration("disabled") });
+      await host.createSession({ ...descriptor, configuration: graphSearchConfiguration("query-v1") });
       expect(factoryCalls).toBe(1);
       await expect(host.createSession({
         ...descriptor,
-        configuration: graphSearchConfiguration("query-v1"),
+        configuration: graphSearchConfiguration("disabled"),
       })).rejects.toThrow("already pinned");
       expect(factoryCalls).toBe(1);
 
       await host.createSession({
         ...descriptor,
         threadId: 2,
-        configuration: graphSearchConfiguration("query-v1"),
+        configuration: graphSearchConfiguration("disabled"),
       });
       expect(factoryCalls).toBe(2);
       await expect(host.createSession({
         ...descriptor,
         threadId: 2,
-        configuration: graphSearchConfiguration("disabled"),
+        configuration: graphSearchConfiguration("query-v1"),
       })).rejects.toThrow("already pinned");
       expect(factoryCalls).toBe(2);
     } finally {
@@ -676,7 +676,7 @@ describe("HarnessHost", () => {
     }
   });
 
-  it("preserves saved provider state across omitted-to-disabled normalization but rejects query-v1", async () => {
+  it("preserves saved provider state across omitted-to-query-v1 normalization but rejects disabled", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-saved-graph-profile-"));
     const stateFile = join(directory, "sessions.json");
     const descriptor = { threadId: 1, permissionProfileId: "auto", workingDirectory: directory };
@@ -704,13 +704,13 @@ describe("HarnessHost", () => {
       await restored.initialize();
       await expect(restored.createSession({
         ...descriptor,
-        configuration: graphSearchConfiguration("query-v1"),
+        configuration: graphSearchConfiguration("disabled"),
       })).rejects.toThrow("already pinned");
       expect(factoryCalls).toBe(0);
 
       await restored.createSession({
         ...descriptor,
-        configuration: graphSearchConfiguration("disabled"),
+        configuration: graphSearchConfiguration("query-v1"),
       });
       expect(factoryCalls).toBe(1);
       expect(restoredState).toEqual({ providerSessionId: "saved" });
@@ -2941,7 +2941,8 @@ describe("HarnessHost", () => {
       // not reached its preview grant. It neither waits for the run nor widens it.
       await host.createSession({
         ...registration,
-        configuration: { ...configuration, revision: 2, graphCapabilityProfile: { search: "disabled", preview: "enabled" } },
+        // An omitted profile grants search (#731), so only the preview capability changes here.
+        configuration: { ...configuration, revision: 2, graphCapabilityProfile: { search: "query-v1", preview: "enabled" } },
       });
       releaseReads();
       await running;

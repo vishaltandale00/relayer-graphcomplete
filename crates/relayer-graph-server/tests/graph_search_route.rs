@@ -174,7 +174,7 @@ async fn disabled_capability_denies_valid_search_before_index_readiness_but_not_
         .await
         .unwrap();
     let app = router(ServerState::new(graph, "control"));
-    let interaction = interaction_with_profile(&app, 79, None).await;
+    let interaction = interaction_with_profile(&app, 79, Some("disabled")).await;
 
     let denied = post(
         &app,
@@ -210,7 +210,7 @@ async fn disabled_capability_denies_valid_search_before_index_readiness_but_not_
 #[tokio::test]
 async fn disabled_authoring_capability_still_projects_for_a_later_enabled_turn() {
     let fixture = fixture().await;
-    let author = interaction_with_profile(&fixture.app, 81, None).await;
+    let author = interaction_with_profile(&fixture.app, 81, Some("disabled")).await;
     author_answer(&fixture.graph, &author).await;
 
     let submitted = post(
@@ -249,6 +249,37 @@ async fn disabled_authoring_capability_still_projects_for_a_later_enabled_turn()
             "rows": [[{"type":"string","value":"Searchable answer"}]],
             "truncated": false,
         })
+    );
+}
+
+#[tokio::test]
+async fn omitted_capability_profile_grants_query_v1_search() {
+    let fixture = fixture().await;
+    let author = interaction(&fixture.app, 82).await;
+    author_answer(&fixture.graph, &author).await;
+    let submitted = post(
+        &fixture.app,
+        "/api/graph/submit",
+        Some(&author.graph_token),
+        Body::from(json!({"nodeId": author.node.id}).to_string()),
+    )
+    .await;
+    assert_eq!(submitted.status(), StatusCode::OK);
+
+    // A control request without graphCapabilityProfile mints the query-v1 default.
+    let reader = interaction_with_profile(&fixture.app, 82, None).await;
+    let searched = post(
+        &fixture.app,
+        "/api/graph/search",
+        Some(&reader.graph_token),
+        query_body(json!({})),
+    )
+    .await;
+    let (status, body) = json_response(searched).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["rows"],
+        json!([[{"type":"string","value":"Searchable answer"}]])
     );
 }
 

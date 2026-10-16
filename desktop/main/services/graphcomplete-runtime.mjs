@@ -324,6 +324,7 @@ export class GraphCompleteRuntimeService {
     userDataDirectory,
     graphServerBinary,
     configurationPaths,
+    adaptConfiguration = (configuration) => configuration,
     unavailableConfigurations = [],
     additionalImplementations = {},
     codexBasicClientModuleUrl,
@@ -359,6 +360,7 @@ export class GraphCompleteRuntimeService {
     this.userDataDirectory = userDataDirectory;
     this.graphServerBinary = graphServerBinary;
     this.configurationPaths = configurationPaths;
+    this.adaptConfiguration = adaptConfiguration;
     this.unavailableConfigurations = unavailableConfigurations;
     this.additionalImplementations = additionalImplementations;
     this.codexBasicClientModuleUrl = codexBasicClientModuleUrl;
@@ -448,7 +450,8 @@ export class GraphCompleteRuntimeService {
       const runtimeDirectory = join(this.userDataDirectory, "graphcomplete-runtime");
       await this.#awaitStartupOperation(mkdir(runtimeDirectory, { recursive: true }));
       await this.#awaitStartupOperation(chmod(runtimeDirectory, 0o700));
-      const configurations = await this.#awaitStartupOperation(loadHarnessConfigurations(this.configurationPaths));
+      const configurations = new Map([...await this.#awaitStartupOperation(loadHarnessConfigurations(this.configurationPaths))]
+        .map(([name, configuration]) => [name, this.adaptConfiguration(configuration)]));
       const visualAssetsToken = randomBytes(32).toString("hex");
       const draftPreviewsToken = randomBytes(32).toString("hex");
       this.draftPreviewDirectory = this.retainDraftPreviews ? join(runtimeDirectory, "draft-previews") : null;

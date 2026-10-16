@@ -56,7 +56,7 @@ export interface HarnessConfiguration {
   readonly modelDefaults?: HarnessModelDefaults;
   /** Explicit authority to expose agent-authored complete(inputGraph); root Complete is unaffected. */
   readonly complete?: HarnessCompleteConfiguration;
-  /** Product-owned graph authority. Omission is equivalent to search and preview disabled. */
+  /** Product-owned graph authority. Omission grants `query-v1` search with previews disabled. */
   readonly graphCapabilityProfile?: GraphCapabilityProfile;
   readonly settings: JsonObject;
 }
