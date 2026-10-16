@@ -56,13 +56,14 @@ impl SqliteProductStore {
     }
 
     /// Claims a queued run to start it, as `claim_interaction_preparing` claims a new one.
-    /// A Stop that won the race leaves it stopped.
+    /// A Stop that won the race leaves it stopped. A run waiting for capacity (#720) already
+    /// holds its node and is not in its node's queue.
     pub(crate) async fn claim_queued_node_run(
         &self,
         run: InteractionId,
     ) -> Result<bool, StorageError> {
         let result = sqlx::query(
-            "UPDATE interactions SET completion_status='submitted',completion_error=NULL WHERE id=?1 AND completion_status='queued'",
+            "UPDATE interactions SET completion_status='submitted',completion_error=NULL WHERE id=?1 AND completion_status='queued' AND NOT EXISTS(SELECT 1 FROM run_capacity_waits WHERE interaction_id=?1)",
         )
         .bind(run.value())
         .execute(&self.pool)
@@ -71,14 +72,15 @@ impl SqliteProductStore {
     }
 
     /// The runs waiting on a node, in the order they were created. The live queue keeps this
-    /// order itself; this read is for tests.
+    /// order itself; this read is for tests. The run holding the node may itself wait for
+    /// capacity (#720); it is not one of them.
     #[cfg(test)]
     pub(crate) async fn queued_node_runs(
         &self,
         key: NodeRunKey,
     ) -> Result<Vec<InteractionId>, StorageError> {
         let runs: Vec<i64> = sqlx::query_scalar(
-            "SELECT run.id FROM node_runs queue JOIN interactions run ON run.id=queue.result_interaction_id WHERE queue.thread_id=?1 AND queue.node_id=?2 AND run.completion_status='queued' ORDER BY run.sequence,run.id",
+            "SELECT run.id FROM node_runs queue JOIN interactions run ON run.id=queue.result_interaction_id WHERE queue.thread_id=?1 AND queue.node_id=?2 AND run.completion_status='queued' AND NOT EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=run.id) ORDER BY run.sequence,run.id",
         )
         .bind(key.thread_id.value())
         .bind(key.node_id)

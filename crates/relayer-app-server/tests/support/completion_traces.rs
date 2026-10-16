@@ -853,6 +853,7 @@ impl World {
             completion_brokers: CompletionBrokerRegistry::new(Some("http://broker".into())),
             completion_observations: CompletionObservations::default(),
             node_runs: Default::default(),
+            run_capacity: Default::default(),
         };
         let seeded = if bound {
             // Prepared and bound exactly as complete_prepared_child prepares it.

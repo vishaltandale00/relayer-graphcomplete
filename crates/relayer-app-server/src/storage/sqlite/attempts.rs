@@ -659,6 +659,65 @@ mod tests {
         )
     }
 
+    /// A first message removed or interrupted while it waited for capacity (#720) never ran: it
+    /// has a selected model but no attempt and no graph interaction. The thread stays open to
+    /// a new send, so "send it again" works.
+    #[tokio::test]
+    async fn a_first_message_that_never_started_leaves_the_conversation_open() {
+        let (_directory, store, root, _route) = seeded_store().await;
+        let thread: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(root.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        // Input restoration may append to the marker.
+        let restored = format!(
+            "{} A newer committed value was preserved instead of restoring this attempt's earlier value.",
+            super::super::QUEUED_RUN_STOPPED
+        );
+        for (status, error) in [
+            ("stopped", super::super::QUEUED_RUN_STOPPED),
+            ("stopped", restored.as_str()),
+            ("failed", super::super::CAPACITY_WAIT_INTERRUPTED),
+        ] {
+            sqlx::query(
+                "UPDATE interactions SET completion_status=?1,completion_error=?3,graph_node_id=NULL WHERE id=?2",
+            )
+            .bind(status)
+            .bind(root.value())
+            .bind(error)
+            .execute(&store.pool)
+            .await
+            .unwrap();
+            assert_ne!(
+                store
+                    .conversation_compatibility(ThreadId::from_database(thread))
+                    .await
+                    .unwrap()
+                    .status,
+                "blocked",
+                "a {status} first message that never started blocked its thread"
+            );
+        }
+        // A failure with no such marker may have run before attempts were recorded, so it
+        // still keeps the route unverified.
+        sqlx::query(
+            "UPDATE interactions SET completion_status='failed',completion_error='Provider failed' WHERE id=?1",
+        )
+        .bind(root.value())
+        .execute(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(
+            store
+                .conversation_compatibility(ThreadId::from_database(thread))
+                .await
+                .unwrap()
+                .status,
+            "blocked"
+        );
+    }
+
     #[tokio::test]
     async fn legacy_conversation_blocks_unknown_and_conflicting_successful_provenance() {
         let (_directory, store, root, route) = seeded_store().await;

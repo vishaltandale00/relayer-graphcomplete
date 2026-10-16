@@ -390,6 +390,48 @@ decision off.
 | `node-queue-context-reverted` | Decision 3 (#716); the reverted check shows the old trace | A queued run's context read when it was sent misses the accepted result of the run ahead. Context is read at start (`ContextAtStart`). Regression tests: `accepted_thread_history_lists_accepted_human_turns_in_order` and the end-to-end test above, which checks the queued run's `threadHistory`. |
 | `node-queue-restart-reverted` | Fixed; the reverted check shows the old trace | A run queued at a restart stayed queued behind a run that no longer existed. Startup now interrupts it like an executing run, and invoking its action again resumes it (`StartupInterruptsQueued`). #722 replaces this with paused runs. Regression test: `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
 
+### `RunCapacity.tla`
+
+This model covers the app's internal limit on human-started runs (#720, PRD
+12.2 PAR-011 to PAR-014), composed with the per-node run queue. It has two
+human runs on one node, two with nodes of their own, one agent child, a limit
+of two, and at most one restart:
+
+- admission (`Send`, `Admit`): a run takes its node or waits behind it, then
+  takes a free slot or waits as `queued` for capacity, holding its node;
+- an agent's child (`LaunchChild`), which never asks for a slot;
+- settlement (`Settle`), then the release of the slot (`ReleaseSlot`), which
+  passes it to the oldest waiting run, and of the node (`ReleaseNode`);
+- Remove of a queued run (`Remove`), which takes it out of either wait;
+- a crash, which loses every slot, hold and wait, and startup, which
+  interrupts the runs that waited.
+
+The slot and the node are released in separate steps, as separate tasks
+release them in the code. Releasing a slot passes it to the oldest waiting run
+in the same step, as the code does under one lock (`AtomicHandOff`). The ghost
+`before` records which waiting run began to wait first, apart from the queue
+that release serves, so `StartsInOrder` is not a restatement of release. A
+storage failure during a release keeps the settled run's slot and the oldest
+waiter's place, and the release is retried; that is not modeled. Duplicate
+deliveries, which join a run's slot or its wait, are not modeled. Graph
+preparation, approvals and the provider are not modeled. `capacity-today`
+mirrors the code; each `-reverted` check turns one fix or decision off.
+
+| Check | Verdict | Finding |
+| --- | --- | --- |
+| `capacity-safety` | passes | Executing human-started runs never exceed the limit (`WithinLimit`). Runs waiting for capacity start first in, first out by when they began to wait (`StartsInOrder`), and no new run starts while another waits (`NoStartAheadOfWaiting`). No run waits while a slot is idle (`NoIdleSlotWhileWaiting`), and every waiting run is in the live wait, also after a restart (`WaitIsLive`). Runs on one node still run one at a time (`OneRunPerNode`), and a child never waits for capacity (`ChildrenNeverWait`). |
+| `capacity-children-beside-full` | Reachability; expected violation | An agent's child runs while human-started runs fill every slot. |
+| `capacity-both-waits` | Reachability; expected violation | One run waits behind a run on its node, then takes the node and waits for capacity. |
+| `capacity-liveness` | passes | Without a restart, every run waiting for capacity that the user does not remove starts. |
+| `capacity-restart-liveness` | passes | Across a restart, every run waiting for capacity leaves the wait. It runs with a limit of one to keep the search short. |
+| `capacity-race-reverted` | Fixed; the reverted check shows the race | Two runs racing for the last slot both saw it free and both started. Admission checks and takes a slot, or queues, in one step under the lock (`AtomicAdmission`). Regression tests: `racing_runs_never_exceed_the_limit_and_start_in_order` and `human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free`. |
+| `capacity-fifo-reverted` | Decision (#720); the reverted check shows the old trace | A slot that could pass to any waiting run started a later run first. It passes to the oldest (`Fifo`). Regression tests: the two above. |
+| `capacity-jump-reverted` | Decision (#720); the reverted check shows the trace | With the hand-off split from the release and no check that a run waits, a new run took a freed slot ahead of a waiting run. The code makes both defenses, so no code test can reach the trace; the model is the evidence. |
+| `capacity-jump-guarded` | passes | With the hand-off split but admission's check kept (`WaitBehindWaiting`), no new run jumps a waiting one and order holds. Each defense is enough on its own. |
+| `capacity-release-reverted` | Fixed; the reverted check shows the trace | A settled run that only freed its slot left the waiting runs beside an idle slot. Release passes the slot on (`ReleaseHandsSlot`). Regression test: the end-to-end test above. |
+| `capacity-children-reverted` | Decision 5 (#716); the reverted check shows the trace | Counting children would make a child wait behind human-started runs, a recursion scheduler. Children never ask for a slot (`ChildrenUncounted`). Regression test: `an_agent_child_starts_while_human_started_runs_fill_the_capacity`. |
+| `capacity-restart-reverted` | Fixed; the reverted check shows the trace | A run that waited for capacity at a restart stayed queued for a slot nothing would pass it. Startup interrupts it (`StartupInterruptsWaits`). Regression tests: `a_run_waits_for_capacity_from_its_claimed_start_and_a_stop_removes_it` and `interrupted_action_invocation_remains_submitted_for_source_pair_recovery`. |
+
 ### `ExecutionLeases.tla`
 
 This model covers provider execution leases from admission to release:

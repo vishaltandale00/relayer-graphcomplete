@@ -4893,6 +4893,474 @@ async fn action_invocation_api_is_idempotent_and_survives_restart() {
 /// One harness Complete call a test holds open until it decides the call's outcome.
 type HeldCompletes = Arc<Mutex<Vec<(i64, Value, Option<tokio::sync::oneshot::Sender<bool>>)>>>;
 
+/// A thread whose accepted root offers invoke actions on several nodes, served by a fake graph
+/// and a harness that holds every Complete call until the test settles it. It drives the real
+/// HTTP API, so admission, the node queue and the capacity limit run as in the product.
+struct HeldRunsFixture {
+    _temporary: tempfile::TempDir,
+    database: std::path::PathBuf,
+    app: Router,
+    thread_id: i64,
+    source_interaction_id: i64,
+    held: HeldCompletes,
+    graph_task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
+    harness_task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
+}
+
+impl HeldRunsFixture {
+    /// `actions` maps each invoke action to its source node. `capacity` lowers the app's limit
+    /// on human-started runs for the test.
+    async fn open(actions: &'static [(i64, i64)], capacity: Option<usize>) -> Self {
+        let temporary = tempfile::Builder::new()
+            .prefix("relayer-held-runs-")
+            .tempdir()
+            .unwrap();
+        let root = temporary.path().to_path_buf();
+        let database = root.join("product.sqlite3");
+
+        let app = open_app(&database, &root).await;
+        let pool = sqlite_pool(&database).await;
+        sqlx::query("UPDATE product_harnesses SET family_policy_id='codex-default-family',family_policy_version=1 WHERE configuration_name='codex-basic'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        pool.close().await;
+        let published = app
+            .clone()
+            .oneshot(provider_publish_request(test_provider_snapshot()))
+            .await
+            .unwrap();
+        assert_eq!(published.status(), StatusCode::NO_CONTENT);
+        let pool = sqlite_pool(&database).await;
+        sqlx::query(
+            "UPDATE product_harnesses SET available=1,unavailable_reason_code=NULL,unavailable_reason_message=NULL WHERE configuration_name='codex-basic'",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        let settings = response_json(
+            app.clone()
+                .oneshot(api_request("GET", "/api/model-settings", None, true))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let family_id = settings["families"][0]["id"].as_i64().unwrap();
+        let thread = response_json(
+            app.oneshot(api_request(
+                "POST",
+                "/api/threads",
+                Some(json!({
+                    "title": "Held runs",
+                    "initialMessage": "Start here",
+                    "harnessId": "codex-basic",
+                    "modelSelection": {
+                        "familyId": family_id,
+                        "providerId": "codex",
+                        "modelId": "test-model"
+                    }
+                })),
+                true,
+            ))
+            .await
+            .unwrap(),
+        )
+        .await;
+        let thread_id = thread["id"].as_i64().unwrap();
+        let source_interaction_id = thread["rootInteractionId"].as_i64().unwrap();
+        let node_of_action = move |action_id: i64| {
+            actions
+                .iter()
+                .find(|(action, _)| *action == action_id)
+                .map(|(_, node)| *node)
+        };
+        let mut nodes: Vec<i64> = actions.iter().map(|(_, node)| *node).collect();
+        nodes.sort_unstable();
+        nodes.dedup();
+        let action_records: Vec<Value> = actions
+            .iter()
+            .map(|(action_id, node)| {
+                json!({
+                    "id": action_id, "sourceNodeId": node, "kind": "invoke",
+                    "interactionText": format!("Action {action_id}"), "state": "accepted", "targetLayerId": null
+                })
+            })
+            .collect();
+        let source_output = json!({
+            "nodeId": 101,
+            "rootLayer": {"layer": {"id": 1}, "nodes": nodes.iter().map(|node| json!({
+                "id": node, "kind": "concept", "title": format!("Node {node}"), "state": "accepted"
+            })).collect::<Vec<_>>(), "edges": [], "actions": action_records}
+        });
+        let pool = sqlite_pool(&database).await;
+        let project_id = sqlx::query(
+            "INSERT INTO projects(name,path,created_at,updated_at) VALUES ('Held runs',?1,'1','1')",
+        )
+        .bind(root.to_string_lossy().as_ref())
+        .execute(&pool)
+        .await
+        .unwrap()
+        .last_insert_rowid();
+        sqlx::query("UPDATE threads SET project_id=?1 WHERE id=?2")
+            .bind(project_id)
+            .bind(thread_id)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            // Accepted on the thread's own harness, so its route is verified and a message
+            // can follow it.
+            "UPDATE interactions SET graph_node_id=101,completion_status='accepted',harness_configuration_name='codex-basic',completion_output_json=?1 WHERE id=?2",
+        )
+        .bind(source_output.to_string())
+        .bind(source_interaction_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+
+        let graph_nodes = Arc::new(AtomicI64::new(202));
+        let graph_metadata = Arc::new(Mutex::new(HashMap::<i64, Value>::new()));
+        let created_metadata = graph_metadata.clone();
+        let graph = axum::Router::new()
+            // Stop needs the temporal schema, as in the desktop.
+            .route(
+                "/api/control/temporal-features",
+                axum::routing::get(|| async {
+                    axum::Json(json!({"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true, "projectionUi": false, "invokeResolution": false, "providerRecursion": false}))
+                }),
+            )
+            .route(
+                "/api/control/capabilities",
+                axum::routing::post(|axum::Json(body): axum::Json<Value>| async move {
+                    axum::Json(json!({ "graphToken": body["graphToken"] }))
+                })
+                .delete(|| async { axum::Json(json!({ "revoked": true })) }),
+            )
+            .route(
+                "/api/control/interactions/{id}/actions/{action_id}",
+                axum::routing::get(
+                    move |axum::extract::Path((id, action_id)): axum::extract::Path<(i64, i64)>| async move {
+                        let Some(node) = node_of_action(action_id).filter(|_| id == 101) else {
+                            return (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "action_not_visible"}})));
+                        };
+                        (StatusCode::OK, axum::Json(json!({"action": {
+                            "id": action_id, "sourceNodeId": node, "kind": "invoke",
+                            "interactionText": format!("Action {action_id}"), "state": "accepted"
+                        }})))
+                    },
+                ),
+            )
+            .route(
+                "/api/control/interactions",
+                axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                    let graph_nodes = graph_nodes.clone();
+                    let created_metadata = created_metadata.clone();
+                    async move {
+                        // The graph refuses this input, as it refuses a stale context target.
+                        if body["text"] == "Rejected by the graph" {
+                            return (
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                axum::Json(json!({"error": {"code": "context_target_missing", "message": "The context target is gone."}})),
+                            );
+                        }
+                        let node_id = graph_nodes.fetch_add(1, Ordering::SeqCst);
+                        created_metadata
+                            .lock()
+                            .unwrap()
+                            .insert(node_id, body["invocation"].clone());
+                        // An identified input, such as a retry's, is echoed back as the
+                        // graph records it.
+                        (StatusCode::OK, axum::Json(json!({
+                            "node": { "id": node_id }, "graphToken": "",
+                            "inputIdentity": body["inputIdentity"], "inputDigest": body["inputDigest"]
+                        })))
+                    }
+                }),
+            )
+            .route(
+                "/api/control/interactions/{id}",
+                axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                    let graph_metadata = graph_metadata.clone();
+                    async move {
+                        axum::Json(json!({
+                            "nodeId": id,
+                            "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
+                        }))
+                    }
+                }),
+            )
+            // The source's output, and the canonical output of each run the harness returned.
+            .route(
+                "/api/control/interactions/{id}/output",
+                axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                    let source_output = source_output.clone();
+                    async move {
+                        axum::Json(if id == 101 {
+                            source_output
+                        } else {
+                            json!({"nodeId": id, "rootLayer": {"layer": {"id": 900 + id}, "nodes": [], "edges": [], "actions": []}})
+                        })
+                    }
+                }),
+            );
+        let held: HeldCompletes = Arc::new(Mutex::new(Vec::new()));
+        let harness_held = held.clone();
+        let leases = Arc::new(AtomicUsize::new(1));
+        let harness = axum::Router::new()
+            .route(
+                "/sessions",
+                axum::routing::post(|| async { (StatusCode::CREATED, axum::Json(json!({}))) }),
+            )
+            .route(
+                "/sessions/{id}/execution-leases",
+                axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                    let leases = leases.clone();
+                    async move {
+                        let lease = leases.fetch_add(1, Ordering::SeqCst);
+                        (
+                            StatusCode::CREATED,
+                            axum::Json(test_execution_admission(
+                                &body,
+                                &format!("00000000-0000-0000-0000-{lease:012}"),
+                                "7",
+                            )),
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/sessions/{id}/execution-leases/{lease}",
+                axum::routing::delete(|| async { axum::Json(json!({ "released": false })) }),
+            )
+            .route(
+                "/sessions/{id}/complete",
+                axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
+                    let held = harness_held.clone();
+                    async move {
+                        let run = body["traceContext"]["productInteractionId"].as_i64().unwrap();
+                        let node_id = body["graph"]["nodeId"].as_i64().unwrap();
+                        let (decide, decision) = tokio::sync::oneshot::channel();
+                        held.lock().unwrap().push((run, body, Some(decide)));
+                        if decision.await.unwrap_or(false) {
+                            (StatusCode::OK, axum::Json(json!({"output": {
+                                "nodeId": node_id,
+                                "rootLayer": {"layer": {"id": 900 + node_id}, "nodes": [], "edges": [], "actions": []}
+                            }})))
+                        } else {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                axum::Json(json!({"error": {"code": "provider_failed", "message": "The provider failed."}})),
+                            )
+                        }
+                    }
+                }),
+            );
+        let (graph_url, graph_task) = serve_test_app(graph).await;
+        let (harness_url, harness_task) = serve_test_app(harness).await;
+        let catalog = root.join("catalog.json");
+        fs::write(
+            &catalog,
+            json!({
+                "schemaVersion": 1,
+                "configurations": [{
+                    "configuration": {
+                        "schemaVersion": 1,
+                        "name": "codex-basic",
+                        "implementation": "test",
+                        "implementationVersion": 1,
+                        "permissionBindings": { "ask": {}, "auto": {}, "full": {} },
+                        "modelCompatibility": [{ "providerId": "codex" }],
+                        "executionAccessContracts": ["managed-runtime@1"],
+                        "settings": {}
+                    },
+                    "digest": "sha256:test"
+                }]
+            })
+            .to_string(),
+        )
+        .unwrap();
+        let app = open_app_with_runtime_capacity(
+            &database,
+            &root,
+            &catalog,
+            &graph_url,
+            &harness_url,
+            capacity,
+        )
+        .await;
+        Self {
+            _temporary: temporary,
+            database,
+            app,
+            thread_id,
+            source_interaction_id,
+            held,
+            graph_task,
+            harness_task,
+        }
+    }
+
+    /// A user invokes an action. Returns the run and its status in the response.
+    async fn invoke(&self, action_id: i64) -> (i64, String) {
+        let (thread_id, source) = (self.thread_id, self.source_interaction_id);
+        let response = self
+            .app
+            .clone()
+            .oneshot(api_request(
+                "POST",
+                &format!(
+                    "/api/threads/{thread_id}/interactions/{source}/actions/{action_id}/invoke"
+                ),
+                None,
+                true,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED, "invoke {action_id}");
+        let body = response_json(response).await;
+        (
+            body["interaction"]["id"].as_i64().unwrap(),
+            body["interaction"]["completionStatus"]
+                .as_str()
+                .unwrap()
+                .to_owned(),
+        )
+    }
+
+    /// The body of the run's held Complete call, once the harness receives it.
+    async fn started(&self, run: i64) -> Value {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some((_, body, _)) = self
+                .held
+                .lock()
+                .unwrap()
+                .iter()
+                .find(|(id, _, _)| *id == run)
+            {
+                return body.clone();
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "run {run} never started"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    fn started_runs(&self) -> Vec<i64> {
+        self.held
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(run, _, _)| *run)
+            .collect()
+    }
+
+    /// Decides the outcome of a run's held Complete call.
+    fn settle(&self, run: i64, accept: bool) {
+        let decide = self
+            .held
+            .lock()
+            .unwrap()
+            .iter_mut()
+            .find(|(id, _, _)| *id == run)
+            .and_then(|(_, _, decide)| decide.take())
+            .expect("a held run");
+        decide.send(accept).unwrap();
+    }
+
+    /// The run as the product state reports it.
+    async fn interaction(&self, run: i64) -> Value {
+        let thread_id = self.thread_id;
+        let state = response_json(
+            self.app
+                .clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == run)
+            .unwrap()
+            .clone()
+    }
+
+    async fn status_of(&self, run: i64) -> String {
+        self.interaction(run).await["completionStatus"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    }
+
+    /// Waits until the run reaches the status.
+    async fn settled(&self, run: i64, expected: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = self.status_of(run).await;
+            if status == expected {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "run {run} is {status}, not {expected}"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    /// Waits until the run waits as queued for the given reason.
+    async fn waits_for(&self, run: i64, reason: &str) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let interaction = self.interaction(run).await;
+            if interaction["completionStatus"] == "queued" && interaction["queueReason"] == reason {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "run {run} is {} ({}), not queued for {reason}",
+                interaction["completionStatus"],
+                interaction["queueReason"]
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }
+
+    async fn stop(&self, run: i64) -> Value {
+        let thread_id = self.thread_id;
+        response_json(
+            self.app
+                .clone()
+                .oneshot(api_request(
+                    "POST",
+                    &format!("/api/threads/{thread_id}/interactions/{run}/stop"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await
+    }
+
+    fn finish(self) {
+        self.graph_task.abort();
+        self.harness_task.abort();
+    }
+}
+
 /// PAR-009 (#718): runs a user starts on different nodes run at once. On one node they queue
 /// in order, and each starts when the run ahead of it settles, whether it was accepted or
 /// failed. A queued run reads the thread when it starts, so it is pointed at the accepted
@@ -5435,6 +5903,251 @@ async fn node_runs_run_beside_other_nodes_and_queue_in_order_on_their_own_node()
     settled(waiting, "accepted").await;
     graph_task.abort();
     harness_task.abort();
+}
+
+/// PAR-012 (#720): with the app's limit on human-started runs filled, the next run waits as
+/// queued for capacity, and waiting runs start first in, first out as slots free. A run behind
+/// another on its node first waits for its node, then for capacity, and each wait shows its own
+/// reason. A thread message is a human-started run too. Removing a run that waits for capacity
+/// keeps its text, it never starts, and the node it held passes on at once.
+#[tokio::test]
+async fn human_started_runs_wait_for_capacity_and_start_in_order_as_slots_free() {
+    // Node 7 offers actions 41, 44 and 47; every other action has a node of its own.
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 8), (43, 9), (44, 7), (46, 11), (47, 7)];
+    let fixture = HeldRunsFixture::open(ACTIONS, Some(2)).await;
+    let thread_id = fixture.thread_id;
+
+    // Two runs fill the limit.
+    let (a, _) = fixture.invoke(41).await;
+    let a_body = fixture.started(a).await;
+    let (b, _) = fixture.invoke(42).await;
+    fixture.started(b).await;
+
+    // The next run waits for capacity; one behind a run on its node waits for that node.
+    let (c, c_status) = fixture.invoke(43).await;
+    assert_eq!(c_status, "queued");
+    fixture.waits_for(c, "capacity").await;
+    let (d, _) = fixture.invoke(44).await;
+    fixture.waits_for(d, "node").await;
+    // A thread message is human-started, so it waits for capacity as well, and it still holds
+    // its thread's one message turn while it waits.
+    let message = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/interactions"),
+        json!({"text": "Also check the FAQ"}),
+    )
+    .await;
+    assert_eq!(message.0, StatusCode::CREATED, "{}", message.1);
+    let m = message.1["id"].as_i64().unwrap();
+    assert_eq!(message.1["completionStatus"], "queued");
+    assert_eq!(message.1["queueReason"], "capacity");
+    let second_message = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/interactions"),
+        json!({"text": "And the pricing page"}),
+    )
+    .await;
+    assert_eq!(
+        second_message.1["code"], "interaction_in_progress",
+        "{}",
+        second_message.1
+    );
+
+    // A slot frees: the oldest run waiting for capacity starts, not the one behind node 7.
+    // Node 7 is free now, so that run holds it and waits for capacity, behind the message.
+    fixture.settle(a, true);
+    fixture.started(c).await;
+    fixture.waits_for(d, "capacity").await;
+    let (f, _) = fixture.invoke(46).await;
+    fixture.waits_for(f, "capacity").await;
+    let (g, _) = fixture.invoke(47).await;
+    fixture.waits_for(g, "node").await;
+
+    // Removing the run that holds node 7 while it waits keeps its text, and it never starts.
+    // Its node passes on at once, so the next run on node 7 now waits for capacity, last.
+    let removed = fixture.stop(d).await;
+    assert_eq!(removed["completionStatus"], "stopped");
+    assert_eq!(removed["text"], "Action 44");
+    assert!(removed.get("queueReason").is_none());
+    fixture.waits_for(g, "capacity").await;
+    assert_eq!(fixture.started_runs(), [a, b, c]);
+
+    // Whatever the outcome, each settled run passes its slot to the oldest waiting run.
+    fixture.settle(b, false);
+    fixture.started(m).await;
+    fixture.settle(c, true);
+    fixture.started(f).await;
+    fixture.waits_for(g, "capacity").await;
+    fixture.settle(m, true);
+    let g_body = fixture.started(g).await;
+    // The run on node 7 reads the thread when it starts, so it sees the first run's result.
+    let a_node = a_body["graph"]["nodeId"].as_i64().unwrap();
+    assert!(
+        g_body["traceContext"]["threadHistory"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"interactionNodeId": a_node, "responseLayerId": 900 + a_node})),
+        "{}",
+        g_body["traceContext"]["threadHistory"]
+    );
+    fixture.settle(f, true);
+    fixture.settle(g, true);
+    for run in [c, f, g, m] {
+        fixture.settled(run, "accepted").await;
+    }
+    assert_eq!(fixture.started_runs(), [a, b, c, m, f, g]);
+    assert_eq!(fixture.status_of(d).await, "stopped");
+    fixture.finish();
+}
+
+/// PAR-012 (#720): an identified send that waited for capacity and then cannot start gets the
+/// same cleanup as one that fails at once: the unbound interaction is discarded, so its draft
+/// is preserved, and it never reaches the harness.
+#[tokio::test]
+async fn a_send_that_waited_for_capacity_and_cannot_start_is_discarded_like_an_immediate_one() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let fixture = HeldRunsFixture::open(ACTIONS, Some(1)).await;
+    let thread_id = fixture.thread_id;
+    let uri = format!("/api/threads/{thread_id}/interactions");
+    // With a free slot, the graph's refusal comes back on the send, and nothing is kept.
+    let immediate = app_post(
+        &fixture.app,
+        &uri,
+        json!({"text": "Rejected by the graph", "inputId": "rejected-at-once"}),
+    )
+    .await;
+    assert_eq!(
+        immediate.0,
+        StatusCode::UNPROCESSABLE_ENTITY,
+        "{}",
+        immediate.1
+    );
+
+    let (a, _) = fixture.invoke(41).await;
+    fixture.started(a).await;
+    let waited = app_post(
+        &fixture.app,
+        &uri,
+        json!({"text": "Rejected by the graph", "inputId": "rejected-after-waiting"}),
+    )
+    .await;
+    assert_eq!(waited.0, StatusCode::CREATED, "{}", waited.1);
+    assert_eq!(waited.1["queueReason"], "capacity");
+    let waited = waited.1["id"].as_i64().unwrap();
+    fixture.settle(a, true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = response_json(
+            fixture
+                .app
+                .clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await;
+        let interactions = state["interactions"].as_array().unwrap();
+        if interactions
+            .iter()
+            .all(|interaction| interaction["id"] != waited)
+        {
+            assert!(
+                interactions
+                    .iter()
+                    .all(|interaction| interaction["text"] != "Rejected by the graph"),
+                "a refused send was kept"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the refused send that waited was kept: {state}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(fixture.started_runs(), [a]);
+    fixture.finish();
+}
+
+/// PAR-012 (#720): a retry is a human-started run, so with every slot taken it waits for
+/// capacity, and it starts when a slot frees.
+#[tokio::test]
+async fn a_retry_waits_for_capacity_like_any_human_started_run() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let fixture = HeldRunsFixture::open(ACTIONS, Some(1)).await;
+    let thread_id = fixture.thread_id;
+    let (a, _) = fixture.invoke(41).await;
+    fixture.started(a).await;
+
+    // A message turn a model failure returned to unsent, so its Retry runs it in place.
+    let pool = sqlite_pool(&fixture.database).await;
+    let (family_id, family_revision): (i64, i64) =
+        sqlx::query_as("SELECT id,revision FROM model_families ORDER BY id LIMIT 1")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let retried = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,completion_error,permission_profile_id,model_provider_id,provider_model_id,model_family_id) VALUES (?1,9,'Try again','9','not_started','retryable fixture','auto','codex','test-model',?2)",
+    )
+    .bind(thread_id)
+    .bind(family_id)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    let attempt_id = sqlx::query(
+        "INSERT INTO interaction_attempts(
+            interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,
+            harness_configuration_name,harness_configuration_revision,harness_configuration_digest,
+            provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,
+            outcome,failure_category,effect_boundary
+         ) VALUES (?1,1,'1','2',?2,?3,'codex-basic',1,'sha256:test',
+            'codex','test-adapter',1,'test-model','managed-runtime@1',
+            'model_failed','provider_timeout','none')",
+    )
+    .bind(retried)
+    .bind(family_id)
+    .bind(family_revision)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    pool.close().await;
+    let retry = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/interactions/{retried}/retry"),
+        json!({
+            "attemptId": attempt_id,
+            "text": "Try again",
+            "inputId": "capacity-retry",
+            "modelSelection": {"familyId": family_id, "providerId": "codex", "modelId": "test-model"}
+        }),
+    )
+    .await;
+    assert_eq!(retry.0, StatusCode::OK, "{}", retry.1);
+    fixture.waits_for(retried, "capacity").await;
+    assert_eq!(fixture.started_runs(), [a]);
+
+    fixture.settle(a, true);
+    fixture.started(retried).await;
+    fixture.settle(retried, true);
+    fixture.settled(retried, "accepted").await;
+    fixture.finish();
+}
+
+async fn app_post(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
+    let response = app
+        .clone()
+        .oneshot(api_request("POST", uri, Some(body), true))
+        .await
+        .unwrap();
+    let status = response.status();
+    (status, response_json(response).await)
 }
 
 #[tokio::test]
@@ -6215,11 +6928,71 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
         .await
         .unwrap();
     }
+    // Runs that waited for capacity (#720) are interrupted like a run queued behind its node:
+    // an invoked run waits for its action to be invoked again, and a message turn fails.
+    // Neither stays queued for a slot that nothing will free, and nothing starts either.
+    let capacity_invoke = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,4,'Waited for capacity',?2,'queued')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    sqlx::query(
+        "INSERT INTO action_invocations(source_interaction_id,action_id,result_interaction_id,created_at,graph_lease_required) VALUES (?1,44,?2,?3,1)",
+    )
+    .bind(source_interaction_id)
+    .bind(capacity_invoke)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO node_runs(result_interaction_id,thread_id,node_id) VALUES (?1,?2,8)")
+        .bind(capacity_invoke)
+        .bind(thread_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let capacity_message = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status) VALUES (?1,5,'Message that waited',?2,'queued')",
+    )
+    .bind(thread_id)
+    .bind(&created_at)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    for interaction in [capacity_invoke, capacity_message] {
+        sqlx::query("INSERT INTO run_capacity_waits(interaction_id) VALUES (?1)")
+            .bind(interaction)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
     pool.close().await;
 
     let reopened = open_app(&database, &root).await;
     let pool = sqlite_pool(&database).await;
-    for interaction in [result_interaction_id, queued_interaction_id] {
+    let (message_status, message_error): (String, String) =
+        sqlx::query_as("SELECT completion_status,completion_error FROM interactions WHERE id=?1")
+            .bind(capacity_message)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(message_status, "failed");
+    assert!(message_error.contains("Send it again"), "{message_error}");
+    let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM run_capacity_waits")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(waits, 0);
+    for interaction in [
+        result_interaction_id,
+        queued_interaction_id,
+        capacity_invoke,
+    ] {
         let (startup_status, startup_error): (String, String) = sqlx::query_as(
             "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
         )
@@ -8191,9 +8964,12 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     })
     .to_string();
     let mut interaction_ids = Vec::new();
+    // A graph-bound message that waited for capacity (#720) is reconciled with its graph
+    // interaction like the running one, even though retirement rebinds it at startup.
     for (sequence, status, graph_node_id) in [
         (2, "running", Some(902_i64)),
         (3, "waiting_for_approval", None),
+        (4, "queued", Some(903_i64)),
     ] {
         let result = sqlx::query(
             "INSERT INTO interactions(
@@ -8216,6 +8992,13 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
         .await
         .unwrap();
         interaction_ids.push(result.last_insert_rowid());
+        if status == "queued" {
+            sqlx::query("INSERT INTO run_capacity_waits(interaction_id) VALUES (?1)")
+                .bind(result.last_insert_rowid())
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
     }
     pool.close().await;
 
@@ -8264,7 +9047,7 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     for _ in 0..100 {
         let both_resumed = {
             let resumed_inputs = resumed_inputs.lock().unwrap();
-            ["send-restart-2", "send-restart-3"]
+            ["send-restart-2", "send-restart-3", "send-restart-4"]
                 .iter()
                 .all(|expected| resumed_inputs.iter().any(|actual| actual == expected))
         };
@@ -8276,7 +9059,7 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
 
     {
         let resumed_inputs = resumed_inputs.lock().unwrap();
-        for expected in ["send-restart-2", "send-restart-3"] {
+        for expected in ["send-restart-2", "send-restart-3", "send-restart-4"] {
             assert!(resumed_inputs.iter().any(|actual| actual == expected));
         }
     }
@@ -9978,6 +10761,51 @@ async fn open_app_with_runtime_observed_with_override(
     harness_url: &str,
     allow_harness_override: bool,
 ) -> Router {
+    open_app_server_with_runtime(
+        database,
+        web_directory,
+        catalog,
+        graph_url,
+        harness_url,
+        allow_harness_override,
+    )
+    .await
+    .router()
+}
+
+/// An app with a runtime whose limit on human-started runs is lowered for the test (#720).
+async fn open_app_with_runtime_capacity(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+    capacity: Option<usize>,
+) -> Router {
+    let server = open_app_server_with_runtime(
+        database,
+        web_directory,
+        catalog,
+        graph_url,
+        harness_url,
+        false,
+    )
+    .await;
+    match capacity {
+        Some(limit) => server.with_human_run_capacity_for_test(limit),
+        None => server,
+    }
+    .router()
+}
+
+async fn open_app_server_with_runtime(
+    database: &Path,
+    web_directory: &Path,
+    catalog: &Path,
+    graph_url: &str,
+    harness_url: &str,
+    allow_harness_override: bool,
+) -> RelayerAppServer {
     RelayerAppServer::open(RelayerAppServerConfig {
         database_path: database.to_owned(),
         web_directory: web_directory.to_owned(),
@@ -10001,7 +10829,6 @@ async fn open_app_with_runtime_observed_with_override(
     })
     .await
     .unwrap()
-    .router()
 }
 
 fn test_export_producer() -> relayer_app_server::conversation_export::ExportProducer {

@@ -5,6 +5,7 @@ import {
   recoverableActionInvocation,
   recoverActionInvocation,
   mergeActionInvocation,
+  mergeInvokedInteraction,
   actionWasInvoked,
   reconcileActionTransitions,
   visibleLayerAfterRefresh,
@@ -206,5 +207,21 @@ describe("durable action invocation renderer state", () => {
       completionOutput: { rootLayer: canonicalRoot },
     };
     expect(visibleLayerAfterRefresh(1, staleRoot, selected)).toBe(canonicalRoot);
+  });
+});
+
+describe("the run an invoke returns (#720)", () => {
+  it("adds it with why it waits, keeps a newer row, and drops a stale reason", () => {
+    const waiting = { id: 2, threadId: 10, completionStatus: "queued", queueReason: "capacity" };
+    expect(mergeInvokedInteraction([], waiting)).toEqual([waiting]);
+    // A refresh already saw it start, so the older waiting acknowledgement is not merged.
+    const running = [{ id: 2, threadId: 10, completionStatus: "running" }];
+    expect(mergeInvokedInteraction(running, waiting)).toBe(running);
+    // A later capacity wait is kept over an earlier node wait.
+    const capacity = [waiting];
+    expect(mergeInvokedInteraction(capacity, { ...waiting, queueReason: "node" })).toBe(capacity);
+    // A run that no longer waits loses its old reason.
+    const merged = mergeInvokedInteraction([waiting], { id: 2, threadId: 10, completionStatus: "submitted" });
+    expect(merged).toEqual([{ id: 2, threadId: 10, completionStatus: "submitted" }]);
   });
 });

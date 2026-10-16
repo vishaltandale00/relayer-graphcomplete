@@ -13,6 +13,7 @@ import {
   recoverableActionInvocation,
   recoverActionInvocation,
   mergeActionInvocation,
+  mergeInvokedInteraction,
   visibleLayerAfterRefresh,
   withoutPendingActionInvocation,
 } from "./action-invocation-state.js";
@@ -1858,6 +1859,10 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
       toast(error.message);
     }
     return null;
+  }
+  // The returned run carries why it waits (#720), so its node row is right before a refresh.
+  if (response.interaction?.id != null && response.interaction.threadId != null) {
+    appState.interactions = mergeInvokedInteraction(appState.interactions, response.interaction);
   }
   if (response.invocation) {
     appState.actionInvocations = mergeActionInvocation(appState.actionInvocations, response.invocation);

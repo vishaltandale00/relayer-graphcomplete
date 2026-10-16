@@ -718,6 +718,20 @@ pub(crate) async fn reconcile_interrupted_recursive_completion_executions(
     Ok(reconciled)
 }
 
+/// No run holds a capacity slot after a restart (#720), so no run stays queued for one. A
+/// message turn that waited fails, unless it already has a graph interaction, which is
+/// reconciled with it. An invoked run that waited is recovered with the runs queued behind
+/// their nodes.
+pub(crate) async fn interrupt_capacity_waits(storage: &SqliteProductStore) -> anyhow::Result<()> {
+    let waited = storage
+        .interrupt_capacity_waits(crate::storage::CAPACITY_WAIT_INTERRUPTED)
+        .await?;
+    if waited > 0 {
+        eprintln!("interrupted {waited} run(s) that waited for capacity");
+    }
+    Ok(())
+}
+
 /// Settles, in order, the work the previous process left interrupted: launched recursive
 /// children, then every interrupted interaction, stale approvals, leased action results, and
 /// ordinary running interactions. Nothing is replayed through a provider.
@@ -726,6 +740,9 @@ pub(crate) async fn reconcile_interrupted_work(
     runtime: Option<&RuntimeClient>,
     permission_catalog: &PermissionCatalog,
 ) -> anyhow::Result<()> {
+    // No run stays queued for capacity (#720). Startup interrupts those waits before harness
+    // retirement; this repeats it for callers that reconcile without opening the server.
+    interrupt_capacity_waits(storage).await?;
     // Agent children an older build left unmarked are marked first, so they are failed
     // below rather than held for a user's invoke.
     let marked = storage.mark_unrecorded_agent_children().await?;
@@ -1076,6 +1093,7 @@ pub struct RelayerAppServer {
     export_producer: crate::conversation_export::ExportProducer,
     execution_lease_reconciler: Option<ExecutionLeaseReconciler>,
     completion_broker_origin: Option<String>,
+    run_capacity: crate::api::RunCapacity,
 }
 
 pub(crate) async fn reconcile_terminal_execution_lease(
@@ -1277,6 +1295,10 @@ impl RelayerAppServer {
             .as_ref()
             .map(RuntimeClient::product_harnesses)
             .unwrap_or_default();
+        // No run holds a capacity slot after a restart (#720). Runs that waited for one are
+        // interrupted before harness retirement may rebind them, so a waiting turn that already
+        // has a graph interaction is still recognized as bound and reconciled with it.
+        interrupt_capacity_waits(&storage).await?;
         storage
             .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
             .await?;
@@ -1337,7 +1359,16 @@ impl RelayerAppServer {
             export_producer: config.export_producer,
             execution_lease_reconciler,
             completion_broker_origin: config.completion_broker_origin,
+            run_capacity: crate::api::RunCapacity::default(),
         })
+    }
+
+    /// Lowers the app's internal limit on human-started runs (#720), so a deterministic test
+    /// can fill it with a few runs. The limit is not a user setting.
+    #[doc(hidden)]
+    pub fn with_human_run_capacity_for_test(mut self, limit: usize) -> Self {
+        self.run_capacity = crate::api::RunCapacity::new(limit);
+        self
     }
 
     pub fn router(&self) -> Router {
@@ -1359,6 +1390,7 @@ impl RelayerAppServer {
                 export_producer: self.export_producer.clone(),
                 execution_lease_reconciler: self.execution_lease_reconciler.clone(),
                 completion_broker_origin: self.completion_broker_origin.clone(),
+                run_capacity: self.run_capacity.clone(),
             },
         )
     }

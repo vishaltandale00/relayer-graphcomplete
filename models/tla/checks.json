@@ -228,6 +228,20 @@
       "ReleaseOnSettle": "TRUE",
       "ContextAtStart": "TRUE",
       "StartupInterruptsQueued": "TRUE"
+    },
+    "capacity-today": {
+      "Limit": "2",
+      "SameNode": "2",
+      "OwnNode": "2",
+      "Children": "1",
+      "MaxRestarts": "1",
+      "AtomicAdmission": "TRUE",
+      "ReleaseHandsSlot": "TRUE",
+      "Fifo": "TRUE",
+      "ChildrenUncounted": "TRUE",
+      "StartupInterruptsWaits": "TRUE",
+      "AtomicHandOff": "TRUE",
+      "WaitBehindWaiting": "TRUE"
     }
   },
   "checks": [
@@ -3136,6 +3150,185 @@
         "violated": "QueuedHasRunAhead"
       },
       "finding": "Without the startup step, a run queued at a restart stays queued behind a run that no longer exists, and nothing ever starts it."
+    },
+    {
+      "id": "capacity-safety",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "invariants": [
+        "TypeOK",
+        "WithinLimit",
+        "NoIdleSlotWhileWaiting",
+        "WaitIsLive",
+        "OneRunPerNode",
+        "ChildrenNeverWait"
+      ],
+      "properties": [
+        "StartsInOrder",
+        "NoStartAheadOfWaiting"
+      ],
+      "expect": "pass",
+      "finding": "Executing human-started runs never exceed the limit. Runs waiting for capacity start first in, first out by when they began to wait, and no new run starts while another waits. No run waits while a slot is idle, every waiting run is in the live wait, runs on one node still run one at a time, and a child never waits for capacity. Across a restart, no run stays queued for a slot."
+    },
+    {
+      "id": "capacity-children-beside-full",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "invariants": [
+        "ChildNeverBesideFullCapacity"
+      ],
+      "expect": {
+        "violated": "ChildNeverBesideFullCapacity"
+      },
+      "finding": "Reachability: an agent's child runs while human-started runs fill every slot."
+    },
+    {
+      "id": "capacity-both-waits",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "invariants": [
+        "NeverWaitsForBoth"
+      ],
+      "expect": {
+        "violated": "NeverWaitsForBoth"
+      },
+      "finding": "Reachability: one run waits behind a run on its node, then takes its node and waits for capacity."
+    },
+    {
+      "id": "capacity-liveness",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0"
+      },
+      "fair": true,
+      "properties": [
+        "WaitingRunsStart"
+      ],
+      "expect": "pass",
+      "finding": "Without a restart, every run waiting for capacity that the user does not remove starts."
+    },
+    {
+      "id": "capacity-restart-liveness",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "fair": true,
+      "properties": [
+        "WaitingRunsLeaveTheWait"
+      ],
+      "expect": "pass",
+      "finding": "Across a restart, every run waiting for capacity leaves the wait: it starts, is removed, or is interrupted at startup.",
+      "constants": {
+        "Limit": "1"
+      }
+    },
+    {
+      "id": "capacity-race-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "AtomicAdmission": "FALSE"
+      },
+      "invariants": [
+        "WithinLimit"
+      ],
+      "expect": {
+        "violated": "WithinLimit"
+      },
+      "finding": "Without the lock, two runs racing for the last slot both see it free and both start, exceeding the limit."
+    },
+    {
+      "id": "capacity-fifo-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "Fifo": "FALSE"
+      },
+      "properties": [
+        "StartsInOrder"
+      ],
+      "expect": {
+        "violated": "StartsInOrder"
+      },
+      "finding": "A released slot that may pass to any waiting run starts a later run before an earlier one."
+    },
+    {
+      "id": "capacity-jump-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "AtomicHandOff": "FALSE",
+        "WaitBehindWaiting": "FALSE"
+      },
+      "properties": [
+        "NoStartAheadOfWaiting"
+      ],
+      "expect": {
+        "violated": "NoStartAheadOfWaiting"
+      },
+      "finding": "With the slot hand-off split from its release and no check that a run waits, a new run arriving as a slot frees takes it ahead of a run that already waits."
+    },
+    {
+      "id": "capacity-jump-guarded",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "AtomicHandOff": "FALSE"
+      },
+      "properties": [
+        "NoStartAheadOfWaiting",
+        "StartsInOrder"
+      ],
+      "expect": "pass",
+      "finding": "Even with the hand-off split from its release, admission's check that no run waits keeps a new run behind the waiting ones, and order holds."
+    },
+    {
+      "id": "capacity-release-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "MaxRestarts": "0",
+        "ReleaseHandsSlot": "FALSE"
+      },
+      "invariants": [
+        "NoIdleSlotWhileWaiting"
+      ],
+      "expect": {
+        "violated": "NoIdleSlotWhileWaiting"
+      },
+      "finding": "A settled run that only frees its slot leaves the runs waiting for capacity queued beside an idle slot."
+    },
+    {
+      "id": "capacity-children-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "ChildrenUncounted": "FALSE"
+      },
+      "invariants": [
+        "ChildrenNeverWait"
+      ],
+      "expect": {
+        "violated": "ChildrenNeverWait"
+      },
+      "finding": "Counting an agent's children would make a child wait for capacity behind human-started runs, a recursion scheduler that decision 5 (#716) rules out."
+    },
+    {
+      "id": "capacity-restart-reverted",
+      "module": "RunCapacity",
+      "preset": "capacity-today",
+      "constants": {
+        "StartupInterruptsWaits": "FALSE"
+      },
+      "invariants": [
+        "WaitIsLive"
+      ],
+      "expect": {
+        "violated": "WaitIsLive"
+      },
+      "finding": "Without the startup step, a run that waited for capacity at a restart stays queued for a slot that no live wait will ever pass it."
     }
   ]
 }

@@ -212,6 +212,10 @@ pub(crate) struct InteractionResponse {
     created_at: String,
     graph_node_id: Option<i64>,
     completion_status: String,
+    /// Why a `queued` run waits (#720): `"node"` behind a run on its node, or `"capacity"`
+    /// for a free slot under the app's limit on human-started runs. Absent otherwise.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    queue_reason: Option<&'static str>,
     stop_requested: bool,
     stop_error: Option<String>,
     harness_configuration_name: Option<String>,
@@ -238,6 +242,13 @@ impl From<Interaction> for InteractionResponse {
             text: interaction.text,
             created_at: interaction.created_at,
             graph_node_id: interaction.graph_node_id,
+            queue_reason: (interaction.completion_status == "queued").then_some(
+                if interaction.waiting_for_capacity {
+                    "capacity"
+                } else {
+                    "node"
+                },
+            ),
             completion_status: interaction.completion_status,
             stop_requested: interaction.stop_requested,
             stop_error: interaction.stop_error,
@@ -752,6 +763,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(9),
             thread_id: ThreadId::from_database(4),
             sequence: 2,

@@ -4517,6 +4517,7 @@ mod tests {
         let owner = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(1),
             thread_id: ThreadId::from_database(1),
             sequence: 1,
@@ -5378,6 +5379,7 @@ mod tests {
             completion_error: None,
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             latest_attempt: None,
         };
         let invoke = |source, result| ActionInvocation {
@@ -5447,6 +5449,7 @@ mod tests {
             completion_error: None,
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             latest_attempt: None,
         };
         let turn_sequences = [(interaction_id, 1)].into_iter().collect();
@@ -5630,6 +5633,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(7),
             thread_id: ThreadId::from_database(1),
             sequence: 2,
@@ -5754,6 +5758,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(7),
             thread_id: ThreadId::from_database(1),
             sequence: 2,
@@ -5821,6 +5826,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(7),
             thread_id: ThreadId::from_database(1),
             sequence: 1,
@@ -5969,6 +5975,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: InteractionId::from_database(8),
             thread_id: ThreadId::from_database(1),
             sequence: 2,
@@ -6217,6 +6224,7 @@ mod tests {
         let interaction = Interaction {
             stop_requested: false,
             stop_error: None,
+            waiting_for_capacity: false,
             id: result_id,
             thread_id: ThreadId::from_database(1),
             sequence: 2,

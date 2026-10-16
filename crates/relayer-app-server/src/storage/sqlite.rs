@@ -29,6 +29,7 @@ mod node_runs;
 mod personal_presentation;
 mod product_state;
 mod projects;
+mod run_capacity;
 mod schema;
 mod stops;
 pub(crate) use stops::QueuedStop;
@@ -46,10 +47,18 @@ pub(crate) use personal_presentation::PersonalPresentationPin;
 /// agent launched is not a human turn, so its selection is never inherited.
 const LATEST_HUMAN_TURN_MODEL: &str = "SELECT turn.model_provider_id,turn.provider_model_id,turn.model_family_id FROM interactions turn WHERE turn.thread_id=?1 AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=turn.id AND child.agent_invoked=1) ORDER BY turn.sequence DESC LIMIT 1";
 
+/// The error of a queued run a Stop removed before it started (#718, #720).
+pub(crate) const QUEUED_RUN_STOPPED: &str = "Stopped before it started.";
+
+/// The error of a message turn that waited for capacity when Relayer stopped (#720).
+pub(crate) const CAPACITY_WAIT_INTERRUPTED: &str =
+    "Relayer stopped before this message had capacity to start. Send it again to run it.";
+
 /// Whether thread ?1 has a message turn in progress. Message turns resume the thread's native
 /// root session, so they still run one at a time. A run started by an invoke action, whether a
-/// user clicked it or an agent launched it, starts a fresh session and runs beside them.
-const MESSAGE_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=turn.id))";
+/// user clicked it or an agent launched it, starts a fresh session and runs beside them. A
+/// message turn waiting for capacity (#720) is still the thread's turn in progress.
+const MESSAGE_TURN_IN_PROGRESS: &str = "SELECT EXISTS(SELECT 1 FROM interactions turn WHERE turn.thread_id=?1 AND turn.completion_status IN ('not_started','queued','running','submitted') AND NOT EXISTS(SELECT 1 FROM action_invocations run WHERE run.result_interaction_id=turn.id))";
 
 #[derive(Clone)]
 pub(crate) struct SqliteProductStore {
