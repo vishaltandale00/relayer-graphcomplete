@@ -713,8 +713,8 @@ export class HarnessHost {
       ...(completionBroker === undefined ? {} : { completionBroker }),
       origin: { kind: "root" },
     } as const;
-    // A fresh root never touches the thread's native root session, so it runs beside the
-    // root turns queued on it.
+    // Provider freshness is separate from scheduling: ordinary messages keep their queue;
+    // user Invoke runs are independent. Both deduplicate the same admitted delivery.
     if (traceContext?.nativeSession === "fresh") {
       // A retried or duplicated delivery of the same prepared run joins it: it must not start
       // a second paid run, nor take over the first one's cancellation.
@@ -724,7 +724,9 @@ export class HarnessHost {
         if (existing.binding !== binding) throw new Error("Fresh root completion is already active under a different graph binding");
         return existing.run;
       }
-      const run = this.runCompletion(runInput) as Promise<HarnessCompleteResult>;
+      const run = (traceContext.rootRunKind === "message"
+        ? this.withSessionLock(session, () => this.runCompletion(runInput))
+        : this.runCompletion(runInput)) as Promise<HarnessCompleteResult>;
       const entry = { binding, run };
       session.freshRootRuns.set(capability.nodeId, entry);
       const forget = () => {
@@ -920,7 +922,7 @@ export class HarnessHost {
       ? session.approvals.beginUnobservedCompletion({ interactionId, completeCallId }, UNOBSERVED_CHILD_APPROVAL_RATIONALE)
       : session.approvals.beginCompletion({ interactionId: approvalInteractionId, completeCallId });
     session.activeCompletions.set(capability.nodeId, { completeCallId, interactionId, controller });
-    if (input.origin.kind === "root" && input.traceContext?.nativeSession !== "fresh") {
+    if (input.origin.kind === "root" && (input.traceContext?.nativeSession !== "fresh" || input.traceContext.rootRunKind === "message")) {
       session.activeHumanRootCompletionId = capability.nodeId;
     }
     const abortApprovals = () => session.approvals.endCompletion(
@@ -1413,12 +1415,16 @@ export class HarnessHost {
         }
         selectedAccess = accessLease.access;
       }
+      const graphHistory = traceContext?.contextMode === "graph-v1" ? await graph.getHistory({ limit: 8 }) : undefined;
       // A turn cancelled and force-stopped before its native work starts ends as a cancellation.
       if (forceSignal.aborted) throw signal.reason;
       harnessStarted = true;
       onNativeStarted?.();
       const native = session.harness.complete({
         origin,
+        ...(traceContext?.contextMode === undefined ? {} : { contextMode: traceContext.contextMode }),
+        ...(graphHistory === undefined ? {} : { graphHistory }),
+        ...(traceContext?.rootRunKind === undefined ? {} : { rootRunKind: traceContext.rootRunKind }),
         requireNativeContinuity: traceContext?.requireNativeContinuity === true,
         ...(traceContext?.threadIconSelection === undefined ? {} : { threadIconSelection: traceContext.threadIconSelection }),
         ...(traceContext?.nativeHistoryAnchor === undefined ? {} : { nativeHistoryAnchor: traceContext.nativeHistoryAnchor }),
@@ -3367,7 +3373,11 @@ function isNativeExecutionHandle(value: Promise<void> | NativeExecutionHandle): 
 function readTraceContext(value: unknown): HarnessCompletionTraceContext | undefined {
   if (!isRecord(value) || value.traceContext === undefined) return undefined;
   if (!isRecord(value.traceContext)) throw new Error("Harness completion contains an invalid trace context");
-  const { productInteractionId, personalPresentationVersionId, personalPresentationVersionKey, requireNativeContinuity, nativeHistoryAnchor, threadIconSelection, nativeSession, threadHistory } = value.traceContext;
+  const { productInteractionId, personalPresentationVersionId, personalPresentationVersionKey, requireNativeContinuity, nativeHistoryAnchor, threadIconSelection, nativeSession, threadHistory, contextMode, rootRunKind } = value.traceContext;
+  if (contextMode !== undefined && contextMode !== "graph-v1") throw new Error("Invalid graph context mode");
+  if (contextMode === "graph-v1" && nativeSession !== "fresh") throw new Error("Graph continuation requires a fresh session");
+  if (rootRunKind !== undefined && rootRunKind !== "message" && rootRunKind !== "invoke") throw new Error("Invalid root run kind");
+  if (rootRunKind === "message" && contextMode !== "graph-v1") throw new Error("Fresh message runs require graph continuation");
   if (nativeSession !== undefined && nativeSession !== "fresh") throw new Error("Invalid native session mode");
   if (nativeSession === "fresh" && requireNativeContinuity === true) throw new Error("A fresh native session cannot require native continuity");
   if (threadHistory !== undefined && nativeSession !== "fresh") throw new Error("Thread history is sent only with a fresh native session");
@@ -3392,6 +3402,8 @@ function readTraceContext(value: unknown): HarnessCompletionTraceContext | undef
   }
   return {
     productInteractionId,
+    ...(contextMode === undefined ? {} : { contextMode }),
+    ...(rootRunKind === undefined ? {} : { rootRunKind }),
     ...(requireNativeContinuity === undefined ? {} : { requireNativeContinuity }),
     ...(threadIconSelection === undefined ? {} : { threadIconSelection: { eligible: true as const } }),
     ...(nativeHistoryAnchor == null ? {} : { nativeHistoryAnchor: nativeHistoryAnchor as { interactionNodeId: number; message: string } }),
@@ -3504,6 +3516,8 @@ function freshRootBinding(
     .update(JSON.stringify({
       completionId: capability.nodeId,
       productInteractionId: traceContext.productInteractionId,
+      contextMode: traceContext.contextMode,
+      rootRunKind: traceContext.rootRunKind,
       attemptAdmissionId: attemptAdmissionId ?? null,
       executionLeaseId: executionLeaseId ?? null,
       model: model === undefined ? undefined : { providerId: model.providerId, adapterId: model.adapterId, modelId: model.modelId },

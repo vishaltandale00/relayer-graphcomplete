@@ -7156,6 +7156,12 @@ async fn persists_project_thread_and_interaction_across_restart() {
         .execute(&partial_index_pool)
         .await
         .unwrap();
+    sqlx::raw_sql(include_str!(
+        "../src/storage/sqlite/migrations/0049_graph_backed_continuation.sql"
+    ))
+    .execute(&partial_index_pool)
+    .await
+    .unwrap();
     sqlx::query("PRAGMA foreign_keys=ON")
         .execute(&partial_index_pool)
         .await

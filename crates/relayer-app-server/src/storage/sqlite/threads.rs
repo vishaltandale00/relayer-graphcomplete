@@ -161,7 +161,7 @@ impl SqliteProductStore {
             catalog::validate_model_selection_on(&mut transaction, &command).await?;
         }
         let thread = sqlx::query(
-            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id,personal_presentation_version_key,working_directory,checkout_context_json,icon_selection_eligible) VALUES (?1,?2,?3,?3,?4,?5,?6,COALESCE(?7,(SELECT path FROM projects WHERE id=?2)),?8,?9)",
+            "INSERT INTO threads(title,project_id,created_at,updated_at,harness_configuration_name,permission_profile_id,personal_presentation_version_key,working_directory,checkout_context_json,icon_selection_eligible,continuation_mode) VALUES (?1,?2,?3,?3,?4,?5,?6,COALESCE(?7,(SELECT path FROM projects WHERE id=?2)),?8,?9,'graph-v1')",
         )
         .bind(record.title)
         .bind(record.project_id.map(ProjectId::value))
@@ -316,6 +316,54 @@ mod icon_tests {
             })
             .await
             .unwrap()
+    }
+
+    #[tokio::test]
+    async fn graph_continuation_is_persisted_only_for_new_native_threads() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("product.sqlite");
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        // Raw historical/import insertion deliberately retains the migration default.
+        let legacy = sqlx::query("INSERT INTO threads(title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES ('Legacy','1','1','fixture','auto')").execute(&store.pool).await.unwrap().last_insert_rowid();
+        sqlx::query("INSERT INTO interactions(thread_id,sequence,text,created_at) VALUES (?1,1,'Legacy request','1')").bind(legacy).execute(&store.pool).await.unwrap();
+        let new = create(&store, true).await;
+        assert!(store.graph_backed_continuation(new.id).await.unwrap());
+        assert!(
+            sqlx::query("UPDATE threads SET continuation_mode='native' WHERE id=?1")
+                .bind(new.id.value())
+                .execute(&store.pool)
+                .await
+                .is_err()
+        );
+        assert!(
+            !store
+                .graph_backed_continuation(ThreadId::from_database(legacy))
+                .await
+                .unwrap()
+        );
+        // Native execution receipts never reclassify a graph-backed thread as legacy.
+        sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE thread_id=?1")
+            .bind(new.id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .conversation_compatibility(new.id)
+                .await
+                .unwrap()
+                .status,
+            "unrestricted"
+        );
+        store.pool.close().await;
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        assert!(reopened.graph_backed_continuation(new.id).await.unwrap());
+        assert!(
+            !reopened
+                .graph_backed_continuation(ThreadId::from_database(legacy))
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]

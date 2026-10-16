@@ -922,7 +922,9 @@ describe("PrimeAgentHarness", () => {
     const scopes: ControlledRunScope[] = [];
     const root = primeSession("/tmp/root-prime-session.jsonl");
     const fresh = primeSession("/tmp/fresh-root.jsonl");
-    const sessions = [root, fresh];
+    const graphFirst = primeSession("/tmp/graph-first.jsonl");
+    const graphSecond = primeSession("/tmp/graph-second.jsonl");
+    const sessions = [root, fresh, graphFirst, graphSecond];
     const create = vi.fn(() => "fresh-root");
     const open = vi.fn(() => "saved-root");
     const harness = await PrimeAgentHarness.create({
@@ -968,6 +970,16 @@ describe("PrimeAgentHarness", () => {
     await harness.complete(runContext(43, "root-token"));
     expect(root.promptAndWait).toHaveBeenCalledOnce();
     expect(String(vi.mocked(root.promptAndWait).mock.calls[0]?.[0])).not.toContain("This run starts a fresh session");
+    for (const id of [44, 45]) await harness.complete({
+      ...familyRunContext(id, `graph-${id}`, 0), nativeSession: "fresh", contextMode: "graph-v1", rootRunKind: "message",
+      graphHistory: { entries: [], nextBeforeNodeId: null },
+    });
+    for (const session of [graphFirst, graphSecond]) {
+      expect(session.promptAndWait).toHaveBeenCalledOnce();
+      expect(String(vi.mocked(session.promptAndWait).mock.calls[0]?.[0])).toContain("get_historical_input");
+      expect(session.disposeAsync).toHaveBeenCalledOnce();
+    }
+    expect(root.promptAndWait).toHaveBeenCalledOnce();
   });
 
   it("cancels and quiesces only the exact invoked Prime session before disposing it", async () => {

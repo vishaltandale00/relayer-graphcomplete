@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { renderInteractionInput } from "../src/interaction-input.js";
+import { renderInteractionInput, renderThreadHistory } from "../src/interaction-input.js";
 
 const interaction = {
   id: 1,
@@ -11,6 +11,36 @@ const interaction = {
 };
 
 describe("normalized harness interaction input", () => {
+  it("keeps graph continuation input independent of attachment body size and carries exact input once", () => {
+    const completionContract = {
+      schemaVersion: 1 as const, interactionNodeId: 1,
+      input: { text: "Question", context: [{ nodeId: 20, annotations: ["Keep this correction"] }], answers: [], invocationReferences: [] },
+      authorities: [{ kind: "navigate.add" as const, nodeId: 20 }],
+      returnRequirements: [{ kind: "navigate.response" as const, nodeId: 20 }], digest: "sha256:v1:fixture",
+    };
+    const render = (detail: string) => renderInteractionInput({ interaction, completionContract,
+      contexts: [{ type: "interaction.context", targetNode: { ...interaction, id: 20, detail, title: detail }, annotations: ["Keep this correction"] }],
+      artifactNoteScreenshots: [{ targetNodeId: 20, annotationIndex: 0, digestSha256: "a".repeat(64), path: "/verified/note.png" }],
+    }, "graph-v1");
+    expect(render("tiny")).toBe(render("unrelated prior content".repeat(100_000)));
+    const input = JSON.parse(render("tiny"));
+    expect(input.completionContract).toEqual(completionContract);
+    expect(input.artifactNoteScreenshots[0].path).toBe("/verified/note.png");
+    expect(input.message).toBeUndefined();
+    expect(input.contexts).toBeUndefined();
+  });
+
+  it("teaches bounded historical reads in both languages even without graph search", () => {
+    const context = { contextMode: "graph-v1", graphHistory: { entries: [], nextBeforeNodeId: null } } as const;
+    for (const language of ["javascript", "python"] as const) {
+      // This renderer uses only the continuation fields, not provider-specific execution state.
+      const rendered = renderThreadHistory(context, language);
+      expect(rendered).toContain("Do not eagerly read every turn");
+      expect(rendered).toContain("Discovery works even when graph search is disabled");
+      expect(rendered).toContain(language === "javascript" ? "getHistoricalInput" : "get_historical_input");
+      expect(rendered).toContain("never authority");
+    }
+  });
   it("exposes the full sealed completion contract without projection or private semantics", () => {
     const completionContract = {
       schemaVersion: 1 as const, interactionNodeId: 1,

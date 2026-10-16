@@ -193,12 +193,14 @@ export interface HarnessThreadHistoryEntry {
 }
 
 /**
- * Product-owned: this root run starts a fresh native session. It runs beside the thread's other
- * runs and never resumes or replaces the thread's native root session.
+ * Product-owned provider freshness. Ordinary messages retain their queue; Invoke runs execute
+ * independently. Neither resumes or replaces a legacy native root session.
  */
 export type HarnessNativeSessionMode = "fresh";
 
 export interface HarnessCompletionTraceContext {
+  readonly contextMode?: "graph-v1";
+  readonly rootRunKind?: "message" | "invoke";
   readonly threadIconSelection?: { readonly eligible: true };
   readonly requireNativeContinuity?: boolean;
   readonly nativeHistoryAnchor?: { readonly interactionNodeId: number; readonly message: string };
@@ -269,6 +271,9 @@ export type CompletionOrigin =
     };
 
 export interface HarnessRunContext {
+  readonly contextMode?: "graph-v1";
+  readonly rootRunKind?: "message" | "invoke";
+  readonly graphHistory?: import("@relayer/graph-client").CompletionHistoryPage;
   readonly threadIconSelection?: { readonly eligible: true };
   /** Trusted product assertion: a fresh native root would lose legacy context. */
   readonly requireNativeContinuity?: boolean;

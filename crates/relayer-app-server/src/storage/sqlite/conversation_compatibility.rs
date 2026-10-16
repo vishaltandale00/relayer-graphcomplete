@@ -19,6 +19,18 @@ pub(crate) struct ConversationCompatibility {
 }
 
 impl SqliteProductStore {
+    pub(crate) async fn graph_backed_continuation(
+        &self,
+        id: ThreadId,
+    ) -> Result<bool, StorageError> {
+        Ok(
+            sqlx::query_scalar::<_, String>("SELECT continuation_mode FROM threads WHERE id=?1")
+                .bind(id.value())
+                .fetch_one(&self.pool)
+                .await?
+                == "graph-v1",
+        )
+    }
     pub(crate) async fn conversation_compatibility(
         &self,
         id: ThreadId,
@@ -53,6 +65,13 @@ pub(super) async fn compatibility_on(
         provider_id: None,
         message: None,
     };
+    let mode: String = sqlx::query_scalar("SELECT continuation_mode FROM threads WHERE id=?1")
+        .bind(thread_id)
+        .fetch_one(&mut *connection)
+        .await?;
+    if mode == "graph-v1" {
+        return Ok(result);
+    }
     // Successful root receipts are authoritative. A failed foreign attempt cannot become
     // the owner. Semantic children have independent native attachments and are excluded.
     let rows = sqlx::query("SELECT i.id,i.graph_node_id,i.text,i.completion_status,i.model_provider_id,i.harness_configuration_name,a.provider_id,a.adapter_id,a.access_contract,a.harness_configuration_name AS attempt_harness,p.adapter_id AS current_adapter,p.access_contract AS current_contract,EXISTS(SELECT 1 FROM interaction_attempts any_attempt WHERE any_attempt.interaction_id=i.id) AS has_attempts FROM interactions i LEFT JOIN interaction_attempts a ON a.interaction_id=i.id AND a.outcome='accepted' LEFT JOIN model_providers p ON p.id=COALESCE(a.provider_id,i.model_provider_id) WHERE i.thread_id=?1 AND (?2 IS NULL OR i.id!=?2) AND NOT EXISTS(SELECT 1 FROM action_invocations v WHERE v.result_interaction_id=i.id) ORDER BY i.sequence")

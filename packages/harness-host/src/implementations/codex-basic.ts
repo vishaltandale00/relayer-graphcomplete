@@ -756,7 +756,7 @@ ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePers
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
-${renderInteractionInput(context.interactionInput)}
+${renderInteractionInput(context.interactionInput, context.contextMode)}
 
 ${INTERACTION_INPUT_GUIDANCE} In JavaScript, call graph.getInteractionInput() to re-read it.
 ${context?.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}
@@ -870,7 +870,7 @@ export function buildLayeredNavigationPrompt(
   const context = "inputGraph" in input ? input as HarnessRunContext : undefined;
   const interactionNode = context ? context.inputGraph : input as GraphNode;
   const normalizedInput = context
-    ? renderInteractionInput(context.interactionInput)
+    ? renderInteractionInput(context.interactionInput, context.contextMode)
     : `Interaction:\n- id: ${interactionNode.id}\n- title: ${interactionNode.title}\n- detail: ${interactionNode.detail}`;
   if (graphAuthoringNodePath !== undefined && graphAuthoringLauncherPath !== undefined) throw new Error("Graph authoring cannot use both Node and the restricted launcher.");
   const authoringInstructions = graphAuthoringNodePath !== undefined

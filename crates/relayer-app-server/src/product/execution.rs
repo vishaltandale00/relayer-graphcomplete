@@ -245,6 +245,21 @@ impl InteractionExecutionService {
                 return;
             }
         };
+        let graph_context = match execution.product.graph_backed_continuation(thread.id).await {
+            Ok(value) => value,
+            Err(error) => {
+                fail_prepared_before_launch(
+                    execution,
+                    runtime,
+                    &thread,
+                    &interaction,
+                    prepared,
+                    error.to_string(),
+                )
+                .await;
+                return;
+            }
+        };
         let fresh_history = if invoked_run {
             match execution
                 .product
@@ -273,6 +288,7 @@ impl InteractionExecutionService {
             require_native_continuity: false,
             native_history_anchor: None,
             fresh_native_session: fresh_history.as_deref(),
+            graph_context,
             project_id: thread.project_id.map(ProjectId::value),
             product_interaction_id: interaction.id.value(),
             thread_id: thread.id.value(),
@@ -473,6 +489,7 @@ impl InteractionExecutionService {
         let require_native_continuity = execution_model_selection.is_some()
             && invocation.is_none()
             && command.fresh_native_session.is_none()
+            && !command.graph_context
             && continuity
                 .as_ref()
                 .is_none_or(|value| value.status != "unrestricted");

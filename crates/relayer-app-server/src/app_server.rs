@@ -173,6 +173,7 @@ async fn reconcile_interrupted_interaction(
                     require_native_continuity: false,
                     native_history_anchor: None,
                     fresh_native_session: None,
+                    graph_context: false,
                     project_id: thread.project_id.map(ProjectId::value),
                     product_interaction_id: interaction.id.value(),
                     thread_id: thread.id.value(),

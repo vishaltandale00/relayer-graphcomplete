@@ -1133,7 +1133,7 @@ ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${include
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
-${renderInteractionInput(context.interactionInput)}
+${renderInteractionInput(context.interactionInput, context.contextMode)}
 
 ${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 ${context.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}
@@ -1183,7 +1183,7 @@ ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${include
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
-${renderInteractionInput(context.interactionInput)}
+${renderInteractionInput(context.interactionInput, context.contextMode)}
 
 ${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 ${context.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}

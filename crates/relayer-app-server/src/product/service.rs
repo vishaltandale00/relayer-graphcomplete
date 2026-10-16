@@ -2874,6 +2874,16 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn graph_backed_continuation(
+        &self,
+        id: ThreadId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .graph_backed_continuation(id)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn accepted_thread_history(
         &self,
         thread_id: ThreadId,

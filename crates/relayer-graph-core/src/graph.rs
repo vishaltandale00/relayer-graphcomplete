@@ -1,6 +1,7 @@
 mod attached_navigation;
 mod completion;
 mod database;
+mod history;
 mod import;
 mod interaction_scope;
 mod invocation;
@@ -17,6 +18,9 @@ pub use completion::{
     ExhaustedInvocationAction, InvocationGraphSnapshot, current_transition_request_digest,
 };
 pub use database::{DEFAULT_IMPORT_INDEX_BUDGET, DEFAULT_SEARCH_INDEX_BUDGET, GraphDatabase};
+pub use history::{
+    CompletionHistoryEntry, CompletionHistoryPage, HistoricalAnswer, HistoricalInteractionInput,
+};
 pub use import::{
     IMPORTED_AUTHORED_DETAIL_OMITTED_NOTE, ImportedAcceptedView, ImportedAction,
     ImportedConversation, ImportedConversationReceipt, ImportedConversationStage,

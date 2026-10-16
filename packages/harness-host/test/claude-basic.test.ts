@@ -634,6 +634,8 @@ describe("ClaudeBasicHarness", () => {
         [{ type: "result", subtype: "success", result: "child a", session_id: "child-a" }],
         [{ type: "result", subtype: "success", result: "child b", session_id: "child-b" }],
         [{ type: "result", subtype: "success", result: "root", session_id: "root-session" }],
+        [{ type: "result", subtype: "success", result: "graph 1", session_id: "graph-1" }],
+        [{ type: "result", subtype: "success", result: "graph 2", session_id: "graph-2" }],
       ], (input) => calls.push(input)),
       browserSdk: browserSdk(),
     });
@@ -691,6 +693,13 @@ describe("ClaudeBasicHarness", () => {
 
     await harness.complete(runContext(access));
     expect(calls[1]?.options.resume).toBe("root-session");
+    for (let i = 0; i < 2; i++) await harness.complete({
+      ...runContext(access), nativeSession: "fresh", contextMode: "graph-v1", rootRunKind: "message",
+      graphHistory: { entries: [], nextBeforeNodeId: null },
+    });
+    expect(calls.slice(2).map(({ options }) => options.resume)).toEqual([undefined, undefined]);
+    expect(String(calls[2]?.prompt)).toContain("getHistoricalInput");
+    expect(harness.state().claudeSessionId).toBe("root-session");
   });
 
   it("rejects an invoked completion that succeeds without a durable session identity", async () => {

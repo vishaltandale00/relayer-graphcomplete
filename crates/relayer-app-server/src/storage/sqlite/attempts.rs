@@ -616,6 +616,17 @@ mod tests {
         InteractionId,
         ExecutionModelSelection,
     ) {
+        seeded_store_with_mode("native").await
+    }
+
+    async fn seeded_store_with_mode(
+        mode: &str,
+    ) -> (
+        tempfile::TempDir,
+        SqliteProductStore,
+        InteractionId,
+        ExecutionModelSelection,
+    ) {
         let directory = tempfile::Builder::new()
             .prefix("relayer-attempts-")
             .tempdir()
@@ -638,7 +649,8 @@ mod tests {
         sqlx::query("INSERT INTO model_family_members(family_id,position,provider_id,model_id) VALUES (?1,0,'codex','gpt-test')")
             .bind(family_id).execute(&store.pool).await.expect("member");
         let thread_id =
-            sqlx::query("INSERT INTO threads(title,created_at,updated_at) VALUES ('Test','1','1')")
+            sqlx::query("INSERT INTO threads(title,created_at,updated_at,continuation_mode) VALUES ('Test','1','1',?1)")
+                .bind(mode)
                 .execute(&store.pool)
                 .await
                 .expect("thread")
@@ -657,6 +669,57 @@ mod tests {
                 model_id: "gpt-test".into(),
             },
         )
+    }
+
+    #[tokio::test]
+    async fn graph_conversation_success_receipts_never_require_native_continuity_after_reopen() {
+        let (_directory, store, root, route) = seeded_store_with_mode("graph-v1").await;
+        let attempt = store
+            .begin_interaction_attempt(receipt(root, &route), "10")
+            .await
+            .unwrap();
+        store
+            .finish_interaction_attempt(attempt, "accepted", None, "graph_write", "11")
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='accepted',harness_configuration_name='codex-basic' WHERE id=?1").bind(root.value()).execute(&store.pool).await.unwrap();
+        let thread: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(root.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .conversation_compatibility(ThreadId::from_database(thread))
+                .await
+                .unwrap()
+                .status,
+            "unrestricted"
+        );
+        // Recover the exact fixture path from SQLx rather than assume its filename.
+        let database_path: String =
+            sqlx::query_scalar("SELECT file FROM pragma_database_list WHERE name='main'")
+                .fetch_one(&store.pool)
+                .await
+                .unwrap();
+        store.pool.close().await;
+        let reopened = SqliteProductStore::open(std::path::Path::new(&database_path))
+            .await
+            .unwrap();
+        assert!(
+            reopened
+                .graph_backed_continuation(ThreadId::from_database(thread))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            reopened
+                .conversation_compatibility(ThreadId::from_database(thread))
+                .await
+                .unwrap()
+                .status,
+            "unrestricted"
+        );
     }
 
     #[tokio::test]

@@ -189,6 +189,7 @@ pub(crate) struct CompleteInteraction<'a> {
     /// The thread's accepted turns, sent with a run that starts a fresh native session. A run
     /// started from an invoke action never resumes the thread's root session, so it runs beside
     /// the thread's other turns. `None` resumes the root session as before.
+    pub(crate) graph_context: bool,
     pub(crate) fresh_native_session: Option<&'a [crate::product::ThreadHistoryEntry]>,
     pub(crate) project_id: Option<i64>,
     pub(crate) product_interaction_id: i64,
@@ -1139,6 +1140,11 @@ impl RuntimeClient {
                 complete_body["traceContext"]["nativeSession"] = Value::from("fresh");
                 complete_body["traceContext"]["threadHistory"] = serde_json::to_value(history)
                     .map_err(|error| RuntimeError::Protocol(format!("thread history: {error}")))?;
+            }
+            if command.graph_context {
+                complete_body["traceContext"]["contextMode"] = Value::from("graph-v1");
+                complete_body["traceContext"]["nativeSession"] = Value::from("fresh");
+                complete_body["traceContext"]["rootRunKind"] = Value::from(if command.fresh_native_session.is_none() { "message" } else { "invoke" });
             }
             if let Some(version_id) = prepared.personal_presentation_version_id {
                 complete_body["traceContext"]["personalPresentationVersionId"] =
@@ -4143,6 +4149,7 @@ mod tests {
             require_native_continuity: false,
             native_history_anchor: None,
             fresh_native_session: None,
+            graph_context: false,
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
@@ -4193,6 +4200,7 @@ mod tests {
             require_native_continuity: false,
             native_history_anchor: None,
             fresh_native_session: None,
+            graph_context: false,
             project_id: None,
             product_interaction_id: 99,
             thread_id: 1,
@@ -4338,6 +4346,7 @@ mod tests {
             require_native_continuity: false,
             native_history_anchor: None,
             fresh_native_session: None,
+            graph_context: false,
             project_id: None,
             product_interaction_id: 77,
             thread_id: 1,
@@ -4746,6 +4755,7 @@ mod tests {
             require_native_continuity: false,
             native_history_anchor: None,
             fresh_native_session: None,
+            graph_context: false,
             project_id: None,
             product_interaction_id: 1,
             thread_id: 1,
@@ -4900,6 +4910,7 @@ mod tests {
                 require_native_continuity: false,
                 native_history_anchor: None,
                 fresh_native_session: None,
+                graph_context: false,
                 project_id: None,
                 product_interaction_id: 1,
                 thread_id: 1,
@@ -4997,14 +5008,15 @@ mod tests {
                     async move {
                         assert_eq!(headers["authorization"], "Bearer harness-control");
                         assert_eq!(body["interactionId"], 7);
-                        if observed_calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                        let call = observed_calls.fetch_add(1, Ordering::SeqCst);
+                        if call == 0 {
                             assert_eq!(
                                 body["traceContext"]["threadIconSelection"],
                                 json!({"eligible": true})
                             );
                             assert!(body["traceContext"].get("nativeSession").is_none());
                             assert!(body["traceContext"].get("threadHistory").is_none());
-                        } else {
+                        } else if call == 1 {
                             assert!(body["traceContext"].get("threadIconSelection").is_none());
                             assert_eq!(body["traceContext"]["nativeSession"], "fresh");
                             assert_eq!(
@@ -5014,6 +5026,12 @@ mod tests {
                                     { "interactionNodeId": 8 }
                                 ])
                             );
+                        }
+                        if call == 2 {
+                            assert_eq!(body["traceContext"]["nativeSession"], "fresh");
+                            assert_eq!(body["traceContext"]["contextMode"], "graph-v1");
+                            assert_eq!(body["traceContext"]["rootRunKind"], "message");
+                            assert!(body["traceContext"].get("threadHistory").is_none());
                         }
                         assert_eq!(body["graph"]["nodeId"], 41);
                         assert_eq!(body["traceContext"]["personalPresentationVersionId"], 90);
@@ -5094,13 +5112,15 @@ mod tests {
                 response_layer_id: None,
             },
         ];
-        for eligible in [true, false] {
+        for (eligible, graph_context) in [(true, false), (false, false), (false, true)] {
             let completed = runtime
                 .complete(CompleteInteraction {
                     thread_icon_selection_eligible: eligible,
                     require_native_continuity: false,
                     native_history_anchor: None,
-                    fresh_native_session: (!eligible).then_some(history.as_slice()),
+                    fresh_native_session: (!eligible && !graph_context)
+                        .then_some(history.as_slice()),
+                    graph_context,
                     project_id: None,
                     product_interaction_id: 1,
                     thread_id: 1,
@@ -5126,8 +5146,8 @@ mod tests {
 
             assert_eq!(completed.output, json!({ "nodeId": 41 }));
         }
-        assert_eq!(attachments.load(Ordering::SeqCst), 4);
-        assert_eq!(revocations.load(Ordering::SeqCst), 2);
+        assert_eq!(attachments.load(Ordering::SeqCst), 5);
+        assert_eq!(revocations.load(Ordering::SeqCst), 3);
         graph_task.abort();
         harness_task.abort();
     }

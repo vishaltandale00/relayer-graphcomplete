@@ -1257,6 +1257,13 @@ describe("CodexBasicHarness", () => {
     await harness.complete(runContext(3, "root-token"));
     expect(submissions[1]?.savedThreadId).toBe("root-thread");
     expect(submissions[1]?.prompt).not.toContain("This run starts a fresh session");
+    for (const id of [4, 5]) await harness.complete({
+      ...runContext(id, `graph-${id}`), nativeSession: "fresh", contextMode: "graph-v1", rootRunKind: "message",
+      graphHistory: { entries: [], nextBeforeNodeId: null },
+    });
+    expect(submissions.slice(2).map(({ savedThreadId }) => savedThreadId)).toEqual([undefined, undefined]);
+    expect(submissions[2]?.prompt).toContain("getHistoricalInput");
+    expect(submissions[3]?.prompt).toContain("getHistory");
   });
 
   it("fails recursive Codex execution closed without fresh admission and access", async () => {

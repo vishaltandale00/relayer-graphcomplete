@@ -33,6 +33,7 @@ const THREAD_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("icon", "TEXT", false, 0),
     ("icon_selection_eligible", "INTEGER", true, 0),
     ("archived_at", "TEXT", false, 0),
+    ("continuation_mode", "TEXT", true, 0),
 ];
 const CONVERSATION_IMPORT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("id", "TEXT", true, 1),

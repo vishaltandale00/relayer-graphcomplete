@@ -2819,6 +2819,59 @@ describe("HarnessHost", () => {
     }
   });
 
+  it("serializes fresh ordinary messages, joins duplicate delivery, and keeps Invoke cancellation independent", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-graph-messages-"));
+    const started = new Map<number, () => void>();
+    const gates = new Map<number, Promise<void>>();
+    const contexts: HarnessRunContext[] = [];
+    for (const id of [1, 2, 3]) gates.set(id, new Promise<void>((resolve) => started.set(id, resolve)));
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+      const id = Number(new Headers(init?.headers).get("authorization")?.replace("Bearer token-", ""));
+      if (url.endsWith("/output")) return new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 });
+      if (url.includes("/history?")) return new Response(JSON.stringify({ entries: [], nextBeforeNodeId: null }));
+      return graphReadResponse(url, id);
+    }));
+    const host = new HarnessHost({ stateFile: join(directory, "sessions.json"), controlToken: "control",
+      implementations: { test: () => ({ state: emptyState, async complete(context, signal) {
+        contexts.push(context);
+        started.get(context.inputGraph.id)!();
+        await new Promise<void>((_resolve, reject) => signal?.addEventListener("abort", () => reject(signal.reason), { once: true }));
+      } }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: testConfiguration, workingDirectory: directory });
+      const launch = (id: number, rootRunKind: "message" | "invoke") => host.complete(1, id, graph(id, `token-${id}`), undefined, undefined, {
+        productInteractionId: id, nativeSession: "fresh", contextMode: "graph-v1", rootRunKind,
+      });
+      const first = launch(1, "message");
+      void first.catch(() => {});
+      await gates.get(1);
+      const duplicate = launch(1, "message");
+      void duplicate.catch(() => {});
+      const second = launch(2, "message");
+      void second.catch(() => {});
+      const invoke = launch(3, "invoke");
+      void invoke.catch(() => {});
+      await gates.get(3);
+      expect(contexts.map(({ inputGraph }) => inputGraph.id)).toEqual([1, 3]);
+      expect(contexts[0]?.graphHistory).toEqual({ entries: [], nextBeforeNodeId: null });
+      expect(host.cancel(1)).toBe(true);
+      await expect(first).rejects.toThrow("cancelled");
+      await expect(duplicate).rejects.toThrow("cancelled");
+      await gates.get(2);
+      expect(host.cancel(1, 3)).toBe(true);
+      await expect(invoke).rejects.toThrow("cancelled");
+      expect(host.cancel(1)).toBe(true);
+      await expect(second).rejects.toThrow("cancelled");
+      expect(contexts.map(({ inputGraph }) => inputGraph.id)).toEqual([1, 3, 2]);
+    } finally {
+      await host.close();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("runs a fresh root beside the thread's root turn and cancels each exactly", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-fresh-root-"));
     const started = new Map<number, () => void>();
