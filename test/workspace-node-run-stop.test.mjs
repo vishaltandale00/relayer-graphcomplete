@@ -136,7 +136,6 @@ it("gives every run invoked from a node its own Stop, kept in place across refre
     runStop.click();
     const runError = window.document.querySelector("#interactionRunError");
     await vi.waitFor(() => expect(runError.textContent).toBe("Stop could not reach the run."));
-    expect(runError.classList.contains("hidden")).toBe(false);
     expect(runError.getAttribute("role")).toBe("status");
     expect(runStop.getAttribute("aria-describedby")).toBe("interactionRunError");
 

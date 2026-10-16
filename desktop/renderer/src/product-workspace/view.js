@@ -45,7 +45,7 @@ export function productWorkspaceMarkup() {
           </div>
           <span class="interaction-status" id="interactionStatus" role="status"></span>
           <button class="interaction-run-stop hidden" id="interactionRunStop" type="button" data-review-ref="interaction-run-stop" data-review-kind="run-stop">Stop</button>
-          <span class="interaction-run-error hidden" id="interactionRunError" role="status"></span>
+          <span class="interaction-run-error" id="interactionRunError" role="status"></span>
     </div>
     <aside class="environment-panel hidden" role="dialog" id="environmentPanel" aria-labelledby="environmentTitle">
       <div class="environment-header"><h2 id="environmentTitle">Environment</h2><span class="environment-observed" id="environmentObserved"></span><button id="closeEnvironment" class="icon-button" type="button" aria-label="Close Environment">×</button></div>

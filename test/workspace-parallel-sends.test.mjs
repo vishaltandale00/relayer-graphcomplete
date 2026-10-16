@@ -176,7 +176,8 @@ it("brings back the annotations of an earlier message that failed while a later 
     const calls = list.mock.calls.length;
     workspace.render();
     await vi.waitFor(() => expect(list.mock.calls.length).toBeGreaterThan(calls));
-    await vi.waitFor(() => expect(window.document.querySelector("#composerContextTray").textContent).toContain("1"));
+    await vi.waitFor(() => expect(window.document.querySelector("#composerContextTray").textContent).toContain("1 annotation"));
+    expect(window.document.querySelector("#composerContextTray").textContent).toContain("Plan");
   } finally {
     workspace.dispose();
     await window.happyDOM.close();

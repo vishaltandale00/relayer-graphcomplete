@@ -2271,6 +2271,65 @@ mod tests {
         }
     }
 
+    /// The same holds for a message returned to unsent before any attempt began, which records
+    /// no attempt, while a message that was never prepared is left alone.
+    #[tokio::test]
+    async fn a_message_returned_before_any_attempt_also_fails_once_stale() {
+        let (_database, store, interaction_id, route) = seeded_store().await;
+        let thread_id: i64 = sqlx::query_scalar("SELECT thread_id FROM interactions WHERE id=?1")
+            .bind(interaction_id.value())
+            .fetch_one(&store.pool)
+            .await
+            .unwrap();
+        sqlx::query("UPDATE interactions SET completion_status='running' WHERE id=?1")
+            .bind(interaction_id.value())
+            .execute(&store.pool)
+            .await
+            .unwrap();
+        store
+            .return_interaction_to_unsent(interaction_id, "codex-basic")
+            .await
+            .unwrap();
+        let selection = crate::product::InteractionModelSelection {
+            family_id: route.family_id,
+            provider_id: route.provider_id.clone(),
+            model_id: route.model_id.clone(),
+        };
+        let later = store
+            .insert_interaction(
+                ThreadId::from_database(thread_id),
+                "Later",
+                Some(&selection),
+                true,
+            )
+            .await
+            .unwrap();
+        let status = |id: i64| {
+            let pool = store.pool.clone();
+            async move {
+                sqlx::query_scalar::<_, String>(
+                    "SELECT completion_status FROM interactions WHERE id=?1",
+                )
+                .bind(id)
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+            }
+        };
+        assert_eq!(status(interaction_id.value()).await, "failed");
+        // The later message was never prepared: a newer message leaves it alone.
+        store
+            .insert_interaction(
+                ThreadId::from_database(thread_id),
+                "Newest",
+                Some(&selection),
+                true,
+            )
+            .await
+            .unwrap();
+        assert_eq!(status(later.id.value()).await, "not_started");
+    }
+
     async fn mark_later_accepted(store: &SqliteProductStore, id: crate::product::InteractionId) {
         sqlx::query("UPDATE interactions SET completion_status='accepted' WHERE id=?1")
             .bind(id.value())

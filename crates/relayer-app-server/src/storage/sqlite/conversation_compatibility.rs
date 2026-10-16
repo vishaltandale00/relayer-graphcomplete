@@ -67,9 +67,10 @@ pub(super) async fn compatibility_on(
             }
             continue;
         }
-        // A run removed or interrupted while it waited in a queue (#718, #720) never
-        // executed: it has no attempt, no graph interaction, and its row says it never
-        // started. It neither owns nor obscures the conversation's route.
+        // A run removed or interrupted while it waited in a queue (#718, #720), or a message
+        // returned before any attempt and then made stale (#719), never executed: it has no
+        // attempt, no graph interaction, and its row says so. It neither owns nor obscures the
+        // conversation's route.
         let error: Option<String> = row.try_get("completion_error")?;
         if !has_attempts
             && row.try_get::<Option<i64>, _>("graph_node_id")?.is_none()
@@ -79,9 +80,12 @@ pub(super) async fn compatibility_on(
                     .as_deref()
                     .is_some_and(|error| error.starts_with(super::QUEUED_RUN_STOPPED)))
                 || (status == "failed"
-                    && error
-                        .as_deref()
-                        .is_some_and(|error| error.starts_with(super::CAPACITY_WAIT_INTERRUPTED))))
+                    && error.as_deref().is_some_and(|error| {
+                        error.starts_with(super::CAPACITY_WAIT_INTERRUPTED)
+                            // A message returned before any attempt and then made stale by a
+                            // later message (#719) never executed either.
+                            || error.starts_with(super::STALE_RETURNED_MESSAGE)
+                    })))
         {
             continue;
         }

@@ -3899,7 +3899,6 @@ export function createProductWorkspace({
     button.classList.toggle("hidden", !control);
     if (!control) {
       delete button.dataset.interactionId;
-      errorText.classList.add("hidden");
       errorText.textContent = "";
       button.removeAttribute("aria-describedby");
       return;
@@ -3915,9 +3914,9 @@ export function createProductWorkspace({
     button.setAttribute("aria-label", stopping ? "Stopping this run" : verb === "Remove" ? "Remove this queued run" : "Stop this run");
     button.title = stopping ? "Waiting for the run to stop"
       : verb === "Remove" ? "Take this run out of the queue. Its text is kept." : "Stop this run";
-    // A failed Stop is announced and stays visible beside the control.
+    // A failed Stop is announced and stays visible beside the control. The live region stays
+    // rendered while empty, so screen readers announce the text when it appears.
     if (errorText.textContent !== (error || "")) errorText.textContent = error || "";
-    errorText.classList.toggle("hidden", !error);
     if (error) button.setAttribute("aria-describedby", "interactionRunError");
     else button.removeAttribute("aria-describedby");
   };
@@ -5019,7 +5018,11 @@ export function createProductWorkspace({
         ?? (turn.completionStatus === "failed" ? `${threadId}:${turn.id}:failed` : null);
       return key && !recoveredConfirmationThreads.has(key) ? [key] : [];
     });
-    if (restoredConfirmationKeys.length && contextDraftController) {
+    // Wait while a send of this thread posts, or a load is still in flight: either could hide
+    // a confirmation the server has not yet recorded. A later render restores then.
+    const confirmationReloadSafe = postingSendsFor(threadId).size === 0
+      && (!contextDraftLoads.has(threadId) || loadedContextDraftThreads.has(threadId));
+    if (restoredConfirmationKeys.length && contextDraftController && confirmationReloadSafe) {
       for (const key of restoredConfirmationKeys) recoveredConfirmationThreads.add(key);
       contextDraftController.allowConfirmationRestoration(threadId);
       // A settled earlier load is not reused: the restored confirmations are read afresh.
