@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "baseCommit": "83c636cf7b3ef63b4c80aa5c61bd5ac4dbe7f123",
+  "baseSourceManifest": "merge-review-source.json",
+  "baseSourceDigest": "82852d2c481090db7ad15d4bd22d359f5e6473646871eee2201ae2f4f24e97b7",
+  "sourceDigest": "383056b9891f8082836b66222e8041c0d46bf81848d18e5ae7646f456958e617",
+  "sourcePaths": 79,
+  "changes": [
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "beforeSha256": "9053f2b9e7b1641f981f2b001e8458f10faa749f6c10da0690baa5b1079378c8",
+      "afterSha256": "736a01f3c5e1bf359fd6cd2b9b65c1e51b5721fa6a623773803916e0bba15642"
+    },
+    {
+      "path": "scripts/capture-followup-node-annotations.mjs",
+      "beforeSha256": "77688c58bd2af14be4b303acf06086d9c99aed4b6db21970b580592aa85b98e4",
+      "afterSha256": "36e64e0a6c8daf7889f0fd98cef297157c30c4b99e39fe9daaf2e48c365bfc8b"
+    },
+    {
+      "path": "scripts/ci/affected-modules.v1.json",
+      "beforeSha256": "ce05e12d3c934e64884ce0e3948e2430d3ad875b9dcdb6ed32d3646a5b509e6d",
+      "afterSha256": "1231dae98d52d3cf3c2014d6fa373e16e8e3859fcb488866c41bd83f1070fc61"
+    },
+    {
+      "path": "test/ci-affected-plan.test.mjs",
+      "beforeSha256": "d6364bab7c6262ba5e10d8338834e74c860f5a1cc95fd3a5134d24e67af5af2a",
+      "afterSha256": "b12430e9f8db09039cecf238c57bb870a3a809ca9ce0fe3f0e8a568035a693fe"
+    }
+  ],
+  "scope": "JSON-valid fallback prompt fixture; annotation capture service-startup allowance, awaited cleanup result and parent-owned Chromium profile; explicit CI owner mapping and planner case. Production code, configured prompts, provider pins and other proof drivers are unchanged from baseCommit.",
+  "reuseQualification": "Prior browser/compiled/Electron/managed/native/SDK proof is reusable for unchanged production and relevant test closures at baseCommit. The fallback fixture, changed annotation capture and CI mapping require their fresh executions. Old hosted TypeScript/Vitest failures remain failed; recaptured receipts and images are bound separately in merge-typecheck-verification.json."
+}

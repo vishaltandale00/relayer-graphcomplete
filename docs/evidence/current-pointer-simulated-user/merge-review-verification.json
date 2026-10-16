@@ -1,0 +1,720 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "82852d2c481090db7ad15d4bd22d359f5e6473646871eee2201ae2f4f24e97b7",
+  "immutableMainCommit": "8c8e05694c69c40ad5f173e9613a7ef739846f41",
+  "plan": "README.md#merge-review-follow-up-2026-10-14",
+  "sourceBindingQualification": "Production/configuration and runtime-test source stayed fixed after preMappingDigest. Only the named two CI owner-map/planner files and canonical browser proof driver changed afterward; their distinct checkpoints are recorded separately. The full-check attempt stopped in Rust before importing those JavaScript files. Final build is rerun after these proof-only repairs.",
+  "preMappingDigest": "086395d7d54bfa981dd6fa2f95af2036409eb3babebd3dad474b53223b713f52",
+  "preBrowserProofRepairDigest": "6442bdccdc5f46845d028cc3bfd480a689278f632ccd7aff89df81be3772a263",
+  "preInputProofRepairDigest": "541abf7f250fb5d7036d51f720f0d9aa227dda31a7f836112e98e25d854ccd57",
+  "preCalibrationReadinessDigest": "014385386c63b0c7eeb8584d39414f74431d99b1d562e3e22cbfe2f5cdd6ecd9",
+  "gates": [
+    {
+      "gate": "recipe-package",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/graph-authoring-replay.test.mjs",
+        "test/prime-managed-runtime.test.mjs",
+        "test/prime-agent-packaging.test.mjs",
+        "test/managed-runtime-resolver.test.mjs"
+      ],
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/merge-review-recipe-package.txt",
+        "sha256": "b0326f6a03b8d9d5eaf76a97de6254958a305f7666f11f75af456889b65085cd",
+        "bytes": 259
+      },
+      "durationSeconds": 70.562,
+      "innerOutcome": {
+        "filesPassed": 4,
+        "testsPassed": 31
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "check",
+      "command": [
+        "npm",
+        "run",
+        "check"
+      ],
+      "exitCode": 101,
+      "log": {
+        "path": ".relayer/merge-review-check.txt",
+        "sha256": "6d03574ca3f7069651ce74bdcdd75963718bb5877b89f4a32d86a7d39d764604",
+        "bytes": 50691
+      },
+      "durationSeconds": 627.893,
+      "innerOutcome": {
+        "appServerLibPassed": 384,
+        "appServerLibFailed": 9,
+        "clippy": "passed",
+        "downstreamLocalDefaultGates": "not reached",
+        "qualification": "Failed preMappingDigest command; nine exact failed cases passed unchanged serial isolation. No failure cause or clean full-command pass claimed."
+      },
+      "status": "failed"
+    },
+    {
+      "gate": "eval-web",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 1,
+      "log": {
+        "path": ".relayer/merge-review-eval-web.txt",
+        "sha256": "9861b00f3eb3eef6f49e4698a6f6e1f28d407a408b3d0f24239cb473fd153203",
+        "bytes": 4238
+      },
+      "durationSeconds": 165.655,
+      "qualification": "Failed before Current-native chapters: default30s calibration wait; the later diagnostic returned the wrong actor revision. Original timeout cause remains unconfirmed.",
+      "completedChapters": [
+        "interrupted startup: pending native child terminated and profile lock released",
+        "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+        "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+        "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+        "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+        "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+        "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+        "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded"
+      ],
+      "status": "failed"
+    },
+    {
+      "gate": "compiled-runtime",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-compiled-runtime"
+      ],
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/merge-review-compiled-runtime.txt",
+        "sha256": "2ae6f369d841486f79995d8c1c5b954f62f48d3c3f0b580cd5515118dcc90e04",
+        "bytes": 380
+      },
+      "durationSeconds": 92.704,
+      "innerOutcome": {
+        "filesPassed": 1,
+        "testsPassed": 12
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "desktop-input",
+      "command": [
+        "node",
+        "scripts/run-node-input-actions-test.mjs"
+      ],
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/merge-review-desktop-input.txt",
+        "sha256": "3c816dcb901c0efe3c6a455e78a7176adb1c0f04acfcee135cc2409887a83685",
+        "bytes": 71711
+      },
+      "durationSeconds": 36.38,
+      "innerOutcome": {
+        "scenarioPassed": true,
+        "paidInferenceCalls": 0,
+        "finalCleanupReceipt": "required by canonical parent before zero exit"
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "desktop-stop",
+      "command": [
+        "node",
+        "scripts/run-desktop-stop-test.mjs"
+      ],
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/merge-review-desktop-stop.txt",
+        "sha256": "a4ce776ad2a7e986881a12fbaa76ed042041de475ae5db88b01bc292e2e2e179",
+        "bytes": 333
+      },
+      "durationSeconds": 10.617,
+      "scenarioReceipt": {
+        "passed": true,
+        "evidence": "/Volumes/2T-SSD/worktrees/communication-baseline/relayer-graphcomplete/.relayer/evidence/issue-506-stop",
+        "results": [
+          {
+            "provider": "codex",
+            "duplicateClickAbortCount": 1,
+            "lifecycle": "stopped",
+            "attempt": "cancelled"
+          },
+          {
+            "provider": "prime",
+            "duplicateClickAbortCount": 1,
+            "lifecycle": "stopped",
+            "attempt": "cancelled"
+          }
+        ]
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "prime-managed",
+      "command": [
+        "npm",
+        "run",
+        "test:prime-managed-runtime"
+      ],
+      "exitCode": 0,
+      "log": {
+        "path": ".relayer/merge-review-prime-managed.txt",
+        "sha256": "60573bb2af959908e3729a132842f01733a8d749cc1f9df1ad7ab1fb1a09de1b",
+        "bytes": 382
+      },
+      "durationSeconds": 84.864,
+      "readiness": {
+        "recipeId": "prime@0.8.1",
+        "recipeDigest": "27ec5ed35995462f088f5182ff03ecf2bbbbd721457befc4a9c444b9648bf460",
+        "target": "macos-arm64",
+        "javascriptClosureKind": "repository",
+        "javascriptClosureSha256": "02f15fb2ce6366f1e9709e66336a94476dc6605bb8618885afea9e7d2e19766f",
+        "ready": true
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "build-final",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 39.333,
+      "log": {
+        "path": ".relayer/merge-review-build-final.txt",
+        "sha256": "4073ce382e4fa69ca809c5a5046c6376238c1e98f4990fe3ed5350a55c238e3d",
+        "bytes": 2040
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "secret-final",
+      "command": [
+        "npm",
+        "run",
+        "test:codex-secret-boundary"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 19.866,
+      "log": {
+        "path": ".relayer/merge-review-secret-final.txt",
+        "sha256": "6a3c3959130019245f0e9f0069cc5dc80f660dada5011386d7652e9d4c4ab55d",
+        "bytes": 429
+      },
+      "innerOutcome": {
+        "testsPassed": 2
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "receipts-final",
+      "command": [
+        "npm",
+        "run",
+        "lint:ladybug-receipt"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 2.661,
+      "log": {
+        "path": ".relayer/merge-review-receipts-final.txt",
+        "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c",
+        "bytes": 927
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "build",
+      "exitCode": 0,
+      "durationSeconds": 147.002,
+      "log": {
+        "path": ".relayer/merge-review-build.txt",
+        "sha256": "ba3b250598477b9fccfce1020d831f58d65a728e817c695c9993a783be65dbdd",
+        "bytes": 2459
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "python-full",
+      "exitCode": 0,
+      "durationSeconds": 8.279,
+      "log": {
+        "path": ".relayer/merge-review-python-full.txt",
+        "sha256": "35c48d0ff7ff9b31ab01aa953d54f567a0730eaf661f7e76f9d65faa554d47ae",
+        "bytes": 198
+      },
+      "innerOutcome": {
+        "testsPassed": 99
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "native-exact-isolation",
+      "command": [
+        "cargo",
+        "test",
+        "-p",
+        "relayer-app-server",
+        "--lib",
+        "--",
+        "--exact",
+        "api::environment::tests::thread_environment_inspects_saved_checkout_and_rejects_foreign_project",
+        "api::threads::completion_traces::native_invocation_argument_bound_preserves_exportable_calls_and_uncalled_definitions",
+        "environment::tests::global_ignore_submodules_all_preserves_diff_semantics_without_helpers",
+        "environment::tests::initialized_gitlink_fails_closed_before_submodule_helpers_can_run",
+        "environment::tests::inspection_never_lazy_fetches_missing_objects_through_ext_transport",
+        "environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees",
+        "environment::tests::shadow_worktree_diff_supports_sha256_split_indexes",
+        "environment::tests::transforming_filter_fails_closed_without_executing_the_helper",
+        "environment::tests::unrepresentable_local_filter_driver_fails_closed_before_diff",
+        "--test-threads=1"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 28.168,
+      "log": {
+        "path": ".relayer/merge-review-native-isolation.txt",
+        "sha256": "af7dcdf89852c2ab43fa41dd36bc139abe430b4cfc00550e6035f034ec23ecae",
+        "bytes": 2116
+      },
+      "qualification": "Exact nine cases, unchanged assertions and bounds, one native test thread. Does not certify the original concurrent full command.",
+      "status": "passed"
+    },
+    {
+      "gate": "ci-mapping",
+      "command": [
+        "node",
+        "node_modules/vitest/vitest.mjs",
+        "run",
+        "--maxWorkers=1",
+        "test/ci-affected-plan.test.mjs",
+        "test/public-share-viewer-artifact.test.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 44.574,
+      "log": {
+        "path": ".relayer/merge-review-ci-mapping.txt",
+        "sha256": "09e023f49f13076cda88cccbd311cba122e49fb0b3bae7504d28bedda10a3e81",
+        "bytes": 1283
+      },
+      "innerOutcome": {
+        "filesPassed": 2,
+        "testsPassed": 93
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "eval-web-final",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 164.581,
+      "log": {
+        "path": ".relayer/merge-review-eval-web-final.txt",
+        "sha256": "34e139a2d07f9ac263b2d91cfdda0579392a1f65ede063d6087b900853cb1b34",
+        "bytes": 4784
+      },
+      "qualification": "Failed after calibration pass: ordinary actor Input had no accepted PUT. Dispatch-confirmed fixture stage progression was later repaired and independently red/green checked.",
+      "completedChapters": [
+        "interrupted startup: pending native child terminated and profile lock released",
+        "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+        "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+        "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+        "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+        "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+        "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+        "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+        "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)"
+      ],
+      "status": "failed"
+    },
+    {
+      "gate": "eval-web-qualified",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 143.408,
+      "log": {
+        "path": ".relayer/merge-review-eval-web-qualified.txt",
+        "sha256": "7e337d6d6f6b58a004cd67c58e20b30b8f05065d97013fa9e00c46aa5d83fb4d",
+        "bytes": 3689
+      },
+      "qualification": "Failed before comparison creation completed; later fixture barriers observe actual rendered set, form replacement and baseline score.",
+      "completedChapters": [
+        "interrupted startup: pending native child terminated and profile lock released",
+        "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+        "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+        "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+        "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+        "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+        "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+        "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)"
+      ],
+      "status": "failed"
+    },
+    {
+      "gate": "eval-web-complete",
+      "command": [
+        "npm",
+        "run",
+        "test:eval-web"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 191.487,
+      "log": {
+        "path": ".relayer/merge-review-eval-web-complete.txt",
+        "sha256": "22dd025a62874535c4ef435d2f9bd13e37fb58de9804c070e023e34d092ed1e8",
+        "bytes": 5212
+      },
+      "completedChapters": [
+        "interrupted startup: pending native child terminated and profile lock released",
+        "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+        "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+        "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+        "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+        "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+        "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+        "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+        "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+        "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+        "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+        "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+        "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+        "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+      ],
+      "status": "passed"
+    },
+    {
+      "gate": "build-qualified",
+      "command": [
+        "npm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 41.443,
+      "log": {
+        "path": ".relayer/merge-review-build-qualified.txt",
+        "sha256": "5040aba9657037cf3c5a2a345fca9e14ce7f8788a6f355a3d07092bb8f196f45",
+        "bytes": 2040
+      },
+      "status": "passed"
+    },
+    {
+      "gate": "readability",
+      "command": [
+        "npm",
+        "run",
+        "prd:check-readability"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 0.947,
+      "log": {
+        "path": ".relayer/merge-review-readability.txt",
+        "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+        "bytes": 166
+      },
+      "status": "passed"
+    }
+  ],
+  "warmChecks": [
+    {
+      "gate": "js-warm",
+      "status": "passed",
+      "testsPassed": 183,
+      "scope": "full node-detail, actor and Codex prompt files",
+      "log": {
+        "path": ".relayer/merge-review-js-warm.txt",
+        "sha256": "e2bb248991b42fba1308e6ca39bafecc2dcf19c8080556085c6bade1fe2e4e01",
+        "bytes": 262
+      }
+    },
+    {
+      "gate": "python-live-green",
+      "status": "passed",
+      "testsPassed": 4,
+      "scope": "real HTTP/cancellation/deadline/cursor transport cases",
+      "log": {
+        "path": ".relayer/merge-review-python-live-green.txt",
+        "sha256": "bf6d40476e7601c3217a3cd8ce8e8611fdd311a9f76d20ba9fb817f4d788a0a4",
+        "bytes": 102
+      }
+    },
+    {
+      "gate": "core-warm",
+      "status": "passed",
+      "testsPassed": 3,
+      "scope": "atomic snapshot, real legacy migration, missing authority/invalid eligible-root epochs",
+      "log": {
+        "path": ".relayer/merge-review-core-warm.txt",
+        "sha256": "6dfed8a787d0bec73d046280e601564a82767c2be4d0ec7fa8c739b2c1ead590",
+        "bytes": 778
+      }
+    },
+    {
+      "gate": "product-projection-warm",
+      "status": "passed",
+      "testsPassed": 1,
+      "scope": "real Product route: one read, Delivered historical/current, known legacy ordinary fallback, unavailable unknown errors",
+      "log": {
+        "path": ".relayer/merge-review-product-projection-warm.txt",
+        "sha256": "a77a4e4850a6c97cc7169c04a765217121499c80c98019e4ef5c4619d5ccd022",
+        "bytes": 1780
+      }
+    }
+  ],
+  "retainedIntermediateAttempts": [
+    {
+      "attempt": "renderer fixtures before repair",
+      "qualification": "Missing mandatory committedAt and authored mount in intermediate fixtures; corrected fixtures passed with ordinary restoration assertions retained.",
+      "logs": [
+        {
+          "path": ".relayer/merge-review-renderer-warm.txt",
+          "sha256": "e19a2fb92fce8479cf2bc6aad70bc11177655d2059dfeb6f951c1efcc9d65baf",
+          "bytes": 2477
+        },
+        {
+          "path": ".relayer/merge-review-renderer-diagnostic.txt",
+          "sha256": "b9b6be63bc3304e6c12d3fa623a31b3fc2129b8eb45c84ce7a4d24a33cb5b3b8",
+          "bytes": 23361
+        }
+      ]
+    },
+    {
+      "attempt": "private full-web diagnostic",
+      "result": {
+        "gate": "web-diagnostic",
+        "command": [
+          "node",
+          ".relayer/merge-review-eval-diagnostic.mjs"
+        ],
+        "exitCode": 1,
+        "durationSeconds": 151.976,
+        "log": ".relayer/merge-review-eval-diagnostic.txt",
+        "qualification": "Private diagnostic copy adds failure capture only; does not certify unmodified canonical runner."
+      },
+      "log": {
+        "path": ".relayer/merge-review-eval-diagnostic.txt",
+        "sha256": "1687f74a19ec5c95e4ae901f652fd3e97a167d059079717bdc161b9d4e2f36b8",
+        "bytes": 4302
+      },
+      "diagnosticSource": {
+        "path": ".relayer/merge-review-eval-diagnostic.mjs",
+        "sha256": "8b9f51120c031e13bffaccbf8cac58511e4e1b393670c9baf316d4b578d88030",
+        "bytes": 121652
+      },
+      "qualification": "Only failure capture and same-depth helper import redirect added; actual failure was mismatched actor revision, before capture branch. Not canonical passing proof."
+    },
+    {
+      "attempt": "intermediate zero-budget polling",
+      "qualification": "A tool-session run observed two initial GETs. Explicit zero-budget return restored one attempt; final four live-answer tests passed. No raw file receipt retained for that intermediate tool-session output."
+    }
+  ],
+  "hostedCI": "Full-portfolio exact-head check and merge-freshness-status remain required after commit/push. This immutable local record does not pre-certify them.",
+  "inputProofDiagnostics": {
+    "isolatedStartupFailure": {
+      "gate": "input-diagnostic",
+      "command": [
+        "node",
+        ".relayer/merge-review-input-diagnostic.mjs"
+      ],
+      "exitCode": 1,
+      "durationSeconds": 20.681,
+      "log": {
+        "path": ".relayer/merge-review-input-diagnostic.txt",
+        "sha256": "42085731a5d11a61992fa6b4e2dff43062b3dff669edb2b13f71c4a18908115a",
+        "bytes": 566
+      },
+      "qualification": "Isolated canonical chapter setup and unchanged ordinary/current assertions; added private state capture. Not complete canonical portfolio.",
+      "source": {
+        "path": ".relayer/merge-review-input-diagnostic-before-startup.mjs",
+        "sha256": "98cf02f4db22734e091a1cd67c2ea636fecfad4e5dd2ef9cb05b9d3fbdafd38e",
+        "bytes": 100286
+      }
+    },
+    "isolatedAcceptedInputAndCurrent": {
+      "gate": "input-diagnostic-v2",
+      "command": [
+        "node",
+        ".relayer/merge-review-input-diagnostic.mjs"
+      ],
+      "exitCode": 0,
+      "durationSeconds": 33.745,
+      "log": {
+        "path": ".relayer/merge-review-input-diagnostic-v2.txt",
+        "sha256": "0f2b238916217b06a135e4d7db4a6d05423e761ea2df74455fd88140056aa17b",
+        "bytes": 1016
+      },
+      "qualification": "Isolated canonical chapter and unchanged assertions; private state capture and explicit60s diagnostic startup allowance. No standard startup or complete canonical portfolio proof.",
+      "source": {
+        "path": ".relayer/merge-review-input-diagnostic.mjs",
+        "sha256": "660d5761d86b9a214c99569a7fdde445f1563a79d963062432ba6661d3de2056",
+        "bytes": 100312
+      },
+      "state": {
+        "path": ".relayer/merge-review-input-diagnostic-state.json",
+        "sha256": "483be9e7da34f6030380ac08604216a3109a2eac2caa855aa62179f0543ff138",
+        "bytes": 65518
+      }
+    },
+    "forcedRefusalRedGreen": [
+      {
+        "kind": "red",
+        "command": [
+          "node",
+          ".relayer/merge-review-input-refusal-red.mjs"
+        ],
+        "exitCode": 1,
+        "durationSeconds": 13.086,
+        "log": {
+          "path": ".relayer/merge-review-input-refusal-red.txt",
+          "sha256": "d756b49a6928f41e600180e88d22b695caf0748b60ee33ef1d55c9e9c1bebca0",
+          "bytes": 754
+        },
+        "diagnosticSourceSha256": "28910b3b735f0f44e6d22e21296302ae6e1a21b9792c68cf61a0e2886b1bbfe5",
+        "outcome": {
+          "status": "completed",
+          "completions": 2,
+          "acceptedInputPut": false,
+          "noteInConversation": false,
+          "certifiedRefusals": 1
+        },
+        "source": {
+          "path": ".relayer/merge-review-input-refusal-red.mjs",
+          "sha256": "28910b3b735f0f44e6d22e21296302ae6e1a21b9792c68cf61a0e2886b1bbfe5",
+          "bytes": 100712
+        },
+        "state": {
+          "path": ".relayer/merge-review-input-refusal-red-state.json",
+          "sha256": "da235459ce444fa7b77da09e1474002a0ed81877189a501128b7feda4f6ed612",
+          "bytes": 64468
+        }
+      },
+      {
+        "kind": "green",
+        "command": [
+          "node",
+          ".relayer/merge-review-input-refusal-green.mjs"
+        ],
+        "exitCode": 0,
+        "durationSeconds": 12.894,
+        "log": {
+          "path": ".relayer/merge-review-input-refusal-green.txt",
+          "sha256": "11534ecc51fc116f77b1f07d36ce42c911be9143baefb41852a31867d56a758d",
+          "bytes": 132
+        },
+        "diagnosticSourceSha256": "875f72d4593f6e258cbb7e481941a7f8940c5287cfbc4a16e99378e09e11046e",
+        "outcome": {
+          "status": "completed",
+          "completions": 2,
+          "acceptedInputPut": true,
+          "noteInConversation": true,
+          "certifiedRefusals": 1
+        },
+        "source": {
+          "path": ".relayer/merge-review-input-refusal-green.mjs",
+          "sha256": "875f72d4593f6e258cbb7e481941a7f8940c5287cfbc4a16e99378e09e11046e",
+          "bytes": 101204
+        },
+        "state": {
+          "path": ".relayer/merge-review-input-refusal-green-state.json",
+          "sha256": "417c5abefc0c28b4b6aa17d150ef73e507229fbc868de9f2faa1e1f0e1e31b13",
+          "bytes": 72437
+        }
+      }
+    ],
+    "qualification": "The isolated/refusal fixtures use a diagnostic60s startup allowance. Red/green proves the scripted-stage defect under one certified refusal, not the original intermittent failure cause or standard startup."
+  },
+  "limits": [
+    "Failed commands remain failed; isolation does not establish failure causes or concurrent portfolio timing.",
+    "Known non-author-eligible roots are non-live; missing authority and invalid eligible-root epochs remain errors. No detection of every constraint-bypassing corruption combination is claimed.",
+    "Python waiting bounds caller and remaining socket inactivity budget; it does not provide true thread cancellation or a strict DNS/trickling total wall-clock limit.",
+    "No new paid model confirmation for this follow-up. The prior 02e05513 live confirmation and its incomplete task endpoint remain historical.",
+    "No statistical, task-attainment, calibrated graph-quality, standard startup/TTFG, signed or release-readiness claim.",
+    "Earlier full-check/macOS Homebrew timing failures and source qualifications remain in merge-ready-20261014.md; no old failed command is relabeled green."
+  ]
+}

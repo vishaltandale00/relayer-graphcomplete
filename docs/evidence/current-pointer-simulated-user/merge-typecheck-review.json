@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "sourceOverlay": "merge-typecheck-source.json",
+  "sourceDigest": "383056b9891f8082836b66222e8041c0d46bf81848d18e5ae7646f456958e617",
+  "sourceEvidenceDigest": "0347f09fde4e8423d77efdcf4cff57a0177d466ed3d3e843def24b8872008042",
+  "sourceEvidencePaths": 91,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "additionalEvidence": [
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-typecheck-source.json",
+      "sha256": "017fb328211a7e50e343d9a8c9d2c23fea16f82eb0ebd4f0cc64e7879da4aa66"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-typecheck-verification.json",
+      "sha256": "6588a55836388e80b1976a84d9cc574f39d2eeba3a2903080de10ae57cdced3d"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-typecheck-20261014.md",
+      "sha256": "50a4ccedb2423c356b8adbb33d17f20e61f2de77c611cbc205da2941886cb9ca"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "b7a17aaf11f7c557ddcd01815bdc3e274c7ab24501f9eede5a8b87d27b86655c"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "36b989af2f4f83458b4ff90cd194f4189d8d6ace8b97b54e5516fc49c8891472"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "fb46f5fbcf6daf1debf73fcf965c335ba700a6ef1763861af8bf972436d3ca2a"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "02d3cf2384b0908f624ff20dcc3513212f16a37b20c895676d94c06831584aa3"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/README.md",
+      "sha256": "6942bd0a3b10ee7ac2ac06efe660987e8a52a5cb760c3b58a02fcf01401f560b"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "7ff5ff0385f6423cff30e8f0d3adea25977c2f8cca4329614637fe1700689391"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "172560df0845c45476fad0bdb8f7ceafdc31cb8598276c9be31ca79a04853d5f"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+    }
+  ],
+  "reviews": [
+    {
+      "reviewer": "actor_renderer_review",
+      "sourceDigest": "383056b9891f8082836b66222e8041c0d46bf81848d18e5ae7646f456958e617",
+      "scope": "Exact annotation capture/profile/result/README and CI mapping, fallback fixture; all79 source hashes reconstructed; six images independently viewed and actual receipt bindings checked; final98-case gate and actual parent/social outcomes.",
+      "verdict": "PASS",
+      "unresolvedFindings": [],
+      "limits": "Preserves startup false/exit0 and intermediate profile cleanup failures. Does not certify a whole-PR green suite, model quality or release."
+    },
+    {
+      "reviewer": "transport_prompt_review",
+      "baseCommit": "83c636cf7b3ef63b4c80aa5c61bd5ac4dbe7f123",
+      "reviewedFile": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "736a01f3c5e1bf359fd6cd2b9b65c1e51b5721fa6a623773803916e0bba15642",
+      "scope": "Clone/delete omits invalid JSON property, selects real fallback path without mutating shared config; terminal assertions retained.",
+      "verdict": "PASS for source; subsequent focused and workspace execution recorded separately",
+      "unresolvedFindings": []
+    },
+    {
+      "reviewer": "design_authority_review",
+      "sourceDigest": "383056b9891f8082836b66222e8041c0d46bf81848d18e5ae7646f456958e617",
+      "sourceEvidenceDigest": "0347f09fde4e8423d77efdcf4cff57a0177d466ed3d3e843def24b8872008042",
+      "scope": "Reconstructed79 source paths and91 source/evidence paths;42 referenced artifact/log hashes; promise/seam mapping, source equivalence, actual gates and retained failures. No additional full local check required solely for later mapped capture/planner edits; fresh gates observe those changes.",
+      "verdict": "PASS for overlay/mapping and qualified evidence",
+      "unresolvedFindings": [],
+      "limits": "Attempted whole local check remains failed; its unknown failures and standard startup are not qualified. Fresh exact-head full-portfolio hosted CI/freshness required; no model-quality or release certification."
+    }
+  ],
+  "qualification": "Fresh exact-head hosted check/freshness required. Prior83 whole-source assertions remain historical and reusable only for unchanged production/relevant proof closures. No new clean-local-suite, quality, standard startup or release claim."
+}

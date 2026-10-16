@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "sourceOverlay": "merge-review-followup-source.json",
+  "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+  "sourceEvidenceDigest": "709cb5a13ba18a0ab1204cb8def31de4d2db309f38396b17f6eb77d8a8af0f3a",
+  "sourceEvidencePaths": 102,
+  "additionalEvidence": [
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/README.md",
+      "sha256": "7d546395a9334348d39d446f720e841d279387924e4632a25589ffea2178463d"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-review-followup-source.json",
+      "sha256": "ac7a34637cc2adb1093af06a52eea7a160f71f8997d4ad6ff7cea9819026a8cb"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-review-followup-verification.json",
+      "sha256": "7550968486edb1d740f310ce72e46d217b446b10119d8c2c11d8ecf98c4e5ee2"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-review-followup-20261015.md",
+      "sha256": "035f0df70710ae71da114d2b3f5e51a9b6756095743675c36f8e6ff6f3dd4fa2"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "ad63964fee36a0f05735fcca6313410c09854d227aed2a3a9553a49736721845"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "7004d96179eb6fde4228e331a152018ef1a6ce545af64925a1bccc875f328fa1"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "e9cc5e70176011c497ca8b0e9db601b324dd95c2545e1c7dc6c3bbf80a6ea787"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "31a824de100e8ec893abe256f5d35d3665e312b9e760a9a36235789ef4493cac"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "170d31be9d2475fb012f94aa6108d67c55a83c5a8cd7087bb49340b8fe7949f8"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "d68c1b2c39748cfe0e5a4b2bfd4e59ecf3ee254750a271d6ae0fd46df34002c1"
+    }
+  ],
+  "reviews": [
+    {
+      "reviewer": "actor_renderer_review",
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "sourceEvidenceDigest": "709cb5a13ba18a0ab1204cb8def31de4d2db309f38396b17f6eb77d8a8af0f3a",
+      "reviewedScope": "Guidance/error/root approval fixture, actual privacy-test subsumption, six capture visuals and source binding, completed heavy evidence/mapping consistency. Excludes own JS service/web-host/browser-dedup and native implementation.",
+      "verdict": "PASS within reviewed scope",
+      "unresolvedFindings": [],
+      "qualifications": [
+        "Local wholecheck remains FAILED. Complete Prime/Codex rerun passes149 after reviewed test-only correction; unchanged15-second depth bound remains failed locally and must pass normally in fresh hosted CI.",
+        "Source reuse is limited to unchanged executable closures across the explicit two-test-only delta. Native retains one presentation_changed_during_capture gap; authored none.",
+        "No paid/model-quality/performance/release certification. Fresh exact-headcheck/freshness and final review-thread read required before merge."
+      ],
+      "verificationSha256": "7550968486edb1d740f310ce72e46d217b446b10119d8c2c11d8ecf98c4e5ee2"
+    },
+    {
+      "reviewer": "transport_prompt_review",
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "sourceEvidenceDigest": "709cb5a13ba18a0ab1204cb8def31de4d2db309f38396b17f6eb77d8a8af0f3a",
+      "reviewedScope": "Independent13-path native attempt/epoch binding, additive migration, receipt cursor gateway, checkpoint mapping and rebuilt canonical browser evidence. Excludes own guidance/renderer/privacy-test implementation.",
+      "verdict": "PASS within reviewed scope",
+      "unresolvedFindings": [],
+      "qualifications": [
+        "Local wholecheck remains FAILED. Complete Prime/Codex rerun passes149 after reviewed test-only correction; unchanged15-second depth bound remains failed locally and must pass normally in fresh hosted CI.",
+        "Source reuse is limited to unchanged executable closures across the explicit two-test-only delta. Native retains one presentation_changed_during_capture gap; authored none.",
+        "No paid/model-quality/performance/release certification. Fresh exact-headcheck/freshness and final review-thread read required before merge."
+      ],
+      "verificationSha256": "7550968486edb1d740f310ce72e46d217b446b10119d8c2c11d8ecf98c4e5ee2"
+    },
+    {
+      "reviewer": "design_authority_review",
+      "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+      "sourceEvidenceDigest": "709cb5a13ba18a0ab1204cb8def31de4d2db309f38396b17f6eb77d8a8af0f3a",
+      "reviewedScope": "Independent service/actor implementation, privacy-test subsumption, checkpoint mapping, artifact hashes and actual completed gate outcomes; own Rust implementation excluded.",
+      "verdict": "PASS within reviewed scope",
+      "unresolvedFindings": [],
+      "qualifications": [
+        "Local wholecheck remains FAILED. Complete Prime/Codex rerun passes149 after reviewed test-only correction; unchanged15-second depth bound remains failed locally and must pass normally in fresh hosted CI.",
+        "Source reuse is limited to unchanged executable closures across the explicit two-test-only delta. Native retains one presentation_changed_during_capture gap; authored none.",
+        "No paid/model-quality/performance/release certification. Fresh exact-headcheck/freshness and final review-thread read required before merge."
+      ],
+      "verificationSha256": "7550968486edb1d740f310ce72e46d217b446b10119d8c2c11d8ecf98c4e5ee2"
+    }
+  ],
+  "qualification": "Review file excluded from its own digest. Reviewed source/evidence bytes are immutable; later changes invalidate these assertions. Historical reports retain original snapshot identities."
+}

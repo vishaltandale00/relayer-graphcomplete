@@ -289,8 +289,8 @@ it("pins historical v2 through a promotion during discovery, while explicit v8 e
   const revised = await f.start(next.id);
   expect(revised.actorSetup).toEqual(next);
   expect(old.behaviorContract.actionSchema).not.toEqual(next.behaviorContract.actionSchema);
-  expect(f.calls.at(-1).config.promptVersion).toBe("task-actor-v8");
-  expect(next.behaviorContract.observationContract).toEqual({ id: "task-actor-observation-v2", optionObservation: "opened-native-select-accessibility" });
+  expect(f.calls.at(-1).config.promptVersion).toBe("task-actor-v9");
+  expect(next.behaviorContract.observationContract).toEqual({ id: "task-actor-observation-v3", optionObservation: "opened-native-select-accessibility", currentObservation: "visible-current-during-execution", currentCaptureLimit: "2*maxActions+1", currentActions: "live-question-controls-and-navigation" });
   expect(f.calls.filter(call => "browserObservationContract" in call).at(-1).browserObservationContract).toEqual(next.behaviorContract.observationContract);
   expect(f.calls.at(-1).prompt).toContain("Never guess an option or use a hidden value");
   expect(f.calls.at(-1).outputSchema).toEqual(next.behaviorContract.actionSchema);

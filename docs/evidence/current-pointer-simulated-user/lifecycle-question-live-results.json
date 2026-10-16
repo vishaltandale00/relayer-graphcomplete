@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "case": "interactive.everyday.europe-trip",
+  "catalogCommit": "2ae3ff3a24ea74d7f73fab5ebd5304e7ba49ffe4",
+  "baseCommit": "45a9ba05d4192f9d14cd5338ac543a556be9f6af",
+  "sourceDigest": "2dd0f7bd8a9170b4195c41cc8ea4c23d77eaf231598d148f123bd606d381ca86",
+  "taskId": "human-532ad75e-fad9-4a92-acb1-511fc7e38907",
+  "candidate": "gpt-6-luna",
+  "harnessRevision": 17,
+  "actor": "gpt-5.6-luna",
+  "actorSetup": "setup-98dee801-7d74-4071-81b5-3b4190d3cf4c",
+  "maxCandidateCompletions": 3,
+  "candidateCompletions": 1,
+  "sessionStatus": "completed",
+  "termination": "satisfied",
+  "canonical": {
+    "root": 40,
+    "history": [
+      {
+        "revision": 0,
+        "transition": "initial",
+        "layer": null,
+        "lifecycle": "active"
+      },
+      {
+        "revision": 1,
+        "transition": "advance",
+        "layer": 17,
+        "lifecycle": "active"
+      },
+      {
+        "revision": 2,
+        "transition": "return",
+        "layer": 17,
+        "lifecycle": "succeeded"
+      }
+    ],
+    "acceptedInputActions": 1,
+    "liveAnswerReceipts": 0
+  },
+  "actorCompletedActions": 3,
+  "actorErrors": [],
+  "actorFailedActions": [
+    {
+      "at": "2026-10-14T17:06:47.996Z",
+      "category": "stale_control"
+    }
+  ],
+  "workingObservations": 2,
+  "actorSatisfaction": 2,
+  "actorEndpointStatus": "incomplete",
+  "completionJudgeVerdict": "incomplete",
+  "frozenExportSha256": "sha256:52ed6a9a89247b7129b741dd860c8438dfe7cd6b74e0261f99edd3b9f7550b55",
+  "exportFileSha256": "7565a63c5a8767ea5d56f1ac9b6518a0f16620ba09fcbd264f483a7f8daf6920",
+  "native": [
+    {
+      "file": "rollout-2026-10-14T13-06-21-01a13b61-16bb-7e53-ad04-5df376f067ba.jsonl",
+      "sha256": "a40955889037b73c71cb3c957d445aca23c6318dd64b361c5dbb88123e47c0dc",
+      "toolCalls": 5,
+      "toolOutputs": 5,
+      "answerReadCalls": [
+        {
+          "at": "2026-10-14T17:06:42.487Z",
+          "callId": "call_96351a474b4d4cf8a2cd5bd42e38d4fc"
+        }
+      ],
+      "observedFailureSignals": [
+        {
+          "at": "2026-10-14T17:06:35.029Z",
+          "callId": "call_770a44a29a5c4808879f9ee7cc70fa2c",
+          "signals": {
+            "detail_template_nested": 2,
+            "native_exception": 1
+          }
+        }
+      ],
+      "newGuidanceDelivered": true
+    }
+  ],
+  "manualAuthoringFailureOutputs": 1,
+  "manualAcceptedNodeRejections": 0,
+  "manualLocalAuthoringFailures": [
+    {
+      "code": "detail_template_nested",
+      "failureAt": "2026-10-14T17:06:35.029Z",
+      "repairSucceededAt": "2026-10-14T17:06:38.393Z"
+    }
+  ],
+  "candidateLiveAnswerReads": {
+    "getLiveAnswers": 1,
+    "waitForLiveAnswers": 1,
+    "waitTimeoutMs": 1000,
+    "returnedAnswers": 0
+  },
+  "timing": {
+    "successfulAdvanceToolOutputAt": "2026-10-14T17:06:38.393Z",
+    "emptyReadAndWaitOutputAt": "2026-10-14T17:06:43.630Z",
+    "actorFillCompletedAt": "2026-10-14T17:06:43.690Z",
+    "submitCallAt": "2026-10-14T17:06:45.673Z",
+    "submitSuccessOutputAt": "2026-10-14T17:06:45.921Z",
+    "actorAnswerClickIntentAt": "2026-10-14T17:06:47.925Z",
+    "actorAnswerClickRejectedAt": "2026-10-14T17:06:47.996Z",
+    "ordinaryInputDraftCommittedAt": "2026-10-14T17:06:53.922Z"
+  },
+  "limits": [
+    "Single exploratory run; no statistical or causal error-rate claim.",
+    "One visible authoring failure output, counted once despite two detail_template_nested strings. All five native outputs manually inspected; no exhaustive telemetry claim.",
+    "The Answer click followed Return and was refused as stale_control; ordinary input-draft commitment was not live Answer delivery or ordinary Send.",
+    "No live receipt existed to consume or incorporate; task endpoint remains incomplete.",
+    "The same local 60-second startup allowance was retained; standard startup/latency is not certified.",
+    "Export frozen before owned host shutdown; post-shutdown mode=ro SQLite read includes WAL and confirms retained Current/Input."
+  ]
+}

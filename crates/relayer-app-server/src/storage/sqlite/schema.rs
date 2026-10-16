@@ -212,6 +212,7 @@ const INTERACTION_ATTEMPT_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("execution_lease_id", "TEXT", false, 0),
     ("execution_lease_reconciled_at", "TEXT", false, 0),
     ("native_wait_ended_at", "TEXT", false, 0),
+    ("live_answer_authority_epoch", "INTEGER", false, 0),
 ];
 const ACTION_INVOCATION_COLUMNS: &[(&str, &str, bool, i64)] = &[
     ("source_interaction_id", "INTEGER", true, 1),

@@ -6,6 +6,7 @@ use serde_json::Value;
 
 pub(crate) struct BeginInteractionAttempt<'a> {
     pub(crate) interaction_id: InteractionId,
+    pub(crate) live_answer_authority_epoch: Option<u64>,
     pub(crate) attempt_admission_id: String,
     pub(crate) harness_name: &'a str,
     pub(crate) route: &'a ExecutionModelSelection,
