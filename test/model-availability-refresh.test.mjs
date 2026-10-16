@@ -58,7 +58,7 @@ async function rendererFixture() {
     defaults: { harnessId: "codex-basic", providerId: "personal", familyId: 1 },
     harnesses: [{ id: "codex-basic", label: "Codex", available: false, unavailableReason: { code: "harness_readiness_pending", message: "Pending" }, compatibleProviderIds: ["personal", "work"] }],
     providers: ["personal", "work"].map((id) => ({ id, label: id, connected: true, models: [{ id: "work-model", label: "Model", available: true, visible: true }] })),
-    families: ["personal", "work"].map((providerId, index) => ({ id: index + 1, kind: "system", name: providerId, enabled: true, position: index, members: [{ providerId, modelId: "work-model", position: 0 }] })),
+    families: ["personal", "work"].map((providerId, index) => ({ id: index + 1, kind: "system", name: providerId, enabled: true, position: index, members: [{ providerId, modelId: "work-model", position: 0, roles: [{ name: "orchestrator" }] }] })),
   };
   const read = vi.fn(async () => ({ ok: true, json: async () => structuredClone(settings) }));
   vi.stubGlobal("fetch", vi.fn((url) => {

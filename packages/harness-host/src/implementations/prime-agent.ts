@@ -1,4 +1,5 @@
 import { GRAPH_SEARCH_TITLE_GUIDANCE } from "./graph-search-guidance.js";
+import { modelFamilyGuidance } from "./model-family-guidance.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { PrimeVisualAuthoring, submitPrimeLayer } from "./prime-visual-authoring.js";
 import { Buffer } from "node:buffer";
@@ -759,7 +760,7 @@ ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
 ${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${modelFamilyGuidance(context, "Prime", (route) => `${nativePrimeProviderId(route)}/${route.modelId}`)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
@@ -809,7 +810,7 @@ ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
 For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
 ${primeVisualExample(interaction.id)}
-${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${modelFamilyGuidance(context, "Prime", (route) => `${nativePrimeProviderId(route)}/${route.modelId}`)}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:

@@ -20,6 +20,22 @@ function text(node: Node): string {
   return children(node).map(text).join("");
 }
 
+// Marker exclusion applies to all authored channels, independently of whether
+// their content is a visible semantic heading. parse5 decodes text and attributes.
+function machineMarker(fragment: Node): boolean {
+  const pending: Node[] = [fragment];
+  let decodedText = "";
+  while (pending.length) {
+    const node = pending.pop()!;
+    if ("value" in node) decodedText += node.value;
+    if ("data" in node && node.data.includes("GRAPH_MEMORY_ANCHOR:")) return true;
+    if ("attrs" in node && node.attrs.some(attr => attr.value.includes("GRAPH_MEMORY_ANCHOR:"))) return true;
+    pending.push(...[...children(node)].reverse());
+    if ("tagName" in node && node.tagName === "template" && "content" in node) pending.push(node.content);
+  }
+  return decodedText.includes("GRAPH_MEMORY_ANCHOR:");
+}
+
 /** Static semantic headings from accepted HTML; CSS visibility still needs rendered review. */
 export function graphMemorySections(output: CompletionOutput, title: string) {
   let count = 0;
@@ -27,9 +43,10 @@ export function graphMemorySections(output: CompletionOutput, title: string) {
   const nodeTitles: string[] = [];
   for (const node of output.rootLayer.nodes) {
     let headings = 0;
+    hasMachineMarker ||= JSON.stringify(node.authoredDetail ?? {}).includes("GRAPH_MEMORY_ANCHOR:");
     for (const component of node.authoredDetail?.components ?? []) {
       const fragment = parseFragment(component.html);
-      hasMachineMarker ||= text(fragment).includes("GRAPH_MEMORY_ANCHOR:");
+      hasMachineMarker ||= machineMarker(fragment);
       const pending: Node[] = [fragment];
       while (pending.length) {
         const element = pending.pop()!;

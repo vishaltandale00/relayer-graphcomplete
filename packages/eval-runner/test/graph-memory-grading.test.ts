@@ -7,12 +7,12 @@ import { canonicalJson } from "../src/cases/catalog.js";
 
 const heading = "Freshness acknowledged";
 
-function output(nodeId: number, title: string, fragments: readonly string[] = []): CompletionOutput {
+function output(nodeId: number, title: string, fragments: readonly string[] = [], css = ""): CompletionOutput {
   const layerId = 100 + nodeId;
   const contentId = 1000 + nodeId;
   const content = {
     version: 1 as const,
-    components: fragments.map((html, order) => ({ id: `section-${order}`, order, html, css: "" })),
+    components: fragments.map((html, order) => ({ id: `section-${order}`, order, html, css })),
     assets: [], mounts: [],
   };
   return {
@@ -213,6 +213,27 @@ describe("graph-memory grading through the exported production seam", () => {
 });
 
 describe("graph-memory section recognition", () => {
+  it("rejects a machine marker in authored CSS", () => {
+    const first = output(1, "Overview", [`<h2>${heading}</h2>`], "/* GRAPH_MEMORY_ANCHOR:secret */");
+    expect(checkGraphMemoryFirstTurn(first).find(check => check.name === "natural-memory-search-target")?.passed).toBe(false);
+  });
+  it.each([
+    '<span hidden>GRAPH_MEMORY_ANCHOR:secret</span>',
+    '<span inert>GRAPH_MEMORY_ANCHOR:secret</span>',
+    '<span aria-hidden="true">GRAPH_MEMORY_ANCHOR:secret</span>',
+    '<script>GRAPH_MEMORY_ANCHOR:secret</script>',
+    '<style>/* GRAPH_MEMORY_ANCHOR:secret */</style>',
+    '<template>GRAPH_MEMORY_ANCHOR:secret</template>',
+    '<noscript>GRAPH_MEMORY_ANCHOR:secret</noscript>',
+    '<!-- GRAPH_MEMORY_ANCHOR:secret -->',
+    '<span hidden>GRAPH_MEMORY_&#65;NCHOR:secret</span>',
+    '<template>GRAPH_MEMORY_&#65;NCHOR:secret</template>',
+    '<span data-anchor="GRAPH_MEMORY_&#65;NCHOR:secret">Other</span>',
+  ])("rejects a machine marker independently of heading visibility: %s", fragment => {
+    const first = output(1, "Overview", [`<h2>${heading}</h2>${fragment}`]);
+    expect(checkGraphMemoryFirstTurn(first).find(check => check.name === "natural-memory-search-target")?.passed).toBe(false);
+  });
+
   it.each([
     { title: heading, fragments: [], accepted: true, name: "legacy Node title" },
     { title: heading, fragments: [`<h2>${heading}</h2>`], accepted: true, name: "title and its own section" },

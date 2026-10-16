@@ -419,6 +419,7 @@ mod tests {
         let (store, _directory) = store().await;
         let thread = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Thread",
                 project_id: None,
@@ -504,6 +505,7 @@ mod tests {
         let (store, _directory) = store().await;
         let thread = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Thread",
                 project_id: None,
@@ -570,6 +572,7 @@ mod tests {
         let (store, _directory) = store().await;
         let thread = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Thread",
                 project_id: None,
@@ -618,6 +621,7 @@ mod tests {
         let (store, _directory) = store().await;
         let thread = store
             .insert_thread_with_initial_interaction(crate::storage::NewThreadRecord {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: "Stop pending approval",
                 project_id: None,

@@ -2,7 +2,7 @@ import { abortable } from "./abortable.mjs";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
-import { createManagedRuntimeResolver, managedRecipeInstalled, managedRecipeSupported } from "../main/managed-runtimes/resolver.mjs";
+import { createManagedRuntimeResolver, managedRecipeInstalled, managedRecipeSupported, MANAGED_RUNTIME_ABSENT_CODES } from "../main/managed-runtimes/resolver.mjs";
 import { createProviderComposition } from "../main/providers/provider-composition.mjs";
 import { productionProviderAdapterRegistry, productionHarnessRuntimeDescriptor, productionProviderRuntimeDependencies } from "../main/providers/provider-adapter-registry.mjs";
 import { createProviderRuntimeStateRemover } from "../main/providers/provider-runtime-state.mjs";
@@ -225,9 +225,9 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
         } else await composition.modelCatalog.refresh("eval-openrouter", "explicit");
         const settings = await request("/api/model-settings");
         const name = "Eval Prime pinned models";
-        const members = profile.modelIds.map((modelId) => ({ providerId: "eval-openrouter", modelId }));
+        const members = profile.modelIds.map((modelId, index) => ({ providerId: "eval-openrouter", modelId, roles: index === 0 ? [{ name: "orchestrator" }] : [] }));
         const existing = settings.families?.find((family) => family.name === name);
-        if (existing && JSON.stringify(existing.members.map(({ providerId, modelId }) => ({ providerId, modelId }))) !== JSON.stringify(members)) {
+        if (existing && JSON.stringify(existing.members.map(({ providerId, modelId, roles }) => ({ providerId, modelId, roles }))) !== JSON.stringify(members)) {
           throw new Error("The existing Prime model family differs from the requested profile.");
         }
         const family = existing ?? await request("/api/model-families", { method: "POST", body: { name, enabled: true, members } });
@@ -272,20 +272,36 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
     async resolveCodexJudgeRuntime(config, { signal } = {}) {
       signal?.throwIfAborted();
       const settings = await request("/api/model-settings", { signal });
-      const connected = (await definitions.list()).filter((definition) => (
-        definition.adapterId === "codex-subscription" && definition.lifecycleState === "active" && definition.connected
+      const active = (await definitions.list()).filter((definition) => (
+        definition.adapterId === "codex-subscription" && definition.lifecycleState === "active"
       ));
+      const connected = active.filter(definition => definition.connected);
       const definition = connected.find(({ id }) => id === settings.defaults?.providerId)
         ?? connected.find(({ id }) => id === "codex")
-        ?? (connected.length === 1 ? connected[0] : null);
+        ?? (connected.length === 1 ? connected[0] : null)
+        // A cached discovery failure is not a native sign-out. Refresh a uniquely
+        // selected subscription under its execution lease before refusing it.
+        ?? (connected.length === 0 ? active.find(({ id }) => id === settings.defaults?.providerId)
+          ?? active.find(({ id }) => id === "codex") ?? (active.length === 1 ? active[0] : null) : null);
       if (!definition) throw Object.assign(new Error("Choose a connected Codex subscription as the default provider before running a Codex judge."), { code: "actor_authentication_required" });
-      const lease = await definitions.acquireExecution(definition.id);
+      let lease;
+      try { lease = await definitions.acquireExecution(definition.id); }
+      catch (error) {
+        if (MANAGED_RUNTIME_ABSENT_CODES.has(error?.code)) {
+          throw Object.assign(new Error("Connect a Codex subscription in Settings before running an evaluator."), { code: "actor_authentication_required", cause: error });
+        }
+        throw error;
+      }
       try {
+        // Discovery is read-only native account/model listing, never installation
+        // or inference. Keep this connection leased throughout freshness checks.
+        const snapshot = await composition.modelCatalog.refresh(definition.id, "pre-inference", { signal });
+        const current = (await definitions.list()).find(item => item.id === definition.id);
+        if (!current?.connected || current.lifecycleState !== "active") {
+          throw Object.assign(new Error("The selected Codex subscription is unavailable after native account discovery."), { code: "actor_authentication_required" });
+        }
         if (config !== undefined) {
-          // Discovery is read-only native model/list, never runtime installation or
-          // inference. Hold this connection's lease through discovery and resolution.
           const requested = typeof config === "string" ? { model: config } : config;
-          const snapshot = await abortable(signal, () => composition.modelCatalog.refresh(definition.id, "pre-inference"));
           const model = snapshot?.provider?.status === "available" && snapshot.models?.find((candidate) => (
             (candidate.id === requested?.model || candidate.executionModel === requested?.model)
             && candidate.visible !== false && candidate.availability === "available" && candidate.inputModalities?.includes("image")

@@ -5,7 +5,7 @@ use sqlx::Row;
 use crate::storage::sqlite::{contexts::ContextTable, nodes::NodeTable};
 use crate::{
     CompletionLifecycle, GraphError, GraphWriter, InputAction, InteractionInput, LayerId,
-    LiveAnswer, NodeId, PresentingInputOccurrence, SubmittedInputValue,
+    LiveAnswer, NodeId, PresentingInputOccurrence, ProjectId, SubmittedInputValue,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +45,8 @@ pub struct HistoricalInteractionInput {
 
 // Preparation may seal a child before its callable is published. Only its owning
 // parent may inspect that private call; other completions wait for publication.
+// A typed legacy lease may convert the shared action. Its immutable receipt
+// preserves the published instruction, including calls from reused occurrences.
 const VISIBLE_ORIGIN: &str = r#"
 (n.id=?2 OR NOT EXISTS(
     SELECT 1 FROM durable_invocations private_call
@@ -54,7 +56,13 @@ const VISIBLE_ORIGIN: &str = r#"
       AND NOT (private_action.state='accepted' AND private_parent.state='accepted'
         AND json_extract(private_call.action_snapshot,'$.sourceLayerId') IS private_action.source_layer_id
         AND json_extract(private_call.action_snapshot,'$.sourceNodeId') IS private_action.source_node_id
-        AND json_extract(private_call.action_snapshot,'$.instruction') IS private_action.interaction_text
+        AND (json_extract(private_call.action_snapshot,'$.instruction') IS private_action.interaction_text
+          OR (private_action.kind='navigate' AND private_action.relation='expand' AND private_action.interaction_text IS NULL
+            AND EXISTS(SELECT 1 FROM invoke_resolution_transitions resolved
+              JOIN nodes leased_result ON leased_result.id=resolved.interaction_node_id
+              WHERE resolved.action_id=private_action.id AND resolved.target_layer_id=private_action.target_layer_id
+                AND leased_result.leased_action_id=private_action.id
+                AND json_extract(private_call.action_snapshot,'$.instruction') IS leased_result.detail)))
         AND json_extract(private_call.action_snapshot,'$.label') IS private_action.label
         AND json_extract(private_call.action_snapshot,'$.icon') IS private_action.icon
         AND json_extract(private_call.action_snapshot,'$.description') IS private_action.description
@@ -92,13 +100,14 @@ impl GraphWriter {
             require_thread_interaction(
                 &mut transaction,
                 self.scope.thread_id.value(),
+                self.scope.project_id.map(ProjectId::value),
                 self.scope.root_node_id,
                 before,
             )
             .await?;
         }
-        let mut rows = sqlx::query(&format!("SELECT n.id,s.lifecycle,s.current_layer_id,COALESCE(s.final_layer_id,a.target_layer_id) AS returned_layer_id,v.parent_node_id,COALESCE(v.source_completion_id,n.lease_source_interaction_id) AS source_completion_id FROM nodes n LEFT JOIN completion_states s ON s.interaction_node_id=n.id LEFT JOIN completions c ON c.interaction_node_id=n.id LEFT JOIN actions a ON a.id=c.root_action_id LEFT JOIN durable_invocations v ON v.child_interaction_node_id=n.id WHERE n.thread_id=?1 AND n.kind='user-interaction' AND n.state='accepted' AND n.owner_interaction_id IS NULL AND n.id!=?2 AND (?3 IS NULL OR n.id<?3) AND {VISIBLE_ORIGIN} ORDER BY n.id DESC LIMIT ?4"))
-            .bind(self.scope.thread_id.value()).bind(self.scope.root_node_id.value()).bind(before.map(NodeId::value)).bind((limit + 1) as i64)
+        let mut rows = sqlx::query(&format!("SELECT n.id,s.lifecycle,s.current_layer_id,COALESCE(s.final_layer_id,a.target_layer_id) AS returned_layer_id,v.parent_node_id,COALESCE(v.source_completion_id,n.lease_source_interaction_id) AS source_completion_id FROM nodes n LEFT JOIN completion_states s ON s.interaction_node_id=n.id LEFT JOIN completions c ON c.interaction_node_id=n.id LEFT JOIN actions a ON a.id=c.root_action_id LEFT JOIN durable_invocations v ON v.child_interaction_node_id=n.id WHERE n.thread_id=?1 AND n.project_id IS ?5 AND n.kind='user-interaction' AND n.state='accepted' AND n.owner_interaction_id IS NULL AND n.id!=?2 AND (?3 IS NULL OR n.id<?3) AND {VISIBLE_ORIGIN} ORDER BY n.id DESC LIMIT ?4"))
+            .bind(self.scope.thread_id.value()).bind(self.scope.root_node_id.value()).bind(before.map(NodeId::value)).bind((limit + 1) as i64).bind(self.scope.project_id.map(ProjectId::value))
             .fetch_all(&mut *transaction).await?;
         let more = rows.len() > limit;
         rows.truncate(limit);
@@ -160,6 +169,7 @@ impl GraphWriter {
         require_thread_interaction(
             &mut transaction,
             self.scope.thread_id.value(),
+            self.scope.project_id.map(ProjectId::value),
             self.scope.root_node_id,
             target,
         )
@@ -206,11 +216,12 @@ impl GraphWriter {
 async fn require_thread_interaction(
     connection: &mut crate::storage::GraphConnection,
     thread_id: i64,
+    project_id: Option<i64>,
     caller: NodeId,
     target: NodeId,
 ) -> Result<(), GraphError> {
-    let valid: bool = sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM nodes n WHERE n.id=?1 AND n.thread_id=?3 AND n.kind='user-interaction' AND n.state='accepted' AND n.owner_interaction_id IS NULL AND {VISIBLE_ORIGIN})"))
-        .bind(target.value()).bind(caller.value()).bind(thread_id).fetch_one(connection).await?;
+    let valid: bool = sqlx::query_scalar(&format!("SELECT EXISTS(SELECT 1 FROM nodes n WHERE n.id=?1 AND n.thread_id=?3 AND n.project_id IS ?4 AND n.kind='user-interaction' AND n.state='accepted' AND n.owner_interaction_id IS NULL AND {VISIBLE_ORIGIN})"))
+        .bind(target.value()).bind(caller.value()).bind(thread_id).bind(project_id).fetch_one(connection).await?;
     if !valid {
         return Err(GraphError::NotFound(format!("thread interaction {target}")));
     }

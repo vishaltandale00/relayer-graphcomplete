@@ -20,13 +20,17 @@ it.each([
   [Object.assign(new Error("private-secret"), { status: 429 }), "rate_limit"],
   [Object.assign(new Error("private-secret"), { name: "TimeoutError" }), "timeout"],
   [Object.assign(new Error("private-secret"), { name: "private-secret" }), "runtime_failure"],
+  [Object.assign(new Error("private-secret"), { actorFailureStage: "execute", actorNativeDispatch: "unknown" }), "runtime_failure"],
+  [Object.assign(new Error("private-secret"), { actorFailureStage: "private-secret", actorNativeDispatch: "private-secret" }), "runtime_failure"],
 ])("records a safe actor runtime failure (%j)", async (error, category) => {
   const task = { id: "one", status: "active", actor: { timeoutMs: 1000, maxActions: 1 }, endpoint: "A plan", prepared: { plan: [{ prompts: ["Help me"] }] } };
   const events = [];
   const tasks = { get: () => task, actorEvent: async (_id, kind, data) => { events.push({ kind, ...data }); return { id: "event" }; }, interruptActor: async () => { task.status = "interrupted"; } };
   const service = new TaskActorService({ tasks, createActor: async () => { throw error; } });
   await service.run(task.id, {}, new AbortController().signal);
+  expect(events.find(event => event.kind === "actor_started")).toMatchObject({ nativeCallTimeoutMs: 300_000 });
   expect(events.find(event => event.kind === "actor_error")).toMatchObject({ category });
   expect(JSON.stringify(events)).not.toContain("private-secret");
+  if (error.actorFailureStage === "execute") expect(events.find(event => event.kind === "actor_error")).toMatchObject({ nativeStage: "execute", nativeDispatch: "unknown" });
   expect(task.status).toBe("interrupted");
 });

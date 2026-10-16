@@ -1,4 +1,5 @@
 import { GRAPH_SEARCH_TITLE_GUIDANCE } from "./graph-search-guidance.js";
+import { modelFamilyGuidance } from "./model-family-guidance.js";
 import { appOwnedNodeCommand, appOwnedNodeInstructions } from "./graph-authoring-command.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { type GraphCapability, type GraphNode } from "@relayer/graph-client";
@@ -590,7 +591,7 @@ ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 For Input plus Invoke, declare one InputActionObject field, then set the Invoke's inputActions: [field]. Mount these exact objects on the same Node. After submitting Node and Layer, graph.addAction(node, invoke) writes or recovers the referenced Input first and stores canonical IDs; no ID guessing or proximity inference. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes only its explicit bindings. New Invokes allow one call unless reusable: true is explicitly appropriate.
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${modelFamilyGuidance(context, "Codex")}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:
@@ -752,7 +753,7 @@ ${threadIconGuidance(context, "javascript")}
 ${CODEX_VISUAL_GUIDANCE}
 For Input plus Invoke, declare one InputActionObject field, then set the Invoke's inputActions: [field]. Mount these exact objects on the same Node. After submitting Node and Layer, graph.addAction(node, invoke) writes or recovers the referenced Input first and stores canonical IDs; no ID guessing or proximity inference. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes only its explicit bindings. New Invokes allow one call unless reusable: true is explicitly appropriate.
 ${CODEX_ASSET_GUIDANCE}
-${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
+${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_JS}${modelFamilyGuidance(context, nativeAgentLabel === "Claude" ? "Claude" : "Codex")}${includePersonalPresentation && context !== undefined ? personalPresentationPrompt(context) : ""}
 
 Current interaction node: ${interactionNode.id}
 Normalized interaction input:

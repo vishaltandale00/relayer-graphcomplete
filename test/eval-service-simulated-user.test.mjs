@@ -33,7 +33,7 @@ const repositoryRoot = resolve(import.meta.dirname, "..");
 const directories = [];
 const originalFetch = globalThis.fetch;
 
-it("carries the selected Eval model into every product interaction request", () => {
+it("carries only the selected Eval family into product interaction requests", () => {
   const selected = {
     familyId: 7,
     providerId: "codex",
@@ -43,8 +43,6 @@ it("carries the selected Eval model into every product interaction request", () 
   expect(evalModelSelectionRequest(selected)).toEqual({
     modelSelection: {
       familyId: 7,
-      providerId: "codex",
-      modelId: "gpt-5.6-sol",
     },
   });
   expect(evalModelSelectionRequest(null)).toEqual({});
@@ -171,7 +169,7 @@ describe("EvalService simulated-user result persistence", () => {
           defaults: { harnessId: "fixture-task-system", familyId: 7 },
           harnesses: [{ id: "fixture-task-system", available: true, settings: { model: "fixture-owned-model" } }],
           providers: [{ id: "openai", adapterId: "openai-api", connected: true, models: [{ id: "test-model", visible: true, available: true }] }],
-          families: [{ id: 7, enabled: true, position: 0, members: [{ position: 0, providerId: "openai", modelId: "test-model" }] }],
+          families: [{ id: 7, enabled: true, position: 0, members: [{ position: 0, providerId: "openai", modelId: "test-model", roles: [{ name: "orchestrator" }] }] }],
         });
       }
       if (path === "/api/threads" && options.method === "POST") {
@@ -242,12 +240,12 @@ describe("EvalService simulated-user result persistence", () => {
   it.each([
     ["codex-basic", "openrouter-work", "openai/gpt-6-luna"],
     ["claude-basic", "anthropic-work", "claude-sonnet-4-6"],
-  ])("uses the profile resolver for %s and pins its identity across followups", async (harnessId, providerId, modelId) => {
+  ])("uses the profile family for %s when its orchestrator changes between followups", async (harnessId, providerId, modelId) => {
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
     globalThis.fetch = product;
     const pinned = { familyId: 17, providerId, modelId };
-    const selectModel = vi.fn(async () => pinned);
+    const selectModel = vi.fn().mockResolvedValueOnce(pinned).mockResolvedValue({ ...pinned, modelId: "changed-orchestrator" });
     const service = await new EvalService({ stateFile, productSession: productSession(),
       configurationPaths: [join(repositoryRoot, "harnesses", `${harnessId}.yaml`)],
       selectModel, targetKey: "macos-arm64" }).open();
@@ -257,24 +255,24 @@ describe("EvalService simulated-user result persistence", () => {
     const bodies = product.mock.calls.filter(([url, options]) => options?.method === "POST"
       && /^\/api\/threads(?:\/[^/]+\/interactions)?$/.test(new URL(url).pathname))
       .map(([, options]) => JSON.parse(options.body));
-    expect(bodies.map(({ modelSelection }) => modelSelection)).toEqual([pinned, pinned]);
+    expect(bodies.map(({ modelSelection }) => modelSelection)).toEqual([{ familyId: pinned.familyId }, { familyId: pinned.familyId }]);
     expect(selectModel.mock.calls).toEqual([[harnessId], [harnessId]]);
   });
 
-  it("stops before a followup if profile model resolution changes identity", async () => {
+  it("stops before a followup if profile resolution changes family", async () => {
     const { stateFile } = await testPaths();
     const product = fakeAcceptedProduct();
     globalThis.fetch = product;
     const selectModel = vi.fn()
       .mockResolvedValueOnce({ familyId: 17, providerId: "openrouter-work", modelId: "first" })
-      .mockResolvedValueOnce({ familyId: 17, providerId: "openrouter-work", modelId: "second" });
+      .mockResolvedValueOnce({ familyId: 18, providerId: "openrouter-work", modelId: "second" });
     const service = await new EvalService({ stateFile, productSession: productSession(),
       configurationPaths: [join(repositoryRoot, "harnesses", "codex-basic.yaml")],
       selectModel, targetKey: "macos-arm64" }).open();
     const created = await service.createRun({ testCaseIds: ["empty-project.task-system.two-turn"],
       harnessConfigurationNames: ["codex-basic"], judgeConfigurationName: "deterministic-graph-contract" });
     const completed = await waitForCompletedRun(service, created.id);
-    expect(JSON.stringify(completed)).toContain("model selection changed between product turns");
+    expect(JSON.stringify(completed)).toContain("family selection changed between product turns");
     expect(product.mock.calls.filter(([url, options]) => options?.method === "POST"
       && /^\/api\/threads\/[^/]+\/interactions$/.test(new URL(url).pathname))).toHaveLength(0);
   });
@@ -285,7 +283,7 @@ describe("EvalService simulated-user result persistence", () => {
     const options = { stateFile, productSession: productSession(),
       configurationPaths: [join(repositoryRoot, "harnesses", "codex-basic.yaml")], targetKey: "macos-arm64",
       selectModel: vi.fn().mockResolvedValueOnce({ familyId: 17, providerId: "openrouter-work", modelId: "first" })
-        .mockResolvedValueOnce({ familyId: 17, providerId: "openrouter-work", modelId: "second" }),
+        .mockResolvedValueOnce({ familyId: 18, providerId: "openrouter-work", modelId: "second" }),
       candidateTraceExporter: async (_interactionId, directory) => {
         const bytes = Buffer.from(`${JSON.stringify({ schemaVersion: 1, interactionNodeId: 1, sequence: 1,
           method: "POST", path: "/api/graph/nodes", status: 422 })}\n`);
@@ -300,7 +298,7 @@ describe("EvalService simulated-user result persistence", () => {
       harnessConfigurationNames: ["codex-basic"], judgeConfigurationName: "deterministic-graph-contract" });
     const failed = await waitForCompletedRun(service, created.id);
     expect(failed.executions[0].status).toBe("error");
-    expect(JSON.stringify(failed)).toContain("model selection changed between product turns");
+    expect(JSON.stringify(failed)).toContain("family selection changed between product turns");
     await waitForPersistedRun(stateFile, created.id);
     const reopened = await new EvalService(options).open();
     const run = reopened.listRuns().find((run) => run.id === created.id);
@@ -342,7 +340,7 @@ describe("EvalService simulated-user result persistence", () => {
     });
     await waitForCompletedRun(service, created.id);
     const threadRequest = requests.find(({ parsed, options }) => parsed.pathname === "/api/threads" && options.method === "POST");
-    expect(JSON.parse(threadRequest.options.body).modelSelection).toEqual({ familyId: 7, providerId: "claude-work", modelId: "sonnet" });
+    expect(JSON.parse(threadRequest.options.body).modelSelection).toEqual({ familyId: 7 });
   });
 
   it("runs after deterministic checks and reloads the immutable completed artifact", async () => {
@@ -917,7 +915,7 @@ describe("EvalService simulated-user result persistence", () => {
       && /^\/api\/threads(?:\/[^/]+\/interactions)?$/.test(new URL(url).pathname))
       .map(([, options]) => JSON.parse(options.body));
     expect(bodies).toHaveLength(2);
-    expect(bodies.map(({ modelSelection }) => modelSelection)).toEqual([pinned, pinned]);
+    expect(bodies.map(({ modelSelection }) => modelSelection)).toEqual([{ familyId: pinned.familyId }, { familyId: pinned.familyId }]);
     expect(selectPrimeModel).toHaveBeenCalledTimes(2);
   });
 
@@ -1419,7 +1417,7 @@ function fakeAcceptedProduct() {
           id: 1,
           enabled: true,
           position: 0,
-          members: [{ position: 0, providerId: "openai", modelId: "test-model" }],
+          members: [{ position: 0, providerId: "openai", modelId: "test-model", roles: [{ name: "orchestrator" }] }],
         }],
       });
     }

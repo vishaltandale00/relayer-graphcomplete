@@ -311,6 +311,10 @@ async fn historical_supplemental_answers_page_without_changing_the_sealed_input(
 #[tokio::test]
 async fn prepared_children_stay_private_to_their_parent_until_the_callable_is_published() {
     let database = GraphDatabase::in_memory().await.unwrap();
+    database
+        .set_interaction_permissions_enabled(true)
+        .await
+        .unwrap();
     let root = database
         .create_interaction(None, ThreadId::new(1).unwrap(), "Investigate")
         .await
@@ -328,7 +332,7 @@ async fn prepared_children_stay_private_to_their_parent_until_the_callable_is_pu
         .unwrap();
     let layer: LayerDraft = serde_json::from_value(serde_json::json!({"clientKey":"layer","nodes":[node.id],"edges":[],"layout":{"version":1,"placements":[{"nodeId":node.id,"x":0.5,"y":0.5}],"edgeShape":"default"}})).unwrap();
     let layer = parent.submit_layer(&layer).await.unwrap();
-    let action: ActionDraft = serde_json::from_value(serde_json::json!({"clientKey":"invoke","sourceNodeId":node.id,"sourceLayerId":layer.id,"kind":"invoke","label":"Investigate","variant":"pill","interactionText":"Private draft instruction"})).unwrap();
+    let action: ActionDraft = serde_json::from_value(serde_json::json!({"clientKey":"invoke","sourceNodeId":node.id,"sourceLayerId":layer.id,"kind":"invoke","label":"Investigate","variant":"pill","interactionText":"Private draft instruction","reusable":true})).unwrap();
     let action = parent.add_action(&action).await.unwrap();
     let (child, _) = parent
         .prepare_recursive_invocation(action.id, "private")
@@ -418,4 +422,207 @@ async fn prepared_children_stay_private_to_their_parent_until_the_callable_is_pu
             .await
             .is_err()
     );
+    parent
+        .transition_current(
+            1,
+            "return",
+            CurrentTransition::Return { layer_id: layer.id },
+        )
+        .await
+        .unwrap();
+    let reuse = database
+        .create_interaction(None, ThreadId::new(1).unwrap(), "Reuse accepted callable")
+        .await
+        .unwrap();
+    let reuse_writer = database.writer_for_subgraph(reuse.id).await.unwrap();
+    let reused_layer = reuse_writer
+        .submit_layer(&LayerDraft {
+            client_key: "reused".into(),
+            ..layer_draft_for_history(node.id)
+        })
+        .await
+        .unwrap();
+    let response: ActionDraft = serde_json::from_value(serde_json::json!({"clientKey":"response","sourceNodeId":reuse.id,"kind":"navigate","relation":"expand","label":"Response","variant":"pill","targetLayerId":reused_layer.id})).unwrap();
+    reuse_writer.add_action(&response).await.unwrap();
+    reuse_writer.complete(reuse.id).await.unwrap();
+    let (reused_child, reused_call) = reuse_writer
+        .prepare_user_invocation_in_layer(action.id, "reused-call", &[], Some(reused_layer.id))
+        .await
+        .unwrap();
+    assert_eq!(reused_call.source_completion_id, reuse.id);
+    assert!(
+        reader
+            .historical_interaction_input(reused_child.id, 0)
+            .await
+            .is_ok()
+    );
+    // Retained control APIs can resolve a one-shot lease after a keyed call was
+    // prepared. The lease has a different child identity from the durable call.
+    for action_id in [action.id, original_action.id] {
+        let leased = database
+            .create_interaction_with_invocation(
+                None,
+                ThreadId::new(1).unwrap(),
+                "ignored",
+                Some(InteractionInvocation {
+                    source_interaction_node_id: root.id,
+                    source_action_id: action_id,
+                }),
+            )
+            .await
+            .unwrap();
+        let writer = database.writer_for_subgraph(leased.id).await.unwrap();
+        let answer = writer
+            .submit_node(&NodeDraft {
+                client_key: "answer".into(),
+                kind: "concept".into(),
+                icon: "box".into(),
+                title: "Answer".into(),
+                detail: "Resolved work".into(),
+            })
+            .await
+            .unwrap();
+        let result: LayerDraft = serde_json::from_value(serde_json::json!({"clientKey":"result","nodes":[answer.id],"edges":[],"layout":{"version":1,"placements":[{"nodeId":answer.id,"x":0.5,"y":0.5}],"edgeShape":"default"}})).unwrap();
+        let result = writer.submit_layer(&result).await.unwrap();
+        let response: ActionDraft = serde_json::from_value(serde_json::json!({"clientKey":"response","sourceNodeId":leased.id,"kind":"navigate","relation":"expand","label":"Response","variant":"pill","targetLayerId":result.id})).unwrap();
+        writer.add_action(&response).await.unwrap();
+        writer.complete(leased.id).await.unwrap();
+        assert_eq!(
+            parent
+                .get_layer(layer.id)
+                .await
+                .unwrap()
+                .actions
+                .iter()
+                .find(|a| a.id == action_id)
+                .unwrap()
+                .kind,
+            ActionKind::Navigate
+        );
+    }
+    let history = reader.completion_history(None, 20).await.unwrap();
+    assert!(
+        history
+            .entries
+            .iter()
+            .any(|entry| entry.interaction_node_id == child.id)
+    );
+    assert!(reader.completion_history(Some(child.id), 20).await.is_ok());
+    assert!(
+        history
+            .entries
+            .iter()
+            .any(|entry| entry.interaction_node_id == reused_child.id)
+    );
+    assert!(
+        reader
+            .completion_history(Some(reused_child.id), 20)
+            .await
+            .is_ok()
+    );
+    assert_eq!(
+        reader
+            .historical_interaction_input(reused_child.id, 0)
+            .await
+            .unwrap()
+            .input
+            .interaction
+            .detail,
+        "Private draft instruction"
+    );
+    assert_eq!(
+        reader
+            .historical_interaction_input(child.id, 0)
+            .await
+            .unwrap()
+            .input
+            .interaction
+            .detail,
+        "Private draft instruction"
+    );
+    assert!(
+        !history
+            .entries
+            .iter()
+            .any(|entry| entry.interaction_node_id == unpublished_child.id)
+    );
+    assert!(
+        reader
+            .historical_interaction_input(unpublished_child.id, 0)
+            .await
+            .is_err()
+    );
+    assert!(
+        reader
+            .completion_history(Some(unpublished_child.id), 20)
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn history_isolates_projects_even_when_thread_ids_are_reused() {
+    let database = GraphDatabase::in_memory().await.unwrap();
+    let thread = ThreadId::new(1).unwrap();
+    let projects = [None, ProjectId::new(1), ProjectId::new(2)];
+    let mut previous = Vec::new();
+    for project in projects {
+        previous.push(
+            database
+                .create_interaction(project, thread, "Private history")
+                .await
+                .unwrap(),
+        );
+    }
+    for (index, project) in projects.into_iter().enumerate() {
+        let current = database
+            .create_interaction(project, thread, "Reader")
+            .await
+            .unwrap();
+        let reader = database.writer_for_subgraph(current.id).await.unwrap();
+        let page = reader.completion_history(None, 1).await.unwrap();
+        assert_eq!(page.entries.len(), 1);
+        let all = reader.completion_history(None, 50).await.unwrap();
+        assert!(
+            all.entries
+                .iter()
+                .any(|entry| entry.interaction_node_id == previous[index].id)
+        );
+        for (foreign_index, foreign) in previous.iter().enumerate() {
+            if foreign_index == index {
+                continue;
+            }
+            assert!(
+                !all.entries
+                    .iter()
+                    .any(|entry| entry.interaction_node_id == foreign.id)
+            );
+            assert!(
+                reader
+                    .completion_history(Some(foreign.id), 1)
+                    .await
+                    .is_err()
+            );
+            assert!(
+                reader
+                    .historical_interaction_input(foreign.id, 0)
+                    .await
+                    .is_err()
+            );
+        }
+        assert_eq!(
+            reader
+                .historical_interaction_input(previous[index].id, 0)
+                .await
+                .unwrap()
+                .input
+                .interaction
+                .id,
+            previous[index].id
+        );
+    }
+}
+
+fn layer_draft_for_history(node: NodeId) -> LayerDraft {
+    serde_json::from_value(serde_json::json!({"clientKey":"result","nodes":[node],"edges":[],"layout":{"version":1,"placements":[{"nodeId":node,"x":0.5,"y":0.5}],"edgeShape":"default"}})).unwrap()
 }

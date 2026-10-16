@@ -51,7 +51,7 @@ it("queues durable invokes on one node, starts each after the run ahead, and sto
       return response.json();
     };
     await product.seedProviderCatalog({ providerId: "codex", label: "Fixture", connected: true, models: [{ id: "fixture-model", label: "Fixture", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }] });
-    const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }) });
+    const family = await request("/api/model-families", { method: "POST", body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] }) });
     const thread = await request("/api/threads", { method: "POST", body: JSON.stringify({ title: "Vacation queue", initialMessage: "Choose a vacation destination", modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" } }) });
     const until = async (predicate) => {
       for (let attempt = 0; attempt < 200; attempt++) {

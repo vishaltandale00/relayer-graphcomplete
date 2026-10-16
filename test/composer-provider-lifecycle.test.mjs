@@ -26,7 +26,7 @@ const settings = {
     id: 12,
     enabled: true,
     members: [
-      { providerId: "anthropic-work", modelId: "claude-sonnet-4", position: 0 },
+      { providerId: "anthropic-work", modelId: "claude-sonnet-4", position: 0, roles: [{ name: "orchestrator" }] },
       { providerId: "openai-work", modelId: "gpt-5.2", position: 1 },
       { providerId: "openai-personal", modelId: "gpt-5.2", position: 2 },
     ],
@@ -34,21 +34,13 @@ const settings = {
 };
 
 describe("composer provider lifecycle", () => {
-  it("reselects only within the current family while a turn is unsent", () => {
+  it("blocks an unavailable orchestrator while a specialist is available", () => {
     expect(resolveUnsentModelIntent(settings, {
       harnessId: "coding-default",
       familyId: 12,
       providerId: "anthropic-work",
       modelId: "claude-sonnet-4",
-    })).toEqual({
-      selection: {
-        harnessId: "coding-default",
-        familyId: 12,
-        providerId: "openai-personal",
-        modelId: "gpt-5.2",
-      },
-      blockedFamilyId: null,
-    });
+    })).toEqual({ selection: null, blockedFamilyId: 12 });
   });
 
   it("blocks instead of jumping families when the selected family has no resolvable member", () => {
@@ -57,7 +49,7 @@ describe("composer provider lifecycle", () => {
     unavailable.families.push({
       id: 13,
       enabled: true,
-      members: [{ providerId: "openai-personal", modelId: "gpt-5.2", position: 0 }],
+      members: [{ providerId: "openai-personal", modelId: "gpt-5.2", position: 0, roles: [{ name: "orchestrator" }] }],
     });
     expect(resolveUnsentModelIntent(unavailable, {
       harnessId: "coding-default",
@@ -216,6 +208,7 @@ describe("composer provider lifecycle", () => {
 
   it("applies adapter exact/regex allow rules with deny precedence", () => {
     const ruled = structuredClone(settings);
+    ruled.families[0].members.forEach((member) => { member.roles = member.providerId === "openai-work" ? [{ name: "orchestrator" }] : []; });
     ruled.providers[0].adapterId = "anthropic-api";
     ruled.providers[0].models[0].available = true;
     ruled.providers[1].adapterId = "openai-api";

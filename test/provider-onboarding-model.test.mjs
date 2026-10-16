@@ -157,14 +157,14 @@ describe("provider onboarding renderer state", () => {
         kind: "create",
         name: "Work",
         members: [
-          { providerId: "work", modelId: "large" },
+          { providerId: "work", modelId: "large", roles: [{ name: "orchestrator" }] },
           { providerId: "work", modelId: "removed" },
         ],
       },
     }).family).toEqual({
       kind: "create",
       name: "Work",
-      members: [{ providerId: "work", modelId: "large" }],
+      members: [{ providerId: "work", modelId: "large", roles: [{ name: "orchestrator" }] }],
     });
   });
 
@@ -195,12 +195,12 @@ describe("provider onboarding renderer state", () => {
     })).toBeNull();
     expect(providerOnboardingCompletionIntent({
       ...base,
-      family: { kind: "create", name: "  Work choices  ", members: [{ providerId: "work", modelId: "large" }] },
+      family: { kind: "create", name: "  Work choices  ", members: [{ providerId: "work", modelId: "large", roles: [{ name: "orchestrator" }] }] },
     })).toEqual({
       providerId: "work",
       harnessId: "compatible",
       expectedProjectionRevision: "sha256:projection",
-      family: { kind: "create", name: "Work choices", members: [{ providerId: "work", modelId: "large" }] },
+      family: { kind: "create", name: "Work choices", members: [{ providerId: "work", modelId: "large", roles: [{ name: "orchestrator" }] }] },
     });
   });
 

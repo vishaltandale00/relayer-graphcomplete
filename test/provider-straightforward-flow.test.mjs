@@ -108,8 +108,6 @@ describe("straightforward discovered-model provider flows", () => {
         harnessId: flow.harnessId,
         modelSelection: {
           familyId: onboardingFamily.id,
-          providerId: onboardingProviderId,
-          modelId: expectedModelIds[0],
         },
       });
 
@@ -124,8 +122,6 @@ describe("straightforward discovered-model provider flows", () => {
         harnessId: flow.harnessId,
         modelSelection: {
           familyId: settingsFamily.id,
-          providerId: settingsProviderId,
-          modelId: expectedModelIds[0],
         },
       });
       expect(afterSettings.families.filter(({ kind }) => kind === "custom")).toEqual([]);
@@ -211,7 +207,7 @@ function catalogSnapshot(providerId, modelIds) {
 }
 
 function familyMembers(providerId, modelIds) {
-  return modelIds.map((modelId, position) => ({ providerId, modelId, position }));
+  return modelIds.map((modelId, position) => ({ providerId, modelId, position, roles: position === 0 ? [{ name: "orchestrator" }] : [] }));
 }
 
 function familyForProvider(settings, providerId) {

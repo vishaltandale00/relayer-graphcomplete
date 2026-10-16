@@ -716,7 +716,7 @@ export class HarnessHost {
     // there is no per-thread root queue (#719). A retried or duplicated delivery of the same
     // prepared run joins it: it must not start a second paid run, nor take over the first one's
     // cancellation.
-    const binding = rootRunBinding(capability, traceContext, model, attemptAdmissionId, executionLeaseId);
+    const binding = rootRunBinding(capability, traceContext, model, attemptAdmissionId, executionLeaseId, modelPlan, harnessPolicy);
     const existing = session.rootRuns.get(capability.nodeId);
     if (existing !== undefined) {
       if (existing.binding !== binding) throw new Error("Root completion is already active under a different graph binding");
@@ -799,7 +799,7 @@ export class HarnessHost {
     if (model !== undefined) {
       validateConfiguredModelSelection(executionConfiguration(session, harnessPolicy), model);
     }
-    const invocationDigest = graphInvocationDigest(capability, origin, traceContext, model);
+    const invocationDigest = graphInvocationDigest(capability, origin, traceContext, model, attemptAdmissionId, executionLeaseId, modelPlan, harnessPolicy);
     const existing = session.invokedCompletionRuns.get(capability.nodeId);
     if (existing !== undefined) {
       if (existing.invocationDigest !== invocationDigest) {
@@ -3011,6 +3011,7 @@ function readHarnessModelPlan(value: unknown): HarnessModelPlan | undefined {
 
 function normalizeModelPlan(value: unknown): HarnessModelPlan {
   if (!isRecord(value)
+    || (value.schemaVersion !== undefined && value.schemaVersion !== 2)
     || !Number.isSafeInteger(value.familyId) || (value.familyId as number) < 1
     || !Number.isSafeInteger(value.familyRevision) || (value.familyRevision as number) < 1
     || !Array.isArray(value.roster) || value.roster.length < 1 || value.roster.length > 100) {
@@ -3039,7 +3040,22 @@ function normalizeModelPlan(value: unknown): HarnessModelPlan {
   if (!identities.has(modelRouteIdentity(orchestrator))) {
     throw new Error("Harness modelPlan orchestrator must belong to its roster");
   }
+  const roleBearing = orchestrator.roles !== undefined || roster.some((route) => route.roles !== undefined);
+  if (roleBearing !== (value.schemaVersion === 2)) {
+    throw new Error("Harness modelPlan role fields do not match its schema version");
+  }
+  if (value.schemaVersion === 2) {
+    if (orchestrator.roles === undefined || roster.some((route) => route.roles === undefined)) {
+      throw new Error("Harness role-bearing modelPlan requires roles on every route");
+    }
+    const roots = roster.filter((route) => route.roles!.some((role) => role.name === "orchestrator"));
+    if (roots.length !== 1 || modelRouteIdentity(roots[0]!) !== modelRouteIdentity(orchestrator)
+      || JSON.stringify(roots[0]!.roles) !== JSON.stringify(orchestrator.roles)) {
+      throw new Error("Harness modelPlan requires exactly one orchestrator role matching its orchestrator route");
+    }
+  }
   return Object.freeze({
+    ...(value.schemaVersion === 2 ? { schemaVersion: 2 as const } : {}),
     familyId: value.familyId as number,
     familyRevision: value.familyRevision as number,
     orchestrator,
@@ -3056,11 +3072,32 @@ function normalizeModelRoute(value: unknown): HarnessModelRoute {
     throw new Error("Harness modelPlan contains an invalid model route");
   }
   return Object.freeze({
+    ...(value.roles === undefined ? {} : { roles: normalizeModelRoles(value.roles) }),
     providerId: value.providerId,
     adapterId: value.adapterId,
     accessContract: value.accessContract,
     modelId: value.modelId,
   });
+}
+
+function hasLoneSurrogate(value: string): boolean {
+  return [...value].some(character => character.length === 1 && /[\uD800-\uDFFF]/u.test(character));
+}
+
+function normalizeModelRoles(value: unknown): readonly { readonly name: string; readonly description?: string }[] {
+  if (!Array.isArray(value) || value.length > 32) throw new Error("Harness model roles are invalid");
+  const names = new Set<string>();
+  return Object.freeze(value.map((role: unknown) => {
+    if (!isRecord(role) || typeof role.name !== "string" || [...role.name].length < 1 || [...role.name].length > 80
+      || role.name.trim() !== role.name || hasLoneSurrogate(role.name)
+      || (role.description !== undefined && (typeof role.description !== "string" || [...role.description].length > 240 || hasLoneSurrogate(role.description)))
+      || Object.keys(role).some((key) => key !== "name" && key !== "description")
+      || names.has(role.name.toLowerCase()) || (role.name.toLowerCase() === "orchestrator" && role.name !== "orchestrator")) {
+      throw new Error("Harness model role is invalid or duplicated");
+    }
+    names.add(role.name.toLowerCase());
+    return Object.freeze({ name: role.name, ...(role.description === undefined ? {} : { description: role.description }) });
+  }));
 }
 
 function readPositiveInteractionId(value: unknown): number {
@@ -3184,6 +3221,7 @@ function admitModelPlan(
     adapterImplementationVersion: accessBundle.byProviderId[route.providerId]!.adapterImplementationVersion,
   });
   const withoutDigest = Object.freeze({
+    ...(plan.schemaVersion === 2 ? { schemaVersion: 2 as const } : {}),
     familyId: plan.familyId,
     familyRevision: plan.familyRevision,
     orchestrator: versioned(plan.orchestrator),
@@ -3192,7 +3230,8 @@ function admitModelPlan(
   });
   return Object.freeze({
     ...withoutDigest,
-    digest: semanticDigest("relayer.harness-model-plan.v1", JSON.stringify(withoutDigest)),
+    digest: semanticDigest(plan.schemaVersion === 2 ? "relayer.harness-model-plan.v2" : "relayer.harness-model-plan.v1",
+      JSON.stringify(withoutDigest)),
   });
 }
 
@@ -3471,17 +3510,21 @@ function validateCompletionOrigin(
   }
 }
 
-/** What makes two root-run deliveries the same run: one completion, attempt and lease. */
+/** What makes two root-run deliveries the same run: one completion, attempt, lease, model plan and execution policy. */
 function rootRunBinding(
   capability: GraphCapability,
   traceContext: HarnessCompletionTraceContext | undefined,
   model: InteractionModelSelection | undefined,
   attemptAdmissionId: string | undefined,
   executionLeaseId: string | undefined,
+  modelPlan: HarnessModelPlan | undefined,
+  policy: HarnessExecutionPolicy | undefined,
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
       completionId: capability.nodeId,
+      modelPlan: modelPlan === undefined ? null : modelPlanIdentity(modelPlan),
+      policy: policy === undefined ? null : executionPolicyIdentity(policy),
       productInteractionId: traceContext?.productInteractionId ?? null,
       attemptAdmissionId: attemptAdmissionId ?? null,
       executionLeaseId: executionLeaseId ?? null,
@@ -3495,10 +3538,18 @@ function graphInvocationDigest(
   origin: Extract<CompletionOrigin, { readonly kind: "invoke" }>,
   traceContext: HarnessCompletionTraceContext | undefined,
   model: InteractionModelSelection | undefined,
+  attemptAdmissionId: string | undefined,
+  executionLeaseId: string | undefined,
+  modelPlan: HarnessModelPlan | undefined,
+  policy: HarnessExecutionPolicy | undefined,
 ): string {
   return createHash("sha256")
     .update(JSON.stringify({
       completionId: capability.nodeId,
+      modelPlan: modelPlan === undefined ? null : modelPlanIdentity(modelPlan),
+      policy: policy === undefined ? null : executionPolicyIdentity(policy),
+      attemptAdmissionId: attemptAdmissionId ?? null,
+      executionLeaseId: executionLeaseId ?? null,
       origin: {
         kind: origin.kind,
         sourceCompletionId: origin.sourceCompletionId,

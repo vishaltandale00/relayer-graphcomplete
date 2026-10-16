@@ -69,7 +69,7 @@ describe("composer model picker UI contract", () => {
         name: "Codex latest",
         enabled: true,
         position: 0,
-        members: [{ providerId: "codex", modelId: "gpt-5", position: 0 }],
+        members: [{ providerId: "codex", modelId: "gpt-5", position: 0, roles: [{ name: "orchestrator" }] }],
       }],
     };
     const presentation = modelPickerFamilyPresentation(catalog, "codex-basic", null);
@@ -160,7 +160,7 @@ describe("composer model picker UI contract", () => {
       familyId: 7,
       providerId: "codex",
       modelId: "gpt-5",
-    })).toMatchObject({ compact: "Codex latest · GPT-5", provider: "Codex" });
+    })).toMatchObject({ compact: "Codex latest", provider: "Codex" });
     expect(modelSelectionLabels(settings, {
       familyId: 404,
       providerId: "codex",
