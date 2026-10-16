@@ -458,12 +458,13 @@ it("Stop releases a stalled external catalog check before follow-up admission", 
   expect(f.calls.some(call => call.method === "POST")).toBe(false);
 });
 
-async function gatedTask() {
+async function gatedTask(benchmark = false) {
   const f = await fixture();
   const session = f.tasks.find(f.session.id);
   session.mode = "simulated";
   session.actor = { maxActions: 5 };
-  session.actorSetup = { behaviorContract: { completionJudge: { version: "completion-judge-v1", model: "strong", modelReasoningEffort: "high" } } };
+  session.actorSetup = benchmark ? (await import("../desktop/eval-main/setup-registry.mjs")).endpointBenchmarkActorSetup()
+    : { behaviorContract: { completionJudge: { version: "completion-judge-v1", model: "strong", modelReasoningEffort: "high" } } };
   return f;
 }
 async function judgedFinish(f, verdict = "complete") {
@@ -473,8 +474,8 @@ async function judgedFinish(f, verdict = "complete") {
   return { reason: "endpoint_reached", actorActionEventId: action.id, completionJudgeEventId: judgment.id };
 }
 
-it("gates normal finishes on the latest exact completion judgment and freezes the original claim", async () => {
-  const f = await gatedTask(); const id = f.session.id;
+it.each([false, true])("gates normal finishes on the latest exact completion judgment and freezes the original claim (benchmark=%s)", async benchmark => {
+  const f = await gatedTask(benchmark); const id = f.session.id;
   for (const reason of ["satisfied", "abandoned", "endpoint_reached", "budget_exhausted"]) await expect(f.tasks.finish(id, { reason })).rejects.toThrow();
   await expect(f.tasks.finish(id, await judgedFinish(f, "incomplete"))).rejects.toThrow("completion judgment");
   const stale = await judgedFinish(f);
@@ -563,10 +564,10 @@ it("only the versioned participant-stop contract permits a judged unfinished sto
   expect(finished.termination).toMatchObject({ reason: "satisfied", endpointAttainment: "not_claimed", success: null, completionJudgeEventId: input.completionJudgeEventId, actorClaim: { endpointStatus: "incomplete", remainingWork: "User thinks work remains" } });
 });
 
-it("current-native stopping evidence separates live delivery receipts from intents, ambiguity and incorporation", async () => {
+it.each(["task-actor-observation-v3", "task-actor-observation-v4"])("%s stopping evidence separates live delivery receipts from intents, ambiguity and incorporation", async observationId => {
   const f = await gatedTask(); const id = f.session.id;
   const session = f.tasks.find(id);
-  session.actorSetup.behaviorContract.observationContract = { id: "task-actor-observation-v3" };
+  session.actorSetup.behaviorContract.observationContract = { id: observationId };
   f.options.evalService.completionJudgeArtifactEvidence = async () => ({ files: [] });
   await f.tasks.actorEvent(id, "actor_action", { phase: "current", action: { kind: "fill", value: "Private stage" } });
   await f.tasks.actorEvent(id, "product_action", { path: "/api/threads/1/interactions/10/live-answers", outcome: "accepted", liveAnswerReceipt: {

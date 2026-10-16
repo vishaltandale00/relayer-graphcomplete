@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 import { GRAPH_PRESENTATION_RUBRIC_V11 } from "@relayer/eval-runner";
-import { actorConfiguration, ACTOR_PROMPT_TEMPLATE, ACTOR_PROMPT_V8_GUIDANCE, ACTOR_PROMPT_V9_GUIDANCE, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION } from "./task-actor.mjs";
+import { actorConfiguration, ENDPOINT_ACTOR_PROMPT_VERSION, ACTOR_PROMPT_V11_GUIDANCE, INPUT_ACTOR_PROMPT_VERSION, INPUT_ACTOR_OBSERVATION_CONTRACT, INPUT_ACTOR_ACTION_SCHEMA, ACTOR_PROMPT_V10_GUIDANCE, ACTOR_PROMPT_TEMPLATE, ACTOR_PROMPT_V8_GUIDANCE, ACTOR_PROMPT_V9_GUIDANCE, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION } from "./task-actor.mjs";
 
 const copy = (value) => structuredClone(value);
 const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
@@ -60,19 +60,39 @@ function completionJudgeConfigurations(directory) {
     if (!input || Array.isArray(input) || Object.keys(input).some(key => !["schemaVersion", "kind", "name", "settings", "evidenceContract", "outputSchema", "promptTemplate"].includes(key))
       || input.schemaVersion !== 1 || input.kind !== "completion-judge"
       || !completionEvidenceContract(input.evidenceContract) || input.outputSchema !== "completion-assessment-v1"
-      || !input.settings || Object.keys(input.settings).some(key => !["model", "modelReasoningEffort", "shellAccess"].includes(key))
+      || !input.settings || Object.keys(input.settings).some(key => !["model", "modelReasoningEffort", "shellAccess", "decision"].includes(key))
       || input.settings.shellAccess !== false) fail(`Unsupported completion judge config contract: ${file}`);
     const configSource = { file, path, digest: setupDigest(contents), contents };
     const spec = { version: basename(file, ".yaml"), model: input.settings.model, modelReasoningEffort: input.settings.modelReasoningEffort,
-      promptTemplate: input.promptTemplate, outputSchema: copy(COMPLETION_JUDGE_SCHEMA), evidenceContract: copy(completionEvidenceContract(input.evidenceContract)) };
+      promptTemplate: input.promptTemplate, outputSchema: copy(COMPLETION_JUDGE_SCHEMA), evidenceContract: copy(completionEvidenceContract(input.evidenceContract)),
+      ...(input.settings.decision === undefined ? {} : { decision: copy(input.settings.decision) }) };
     const definition = normalize({ kind: input.kind, name: input.name, promptVersion: spec.version, spec, configSource });
     return { file, path, digest: configSource.digest, definition };
   });
 }
-export function defaultCompletionJudgeSetup() { return completionJudgeConfigurations(defaultCompletionJudgeDirectory)[0].definition; }
+function nativeCompletionJudgeDefinition(configurations) {
+  const native = configurations.find(config => !config.definition.spec.decision);
+  if (!native) fail("Keep a native completion judge config for the historical default.");
+  return native.definition;
+}
+export function defaultCompletionJudgeSetup() { return nativeCompletionJudgeDefinition(completionJudgeConfigurations(defaultCompletionJudgeDirectory)); }
 export function defaultActorSetup() {
   return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE + "\n" + ACTOR_PROMPT_V8_GUIDANCE + "\n" + ACTOR_PROMPT_V9_GUIDANCE,
     settings: actorConfiguration(), behaviorContract: { id: "task-actor-v6", participantMayStopIncomplete: true, actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
+}
+export function inputActorSetup() {
+  const base = defaultActorSetup();
+  return { ...base, name: "Task user with input delivery", promptVersion: INPUT_ACTOR_PROMPT_VERSION,
+    promptTemplate: base.promptTemplate + "\n" + ACTOR_PROMPT_V10_GUIDANCE,
+    settings: { ...base.settings, promptVersion: INPUT_ACTOR_PROMPT_VERSION },
+    behaviorContract: { ...base.behaviorContract, id: "task-actor-v7", actionSchema: copy(INPUT_ACTOR_ACTION_SCHEMA), observationContract: copy(INPUT_ACTOR_OBSERVATION_CONTRACT) } };
+}
+export function endpointBenchmarkActorSetup() {
+  const base = inputActorSetup();
+  return { ...base, name: "Endpoint completion benchmark", promptVersion: ENDPOINT_ACTOR_PROMPT_VERSION,
+    promptTemplate: base.promptTemplate + "\n" + ACTOR_PROMPT_V11_GUIDANCE,
+    settings: { ...base.settings, promptVersion: ENDPOINT_ACTOR_PROMPT_VERSION },
+    behaviorContract: { ...base.behaviorContract, id: "task-actor-v8", participantMayStopIncomplete: false } };
 }
 export function defaultJudgeSetup() {
   const config = judgeConfigurations(defaultJudgeDirectory)[0];
@@ -96,8 +116,9 @@ function normalize(input) {
     if (document.errors.length || !file || Object.keys(file).some(key => !["schemaVersion", "kind", "name", "settings", "evidenceContract", "outputSchema", "promptTemplate"].includes(key))
       || file.schemaVersion !== 1 || file.kind !== input.kind || file.name !== input.name || file.promptTemplate !== input.spec.promptTemplate
       || file.outputSchema !== "completion-assessment-v1" || file.evidenceContract !== input.spec.evidenceContract.id
-      || Object.keys(file.settings ?? {}).some(key => !["model", "modelReasoningEffort", "shellAccess"].includes(key))
-      || file.settings?.shellAccess !== false || file.settings?.model !== input.spec.model || file.settings?.modelReasoningEffort !== input.spec.modelReasoningEffort) fail("Completion judge config snapshot does not match its definition.");
+      || Object.keys(file.settings ?? {}).some(key => !["model", "modelReasoningEffort", "shellAccess", "decision"].includes(key))
+      || file.settings?.shellAccess !== false || file.settings?.model !== input.spec.model || file.settings?.modelReasoningEffort !== input.spec.modelReasoningEffort
+      || JSON.stringify(file.settings?.decision) !== JSON.stringify(input.spec.decision)) fail("Completion judge config snapshot does not match its definition.");
     return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion, spec: copy(input.spec), configSource: copy(source) };
   }
   if (input.kind === "actor") {
@@ -109,10 +130,13 @@ function normalize(input) {
     const legacyContract = copy(priorContract);
     legacyContract.actionSchema.properties.reason = { type: "string" };
     // Publication may upgrade a known historical contract; stored revisions stay immutable.
-    if (![behaviorContract, settledContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
+    if (![endpointBenchmarkActorSetup().behaviorContract, inputActorSetup().behaviorContract, behaviorContract, settledContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
+    const settings = actorConfiguration(input.settings);
+    const contract = input.promptVersion === ENDPOINT_ACTOR_PROMPT_VERSION ? endpointBenchmarkActorSetup().behaviorContract : input.promptVersion === INPUT_ACTOR_PROMPT_VERSION ? inputActorSetup().behaviorContract : input.promptVersion === ACTOR_PROMPT_VERSION ? behaviorContract : copy(input.behaviorContract);
+    if (["task-actor-v7", "task-actor-v8"].includes(contract.id) && settings.decision && settings.decision.contractId !== "openai-decisions-codex-text-v2") fail("The input actor revision requires Decisions execution v2.");
     return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion,
       promptTemplate: template(input.promptTemplate, ["request", "endpoint", "privateBrief", "exploration", "meticulousness"]),
-      settings: actorConfiguration(input.settings), behaviorContract: input.promptVersion === ACTOR_PROMPT_VERSION ? behaviorContract : copy(input.behaviorContract) };
+      settings, behaviorContract: contract };
   }
   const settings = { model: input.settings?.model, modelReasoningEffort: input.settings?.modelReasoningEffort, shellAccess: false };
   if (!/^[a-zA-Z0-9._-]{1,100}$/.test(settings.model ?? "") || !["low", "medium", "high"].includes(settings.modelReasoningEffort)) fail("Invalid judge model/settings.");
@@ -149,7 +173,7 @@ export class SetupRegistry {
       this.state.evaluatorReleases.forEach(verify);
       for (const release of this.state.evaluatorReleases) this.validateRelease(release);
     } catch (error) { if (error.code !== "ENOENT") throw error; }
-    for (const [kind, createDefault] of [["actor", defaultActorSetup], ["judge", defaultJudgeSetup], ["completion-judge", () => this.completionJudgeConfigs()[0].definition]]) {
+    for (const [kind, createDefault] of [["actor", defaultActorSetup], ["judge", defaultJudgeSetup], ["completion-judge", () => nativeCompletionJudgeDefinition(this.completionJudgeConfigs())]]) {
       if (!this.state.revisions.some(revision => revision.kind === kind)) await this.publish({ ...createDefault(), predecessorId: null, feedback: [] });
     }
     return this;
@@ -178,7 +202,7 @@ export class SetupRegistry {
   selected(kind, id) {
     return this.get(id || this.state.promotions.findLast((item) => item.kind === kind)?.revisionId || this.state.revisions.find((item) => item.kind === kind)?.id, kind);
   }
-  catalog() { return { ...copy(this.state), actorDefinition: defaultActorSetup(), judgeConfigs: this.judgeConfigs(), completionJudgeConfigs: this.completionJudgeConfigs() }; }
+  catalog() { return { ...copy(this.state), actorDefinition: defaultActorSetup(), actorInputDefinition: inputActorSetup(), actorEndpointDefinition: endpointBenchmarkActorSetup(), judgeConfigs: this.judgeConfigs(), completionJudgeConfigs: this.completionJudgeConfigs() }; }
   judgeConfigs() { return copy(judgeConfigurations(this.judgeConfigDirectory)); }
   completionJudgeConfigs() { return copy(completionJudgeConfigurations(this.completionJudgeConfigDirectory)); }
   publishCompletionJudgeConfig(input) { return this.publishConfig({ ...input, kind: "completion-judge" }); }

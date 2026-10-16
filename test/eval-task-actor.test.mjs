@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { COMPLETION_JUDGE_SPEC } from "../desktop/eval-main/task-completion-judge.mjs";
 import { defaultActorSetup } from "../desktop/eval-main/setup-registry.mjs";
+import * as setupDefinitions from "../desktop/eval-main/setup-registry.mjs";
 import { HumanTaskService } from "../desktop/eval-main/human-task-service.mjs";
 import { TaskActorService } from "../desktop/eval-main/task-actor-service.mjs";
 import { actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "../desktop/eval-main/task-actor.mjs";
@@ -15,14 +16,15 @@ import { createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
 const action = (kind, extra = {}) => ({ kind, ref: "visible", value: "", reason: "", satisfaction: null, comment: "", endpointStatus: "incomplete", remainingWork: "Route undecided", ...extra });
-async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionJudge = null, judgeEvaluate = null, voluntaryStop = false } = {}) {
+async function fixture({ decide, observe, observeCurrent, promptVersion, maxActions = 8, busy = false, failWrite = false, navigateOnly = false, retry = false, timeoutMs = 900000, planCount = 1, maxCompletions = 2, controlErrors = [], completionPath = null, completionJudge = null, judgeEvaluate = null, voluntaryStop = false, actorSetup = null, actorFactory = null, completionJudgeFactory = null, completionJudgeRuntime = null } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "task-actor-test-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   const turns = [{ id: 1, completionStatus: busy ? "running" : retry ? "not_started" : "accepted", ...(retry ? { latestAttempt: { id: 91, outcome: "model_failed" } } : {}) }];
   const dispatches = [];
-  const behavior = { ...defaultActorSetup().behaviorContract, completionJudge };
-  if (!voluntaryStop) { behavior.id = "task-actor-v4"; delete behavior.participantMayStopIncomplete; }
-  const setupRegistry = completionJudge ? { selected: () => ({ ...defaultActorSetup(), id: "judge-gated-setup", settings: { ...defaultActorSetup().settings, maxActions }, behaviorContract: behavior }) } : null;
+  const definition = actorSetup ?? defaultActorSetup();
+  const behavior = { ...definition.behaviorContract, completionJudge };
+  if (!actorSetup && !voluntaryStop) { behavior.id = "task-actor-v4"; delete behavior.participantMayStopIncomplete; }
+  const setupRegistry = completionJudge ? { selected: () => ({ ...definition, id: "judge-gated-setup", settings: { ...definition.settings, maxActions }, behaviorContract: behavior }) } : null;
   const options = { setupRegistry, stateFile: join(directory, "tasks.json"), productSession: { origin: "http://product.invalid", cookie: { name: "control", value: "secret" }, readOnlyCookie: { name: "read", value: "only" } },
     evalService: {
       prepareHumanTask: async () => ({ name: "Task", humanBrief: "PRIVATE BRIEF", humanRubric: "SECRET RUBRIC", execution: { harnessConfigurationName: "fixture", projectId: 1, modelResolution: {} }, plan: Array.from({ length: planCount }, () => ({ name: "Task", prompts: ["Help me plan a trip"] })) }),
@@ -51,15 +53,22 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
   const browser = {
     observeCurrent: vi.fn(async (...args) => observeCurrent ? observeCurrent(...args, turns) : null),
     observe: vi.fn(async () => ({ text: turns.length > 1 ? "A trip plan based on your reply" : "Where do you want to go?", controls: [{ ref: "visible", name: "Send" }] })),
-    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions", "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
+    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, completionPath ?? (retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions"), "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
     nextStep: vi.fn(),
     close: vi.fn(),
   };
-  const actors = new TaskActorService({ tasks, setupRegistry, resolveCompletionJudgeRuntime: async () => ({}), createCompletionJudge: async () => judge, pollMs: 1, deadlineMs: timeoutMs, resolveRuntime: async () => ({}), openBrowser: async (_id, signal) => { browserSignal = signal; return browser; },
-    createActor: async ({ prompt }) => ({ decide: async (observation, signal, decisionOptions) => {
+  const actors = new TaskActorService({ tasks, setupRegistry, resolveCompletionJudgeRuntime: async () => completionJudgeRuntime ?? ({}), createCompletionJudge: completionJudgeFactory ?? (async () => judge), pollMs: 1, deadlineMs: timeoutMs, resolveRuntime: async () => ({}), openBrowser: async (_id, signal) => { browserSignal = signal; return browser; },
+    createActor: async (options) => {
+      const { prompt } = options;
+      if (actorFactory) {
+        const adapter = await actorFactory(options);
+        return { ...adapter, decide: (observation, ...args) => { seen.push({ prompt, observation }); return adapter.decide(observation, ...args); } };
+      }
+      return { decide: async (observation, signal, decisionOptions) => {
       seen.push({ prompt, observation });
       return { action: decide ? await decide(observation, signal, decisionOptions) : turns.length === 1 ? action("click") : action("finish", { reason: "satisfied", satisfaction: 3, comment: "Good enough" }), usage: { input_tokens: 10, output_tokens: 5 } };
-    }, observe: vi.fn(async (observation, signal, options) => observe ? observe(observation, signal, turns, options) : { comment: "I understand what is being checked", usage: null }), close: vi.fn() }),
+    }, observe: vi.fn(async (observation, signal, options) => observe ? observe(observation, signal, turns, options) : { comment: "I understand what is being checked", usage: null }), close: vi.fn() };
+    },
   });
   cleanups.push(() => actors.close());
   const task = await actors.create({ maxCompletions, endpoint: "A trip plan", actor: { maxActions, ...(promptVersion ? { promptVersion } : {}) } }); id = task.id;
@@ -168,8 +177,8 @@ it("cancels a decision durably queued before dispatch", async () => {
   expect(f.tasks.get(f.id).termination.reason).toBe("actor_cancelled");
 });
 
-it("deadline aborts native decisions and preserves partial evidence without replay", async () => {
-  const f = await fixture({ timeoutMs: 1000, decide: (_observation, signal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })) });
+it.each([false, true])("deadline aborts native decisions and preserves partial evidence without replay (benchmark=%s)", async benchmark => {
+  const f = await fixture({ ...(benchmark ? { actorSetup: setupDefinitions.endpointBenchmarkActorSetup(), completionJudge: COMPLETION_JUDGE_SPEC } : {}), timeoutMs: 1000, decide: (_observation, signal) => new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true })) });
   await f.done;
   expect(f.browser.act).not.toHaveBeenCalled();
   expect(f.tasks.get(f.id)).toMatchObject({ status: "interrupted", completions: 1, termination: { reason: "actor_timeout" } });
@@ -518,7 +527,7 @@ it("preflights the pinned completion judge before candidate task creation", asyn
 
 it.each(["incomplete", "uncertain"])("completion judge %s consumes the same action budget without accepting a finish loop", async (verdict) => {
   let decision = 0;
-  const f = await fixture({ completionJudge: COMPLETION_JUDGE_SPEC, maxActions: 2, navigateOnly: true,
+  const f = await fixture({ completionJudge: COMPLETION_JUDGE_SPEC, maxActions: 2, maxCompletions: 1, navigateOnly: true,
     decide: () => ++decision === 1 ? action("finish", { reason: "satisfied", satisfaction: 4 }) : action("click"),
     judgeEvaluate: async () => ({ verdict, evidenceExplanation: "Endpoint evidence missing", continuationHint: "Ask for the remaining detail.", usage: null }) });
   await f.done;
@@ -540,10 +549,10 @@ it("judge failure preserves proposed satisfaction and supplied evidence, then in
   expect(f.judge.close).toHaveBeenCalledOnce();
 });
 
-it("manual stop cancels a pending completion judgment without allowing late completion", async () => {
+it.each([false, true])("manual stop cancels a pending completion judgment without allowing late completion (benchmark=%s)", async benchmark => {
   let started; const pending = new Promise(resolve => { started = resolve; });
   let release; const gate = new Promise(resolve => { release = resolve; });
-  const f = await fixture({ completionJudge: COMPLETION_JUDGE_SPEC, decide: () => action("finish", { reason: "satisfied", satisfaction: 4 }),
+  const f = await fixture({ ...(benchmark ? { actorSetup: setupDefinitions.endpointBenchmarkActorSetup() } : {}), completionJudge: COMPLETION_JUDGE_SPEC, decide: () => action("finish", { reason: "satisfied", satisfaction: 4 }),
     judgeEvaluate: async () => { started(); await gate; return { verdict: "complete", evidenceExplanation: "Late response", continuationHint: "", usage: null }; } });
   await pending;
   await f.actors.stop(f.id);
@@ -562,17 +571,35 @@ it("another finish without an intervening interaction never calls the judge twic
 });
 
 
-it("stops at the completion budget after recording a rejected final-turn judgment", async () => {
-  const f = await fixture({ completionJudge: COMPLETION_JUDGE_SPEC, maxCompletions: 1,
-    decide: () => action("finish", { reason: "satisfied", satisfaction: 4 }),
-    judgeEvaluate: async () => ({ verdict: "uncertain", evidenceExplanation: "The final turn does not establish completion", continuationHint: "Ask for the missing plan.", usage: null }) });
+it("recovers by navigating and reassessing a rejected finish after the candidate-response budget is consumed", async () => {
+  const choices = [action("finish", { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "", satisfaction: 3 }), action("click"), action("finish", { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "", satisfaction: 4 })];
+  let evaluations = 0;
+  const f = await fixture({ completionJudge: COMPLETION_JUDGE_SPEC, maxCompletions: 1, navigateOnly: true,
+    decide: () => choices.shift(), judgeEvaluate: async () => ++evaluations === 1
+      ? { verdict: "incomplete", evidenceExplanation: "An existing detail remains unread", continuationHint: "Inspect the remaining detail.", usage: null }
+      : { verdict: "complete", evidenceExplanation: "Existing details inspected", continuationHint: "", usage: null } });
   await f.done;
   const task = f.tasks.get(f.id);
-  expect(task.termination).toMatchObject({ reason: "budget_exhausted", success: null });
-  expect(task.events.filter(event => event.kind === "actor_completion_judgment")).toHaveLength(1);
-  expect(task.events.some(event => event.kind === "actor_error")).toBe(false);
-  expect(f.browser.act).not.toHaveBeenCalled();
-  expect(f.seen).toHaveLength(1);
+  expect(f.dispatches).toEqual([]);
+  expect(f.browser.act).toHaveBeenCalledOnce();
+  expect(task.completions).toBe(1);
+  expect(task.events.filter(event => event.kind === "actor_completion_judgment").map(event => event.verdict)).toEqual(["incomplete", "complete"]);
+  expect(f.seen[1].observation.availableActions).not.toContain("finish");
+  expect(f.seen[2].observation.availableActions).toContain("finish");
+  expect(task.termination).toMatchObject({ reason: "endpoint_reached", endpointAttainment: "judge_reported" });
+});
+
+it.each(["/api/threads/1/interactions", "/api/threads/1/interactions/1/retry", "/api/threads/1/interactions/1/actions/22/invoke"])("keeps response request %s blocked during finish recovery at the response budget", async completionPath => {
+  let decision = 0;
+  const f = await fixture({ completionJudge: COMPLETION_JUDGE_SPEC, maxCompletions: 1, completionPath,
+    decide: () => ++decision === 1 ? action("finish", { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "", satisfaction: 3 }) : action("click"),
+    judgeEvaluate: async () => ({ verdict: "incomplete", evidenceExplanation: "Needs another response", continuationHint: "Ask for a revised plan.", usage: null }) });
+  await f.done;
+  expect(f.browser.act).toHaveBeenCalledOnce();
+  await expect(f.browser.act.mock.results[0].value).rejects.toThrow("Completion limit reached");
+  expect(f.dispatches).toEqual([]);
+  expect(f.tasks.get(f.id)).toMatchObject({ completions: 1, status: "interrupted", termination: { reason: "actor_failed" } });
+  expect(f.judge.evaluate).toHaveBeenCalledOnce();
 });
 
 it.each(["incomplete", "uncertain", "complete"])("new actor contract preserves an unfinished participant stop despite judge verdict %s", async verdict => {
@@ -585,6 +612,50 @@ it.each(["incomplete", "uncertain", "complete"])("new actor contract preserves a
   const task = f.tasks.get(f.id);
   expect(task.termination).toMatchObject({ reason: "satisfied", success: null, endpointAttainment: "not_claimed", actorClaim: { endpointStatus: "uncertain", remainingWork: expect.stringContaining("measurements") } });
   expect(task.events.find(e => e.kind === "actor_completion_judgment").verdict).toBe(verdict);
+});
+
+it.each(["native", "decisions"].flatMap(engine => ["incomplete", "uncertain"].map(verdict => ({ engine, verdict }))))("endpoint benchmark $engine continues after a stop and judge $verdict until approval", async ({ engine, verdict }) => {
+  const benchmark = setupDefinitions.endpointBenchmarkActorSetup();
+  const first = action("finish", { reason: verdict === "uncertain" ? "abandoned" : "satisfied", satisfaction: 3 });
+  const last = action("finish", { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "", satisfaction: 4 });
+  const choices = [first, action("click"), last];
+  let actorFactory = null;
+  if (engine === "decisions") {
+    benchmark.settings.decision = { contractId: "openai-decisions-codex-text-v2", providerId: "fixture-openai", model: "gpt-6-luna" };
+    let operations = 0, reports = 0;
+    actorFactory = async options => (await import("../desktop/eval-main/decision-task-actor.mjs")).createDecisionTaskActor({ ...options,
+      runtime: { textRuntime: {}, decide: async request => {
+        const kind = operations++ === 1 ? "click" : "finish";
+        const choice = request.questions[0].choices.find(c => JSON.parse(c.description).kind === kind);
+        expect(choice).toBeDefined();
+        return { answer: { type: "choice", name: "action", choice: choice.value }, usage: null };
+      } },
+      createTextActor: async () => ({ close: async () => {}, decide: async observation => ({ action: { ...(reports++ === 0 ? first : last), ref: observation.selectedOperation.ref }, usage: null }) }),
+    });
+  }
+  let judgments = 0;
+  const f = await fixture({ actorSetup: benchmark, actorFactory, completionJudge: COMPLETION_JUDGE_SPEC,
+    decide: () => choices.shift(), judgeEvaluate: async () => ++judgments === 1
+      ? { verdict, evidenceExplanation: "Rollback trigger missing", continuationHint: "Please add a concrete rollback trigger.", usage: null }
+      : { verdict: "complete", evidenceExplanation: "Trigger supplied", continuationHint: "", usage: null } });
+  await f.done;
+  const task = f.tasks.get(f.id);
+  expect(task.events.filter(e => e.kind === "actor_completion_judgment").map(e => e.verdict)).toEqual([verdict, "complete"]);
+  expect(f.seen[1].observation.completionJudgeFeedback).toBe("Please add a concrete rollback trigger.");
+  expect(f.seen[1].observation.availableActions).not.toContain("finish");
+  expect(f.dispatches).toEqual(["/api/threads/1/interactions"]);
+  expect(task).toMatchObject({ completions: 2, termination: { reason: "endpoint_reached", endpointAttainment: "judge_reported" } });
+});
+
+it.each([false, true])("endpoint benchmark cannot bypass response admission or action exhaustion during recovery (navigation=%s)", async navigateOnly => {
+  let choices = 0;
+  const f = await fixture({ actorSetup: setupDefinitions.endpointBenchmarkActorSetup(), completionJudge: COMPLETION_JUDGE_SPEC,
+    maxActions: 2, maxCompletions: 1, navigateOnly,
+    decide: () => ++choices === 1 ? action("finish", { reason: "satisfied", satisfaction: 3 }) : action("click"),
+    judgeEvaluate: async () => ({ verdict: "incomplete", evidenceExplanation: "Missing trigger", continuationHint: "Please check the rollback trigger.", usage: null }) });
+  await f.done;
+  expect(f.dispatches).toEqual([]); expect(f.judge.evaluate).toHaveBeenCalledOnce();
+  expect(f.tasks.get(f.id)).toMatchObject({ completions: 1, termination: { reason: navigateOnly ? "budget_exhausted" : "actor_failed" } });
 });
 
 it("reads historical inline completion screenshots with their original digest after reopen", async () => {
@@ -861,4 +932,38 @@ it("a fresh no-action reaction ends recovery before a later question races", asy
   expect(f.browser.act).toHaveBeenCalledTimes(3);
   expect(f.dispatches).toEqual(["/api/threads/1/interactions/1/live-answers"]);
   expect(f.tasks.get(f.id).completions).toBe(1);
+});
+
+it.each([false, true])("persists both actual Decisions judge stages across service recovery or reporter failure (failure=%s)", async reportFails => {
+  const { createCompletionJudge, COMPLETION_JUDGE_EVIDENCE_V2, COMPLETION_DECISION_CONTRACT } = await import("../desktop/eval-main/task-completion-judge.mjs");
+  const spec = { ...structuredClone(COMPLETION_JUDGE_SPEC), version: "completion-judge-v3-decisions", evidenceContract: structuredClone(COMPLETION_JUDGE_EVIDENCE_V2), decision: { contractId: COMPLETION_DECISION_CONTRACT.id, providerId: "fixture-openai", model: "gpt-6-luna" } };
+  const requests = []; let calls = 0;
+  const choices = [action("finish", { reason: "endpoint_reached", satisfaction: 3, endpointStatus: "reached", remainingWork: "" }), action("click"), action("finish", { reason: "endpoint_reached", satisfaction: 4, endpointStatus: "reached", remainingWork: "" })];
+  const f = await fixture({ actorSetup: setupDefinitions.endpointBenchmarkActorSetup(), completionJudge: spec,
+    completionJudgeRuntime: { textRuntime: {}, decide: async body => { requests.push(body); return { answer: { type: "choice", name: "completion_verdict", choice: ++calls === 1 ? "incomplete" : "complete" }, usage: { input_tokens: 42 } }; } },
+    completionJudgeFactory: options => createCompletionJudge({ ...options, createActor: async () => ({ close: async () => {}, decide: async (_input, _signal, { outputSchema }) => {
+      if (reportFails) throw new Error("PRIVATE_PROVIDER_ERROR");
+      const verdict = outputSchema.properties.verdict.enum[0];
+      return { action: { verdict, evidenceExplanation: verdict === "complete" ? "Dates are visibly included in the plan." : "The trip dates remain unspecified.", continuationHint: verdict === "complete" ? "" : "Please make the trip dates explicit." }, usage: { input_tokens: calls * 100 } };
+    } }) }), decide: () => choices.shift() });
+  await f.done; const session = f.tasks.get(f.id);
+  const stages = session.events.filter(e => e.kind === "actor_completion_stage");
+  expect(stages.slice(0, 3).map(e => [e.stage.engine, e.stage.phase])).toEqual([["decisions", "requested"], ["decisions", "completed"], ["codex", "requested"]]);
+  expect(stages[1].stage.requestUsage).toEqual({ input_tokens: 42 });
+  const reopened = await new HumanTaskService(f.options).open();
+  expect(await reopened.completionJudgeStageInput(f.id, stages[0].id)).toEqual(requests[0]);
+  expect((await reopened.completionJudgeStageInput(f.id, stages[2].id)).outputSchema.properties.verdict.enum).toEqual(["incomplete"]);
+  const judgments = session.events.filter(e => e.kind === "actor_completion_judgment");
+  if (reportFails) {
+    expect(judgments).toEqual([]); expect(session.status).toBe("interrupted"); expect(session.termination.reason).not.toBe("endpoint_reached");
+    expect(stages.at(-1).stage).toMatchObject({ engine: "codex", phase: "failed", nativeSessionUsage: null }); expect(f.dispatches).toEqual([]);
+  } else {
+    expect(judgments.map(e => e.verdict)).toEqual(["incomplete", "complete"]);
+    expect(session.termination.reason).toBe("endpoint_reached"); expect(f.dispatches).toEqual(["/api/threads/1/interactions"]);
+    expect(f.seen[1].observation.completionJudgeFeedback).toBe("Please make the trip dates explicit.");
+  }
+  expect(JSON.stringify(session.events)).not.toMatch(/PRIVATE_PROVIDER_ERROR|SECRET RUBRIC/);
+  expect((await reopened.export(f.id)).bundle.session.events.filter(e => e.kind === "actor_completion_stage")).toEqual(stages);
+  reopened.find(f.id).events.find(e => e.id === stages[0].id).stage.questions[0].instructions += "forged";
+  await expect(reopened.export(f.id)).rejects.toThrow("integrity");
 });

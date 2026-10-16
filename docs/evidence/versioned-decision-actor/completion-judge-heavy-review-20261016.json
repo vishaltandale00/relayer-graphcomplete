@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewType": "Adversarial heavy-evidence and final required-versus-actual review",
+  "reviewedAt": "2026-10-16T20:20:34.952682+00:00",
+  "workspaceDigest": "c67a5acedc3f370141c46ac4ffcea27d14f81e2795f43586b49fd3e5a4957dc1",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "bindings": {
+    "docs/evidence/versioned-decision-actor/completion-judge-verification-20261016.json": "86b0ab82d01a22d0328b784faabb0422fa9fed7b53563f77db1fd92a0493ed33",
+    "docs/evidence/versioned-decision-actor/completion-judge-20261016.md": "5d1a2cd328c3849382f273a4fbdc6449d82eab0333e0b78c0d30d2edcbdf65ba",
+    "docs/evidence/versioned-decision-actor/completion-judge-source-20261016.json": "d46816e4059191d84e430714f456e6792195148e79d18a4c9c158187e70524c6",
+    "docs/evidence/versioned-decision-actor/completion-judge-review-20261016.json": "369a767cdc531deb1fa1672ac7cbf1223fb4e4bcf0fcfd8b329fbd6659860fe0",
+    "docs/evidence/desktop-social-preview/receipt.json": "184c3c933eca17300f4dcc9526036c145e0899c04167702fde58215ea572216b",
+    "docs/evidence/desktop-social-preview/light.png": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+    "docs/evidence/desktop-social-preview/dark.png": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+  },
+  "reviewedScope": [
+    "All31 final source-file hashes and sorted path/NUL/bytes aggregate reverified; static review remains separately retained",
+    "All15 referenced log hashes and byte lengths, source receipt and social-preview artifact hashes independently verified",
+    "Final focused294 tests/10files; complete root formatting/Clippy/Rust/doc/crash/native/package/TypeScript/workspace stages and Vitest4360passed3skipped; secret-boundary2,Python99,receipt lint and PRD readability",
+    "Final build and compiled-runtime12/12 pass; full-browser named chapter passes, exact native actor observe-timeout failure after Send/Invoke, and unreached later chapters",
+    "Development collection/assertion failures retained distinctly from final-source outcomes; no unchanged browser retry or deadline/assertion weakening",
+    "SOC-003 production Electron generated capture receipt matches checked-in receipt, source/served renderer hashes and aggregate,1200x630 distinct-theme PNG identities, cancellation and cleanup assertions; previously visually inspected PNGs remain byte-identical",
+    "Historical paid actor comparison remains pinned to its original base/source and native completion judge; no new Decisions completion-judge live inference/calibration/performance claim"
+  ],
+  "verifiedOutcomes": {
+    "focused": {
+      "filesPassed": 10,
+      "testsPassed": 294
+    },
+    "rootCheck": {
+      "passed": true,
+      "vitestFilesPassed": 334,
+      "vitestFilesSkipped": 1,
+      "vitestTestsPassed": 4360,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 99
+    },
+    "buildPassed": true,
+    "compiledRuntimeTestsPassed": 12,
+    "fullWeb": {
+      "passed": false,
+      "newCompletionJudgeChapterPassed": true,
+      "otherPassed": [
+        "lifecycle/host/review authority",
+        "provider settings",
+        "Decisions actor revision",
+        "input revision",
+        "endpoint benchmark UI",
+        "actor input-v4 and actual Send",
+        "dispatch/native-select/redraw"
+      ],
+      "failure": "Existing native proveTaskActor interrupted in observe after Send/Invoke (two additional submissions after initial request), expected completed at scripts/test-eval-web.mjs:1145",
+      "laterChapters": "unreached; not certified"
+    },
+    "wholeRequiredPortfolioPassed": false
+  },
+  "socialPreview": {
+    "authority": [
+      "PRD SOC-003",
+      "ADR0012",
+      "docs/evidence/desktop-social-preview/README.md"
+    ],
+    "generatedReceiptEqualsCheckedInReceipt": true,
+    "allSourceAndRendererBindingsVerified": true,
+    "rendererAggregate": "70a8e248828da4ce38c9b3bf084e6aae5a288751828be0b9137b62f3e6528655",
+    "lightPNG": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+    "darkPNG": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+    "bothDimensions": [
+      1200,
+      630
+    ],
+    "cancellationAndCleanupPassed": true,
+    "imagesByteIdenticalToEarlierVisuallyReviewedCaptures": true,
+    "qualification": "Local production Electron capture/integrity only; no hosted-social-crawler or release proof"
+  },
+  "verdict": "No material mismatch in final evidence claims, exact hashes or required-versus-actual boundaries. Check/build/compiled and new judge browser chapter pass are supported. The whole required portfolio remains incomplete because full web failed.",
+  "findings": [],
+  "unresolved": [
+    "Full-browser native actor observation timeout remains unresolved; later chapters were not reached. This review does not establish that failure is unrelated or harmless.",
+    "Live Decisions completion-judge accuracy, calibration, equivalence, latency and cost remain unproved.",
+    "Diagnostic stage usage can be partial or unknown; cumulative native usage must not be summed or represented as a subscription invoice."
+  ],
+  "reviewerActions": {
+    "paidInference": false,
+    "newTestsOrBuilds": false,
+    "codeEdits": false,
+    "historicalReceiptEdits": false
+  },
+  "certification": "Non-certifying until included as a bounded PR assertion. Invalidated by changes to the bound source/evidence. No full-required-portfolio or release certification."
+}

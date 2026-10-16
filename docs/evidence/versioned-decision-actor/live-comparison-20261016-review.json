@@ -1,0 +1,16 @@
+{
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16",
+  "implementationWorkspaceDigest": "dedd1cc66f3d41a06250a6c9274b16f79cace9184a5df83c7b572f79f958d5d2",
+  "reportSha256": "a1a8dab75e28aed53797344e8d10e42d1a921d59609a5d3fda859c0fc40537b0",
+  "metricsSha256": "5594eadb444a9565974febd358023178096a19ac8ba2e6bcf9b835befd413d50",
+  "scope": "Report and metrics against the exact runner, raw timing/API/task records, immutable exports and native rollout token-usage records referenced and hashed by the metrics. Cumulative native accounting, nested timings, eight proposals/seven recorded actions, judge asymmetry, experimental roots without promotion, and bounded cost claims.",
+  "verdict": "No remaining material mismatch found. All recorded raw-file and native-rollout hashes match.",
+  "unresolvedMaterialAuditFindings": [],
+  "limitations": [
+    "Non-certifying without a PR.",
+    "One pair on a deterministic candidate fixture establishes no general performance, quality, realism or total-cost advantage.",
+    "Recorded judge verdicts are not independent proof of equivalent candidate delivery or endpoint success.",
+    "Invalidated if either reviewed report or metrics file changes."
+  ]
+}

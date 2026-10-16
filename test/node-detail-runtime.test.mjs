@@ -7,6 +7,7 @@ import { compiledNodeDetailReviewControls, isResolvedInvokeAction, mountCompiled
 import { createReviewPresentationAdapter } from "../desktop/renderer/src/review-tools.js";
 import { interactionForThread, workspaceTurns, rootLayerPath, appendLayerPath } from "../desktop/renderer/src/product-workspace/model.js";
 import { createProductWorkspace, renderProductNodeDetail } from "../desktop/renderer/src/product-workspace/workspace.js";
+import { validateInputStage } from "../desktop/renderer/src/node-input-controls.js";
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -44,6 +45,42 @@ function mountedCss(shadowRoot, index) {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("compiled Node Detail product runtime", () => {
+  it("retains a partial multi-select draft through refusal and refresh until a valid commit", async () => {
+    const window = new Window();
+    const host = window.document.createElement("div"); window.document.body.append(host);
+    const action = { id: 1, kind: "input", control: "multi_select", minimumSelections: 2,
+      options: [{ key: "a", label: "A" }, { key: "b", label: "B" }] };
+    const detail = compiledPackage({ version: 1, components: [{ id: "form", order: 0,
+      html: '<select multiple data-gc-mount="signals"></select>', css: "" }], assets: [],
+      mounts: [{ id: "signals", componentId: "form", kind: "capability", host: "select",
+        capability: { kind: "input", action: { clientKey: "signals", sourceNode: { clientKey: "question" }, sourceLayer: { clientKey: "root" } } } }] });
+    const commits = [];
+    const runtime = await mountCompiledNodeDetail({ host, detail, resolveAction: () => action,
+      capabilityState: { signals: { value: [], inputBoundary: "original" } },
+      onInput: async (_action, value) => {
+        const issue = validateInputStage(action, value); if (issue) throw new Error(issue.message);
+        commits.push(value); runtime.updateCapability("signals", { value, busy: false, error: null });
+      } });
+    const field = host.shadowRoot.querySelector("select");
+    // Happy DOM caches selectedOptions after a read without invalidating it
+    // when option.selected changes. Model Chromium's live collection here.
+    Object.defineProperty(field, "selectedOptions", { get: () => [...field.options].filter(option => option.selected) });
+    const change = async () => { field.dispatchEvent(new window.Event("change", { bubbles: true })); await window.happyDOM.waitUntilComplete(); };
+    field.options[0].selected = true; await change();
+    expect(commits).toEqual([]); expect(field.getAttribute("aria-invalid")).toBe("true");
+    expect([...field.selectedOptions].map(o => o.value)).toEqual(["a"]);
+    runtime.updateCapability("signals", { value: [], disabled: false, inputBoundary: "original" });
+    expect([...field.selectedOptions].map(o => o.value)).toEqual(["a"]);
+    field.options[1].selected = true; await change();
+    expect(commits, field.title).toEqual([["a", "b"]]); expect(field.hasAttribute("aria-invalid")).toBe(false);
+    field.options[1].selected = false; await change();
+    expect(commits).toEqual([["a", "b"]]);
+    expect([...field.selectedOptions].map(o => o.value)).toEqual(["a"]);
+    expect(field.getAttribute("aria-invalid")).toBe("true");
+    runtime.updateCapability("signals", { value: [], inputBoundary: "different" });
+    expect([...field.selectedOptions]).toEqual([]);
+    runtime.dispose();
+  });
   it.each([false, true])("delivers live answers while ordinary draft restoration is unavailable (authored=%s)", async (authored) => {
     const window = new Window({ url: "http://127.0.0.1:3000" });
     vi.stubGlobal("document", window.document);
@@ -541,6 +578,8 @@ describe("compiled Node Detail product runtime", () => {
     expect(shadow.activeElement).toBe(input);
     expect(input.disabled).toBe(true);
     expect(input.getAttribute("aria-busy")).toBe("true");
+    expect([...input.selectedOptions].map((option) => option.value)).toEqual(["one", "two"]);
+    runtime.updateCapability("input", { value: ["two"], busy: false, error: null });
     expect([...input.selectedOptions].map((option) => option.value)).toEqual(["two"]);
     expect(resolveAction).toHaveBeenCalledTimes(8);
   });

@@ -1,0 +1,80 @@
+Default check (first attempt)
+failures:
+
+---- environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees stdout ----
+
+thread 'environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees' (87003230) panicked at crates/relayer-app-server/src/environment.rs:3140:9:
+assertion `left == right` failed
+  left: Unavailable
+ right: Git
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- environment::tests::shadow_worktree_diff_supports_sha256_split_indexes stdout ----
+
+thread 'environment::tests::shadow_worktree_diff_supports_sha256_split_indexes' (87005065) panicked at crates/relayer-app-server/src/environment.rs:4665:9:
+assertion `left == right` failed
+  left: Unavailable
+ right: Git
+
+---- environment::tests::global_ignore_submodules_all_preserves_diff_semantics_without_helpers stdout ----
+
+thread 'environment::tests::global_ignore_submodules_all_preserves_diff_semantics_without_helpers' (87001776) panicked at crates/relayer-app-server/src/environment.rs:5241:9:
+assertion `left == right` failed
+  left: Unavailable
+ right: Git
+
+
+failures:
+    environment::tests::global_ignore_submodules_all_preserves_diff_semantics_without_helpers
+    environment::tests::repository_identity_allows_selected_subdirectories_and_linked_worktrees
+    environment::tests::shadow_worktree_diff_supports_sha256_split_indexes
+
+test result: FAILED. 395 passed; 3 failed; 0 ignored; 0 measured; 0 filtered out; finished in 72.50s
+
+error: test failed, to rerun pass `-p relayer-app-server --lib`
+
+Default check (RUST_TEST_THREADS=2)
+failures:
+
+---- environment::tests::command_runner_enforces_start_timeout_and_output_bounds stdout ----
+
+thread 'environment::tests::command_runner_enforces_start_timeout_and_output_bounds' (87029802) panicked at crates/relayer-app-server/src/environment.rs:3652:9:
+assertion failed: matches!(run_bounded_command(executable.as_os_str(), directory.path(),
+    &["output"], Duration::from_secs(1)), Err(GitRunError::OutputTooLarge))
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    environment::tests::command_runner_enforces_start_timeout_and_output_bounds
+
+test result: FAILED. 397 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 88.38s
+
+error: test failed, to rerun pass `-p relayer-app-server --lib`
+
+Browser chapter results
+PASS interrupted startup: pending native child terminated and profile lock released
+PASS real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation
+PASS host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart
+PASS Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)
+PASS human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export
+PASS Decisions actor revision: dashboard publication/selection without promotion, real graph navigation, constrained text stopping, reopen/export and original revision preserved (fixture inference)
+PASS actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal
+PASS actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection
+PASS actor redraw action: production refresh detached the original and exact replacement activation succeeded
+PASS actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded
+
+Later browser failure
+AssertionError [ERR_ASSERTION]: [{"kind":"submission"},{"kind":"thread_started"},{"kind":"actor_started"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"presentation"},{"kind":"actor_action_completed"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"actor_action_completed"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"submission"},{"kind":"actor_action_completed"},{"kind":"presentation"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"presentation"},{"kind":"actor_action_completed"},{"kind":"actor_observation"},{"kind":"actor_action"},{"kind":"submission"},{"kind":"presentation"},{"kind":"actor_action_completed"},{"kind":"presentation"},{"kind":"presentation"},{"kind":"actor_error","id":"human-cb163bbb-9d74-408d-bdf5-b77f6a2db589:49","sequence":49,"at":"2026-10-16T02:48:43.746Z","category":"timeout","message":"Actor timed out. Review the saved trajectory before starting another task.","phase":"observe"},{"kind":"actor_interrupted"}]
+    at proveTaskActor (file:///Volumes/2T-SSD/worktrees/ae4e/relayer-graphcomplete/scripts/test-eval-web.mjs:1026:12)
+  actual: 'interrupted',
+  expected: 'completed',
+
+Final full JavaScript portfolio
+ Test Files  328 passed | 1 skipped (329)
+      Tests  4356 passed | 3 skipped (4359)
+   Duration  416.95s (transform 21.74s, setup 0ms, import 79.36s, tests 862.83s, environment 23ms)
+
+Final compiled-runtime proof
+ Test Files  1 passed (1)
+      Tests  12 passed (12)
+   Duration  19.36s (transform 636ms, setup 0ms, import 924ms, tests 18.37s, environment 0ms)

@@ -7,19 +7,19 @@ import { createProviderAdapterRegistry } from "../desktop/main/providers/provide
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function setup({ managed = false, failing = false, credentialStore, now, accountStatus = "connected", closeFails = false, scheduleTimeout, cancelTimeout, updatesDue = [], inputModalities = ["text", "image"], modelRules = { allow: [], deny: [] } } = {}) {
+async function setup({ managed = false, openai = false, failing = false, credentialStore, now, accountStatus = "connected", closeFails = false, scheduleTimeout, cancelTimeout, updatesDue = [], inputModalities = ["text", "image"], modelRules = { allow: [], deny: [] } } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "eval-provider-setup-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   let stored = [];
   let busy = false;
   const snapshots = new Map();
   const dependencies = [];
-  const adapterId = managed ? "codex-subscription" : "openrouter";
+  const adapterId = managed ? "codex-subscription" : openai ? "openai-api" : "openrouter";
   const selection = { harnessId: "codex-basic", familyId: 1, providerId: "chosen", modelId: "gpt-test" };
   const registry = createProviderAdapterRegistry([{
     adapterId, implementationVersion: "1", label: "Test provider",
     accessContract: managed ? "managed-runtime@1" : "secret@1",
-    defaultEndpoint: managed ? null : "https://provider.example/v1",
+    defaultEndpoint: managed ? null : openai ? "https://api.openai.com/v1" : "https://provider.example/v1",
     connection: managed ? { mode: "managed-login" } : { mode: "secret-fields", fields: [{ id: "api-key", label: "Key", kind: "secret" }] },
     create: ({ definition, ...deps }) => {
       dependencies.push(deps);
@@ -34,7 +34,7 @@ async function setup({ managed = false, failing = false, credentialStore, now, a
         credentials: { login: async () => ({ authUrl: "https://provider.example/login" }), account: async () => ({ status: accountStatus }), logout: async () => ({ status: "disconnected" }) },
         executionAccess: async () => managed
           ? ({ kind: "managed-runtime", runtimeId: "codex", environment: deps.environment })
-          : ({ kind: "secret", value: deps.secrets?.["api-key"] }),
+          : openai ? ({ kind: "secret", endpoint: definition.endpoint, fields: { "api-key": deps.secrets?.["api-key"] } }) : ({ kind: "secret", value: deps.secrets?.["api-key"] }),
         close: async () => { if (closeFails) throw new Error("native cancellation failed"); },
       };
     },
@@ -43,6 +43,12 @@ async function setup({ managed = false, failing = false, credentialStore, now, a
   const due = new Set(updatesDue);
   const publishHarnessReadiness = vi.fn(async (updates) => { for (const { harnessId } of updates) due.delete(harnessId); });
   const fetchImpl = vi.fn(async (url, options) => {
+    if (String(url).startsWith("https://api.openai.com/v1/")) {
+      expect(options.headers.Authorization).toBe("Bearer private-key");
+      expect(options.redirect).toBe("error");
+      if (String(url).endsWith("/models/gpt-6-luna")) return Response.json({ id: "gpt-6-luna" });
+      return Response.json({ model: "gpt-6-luna", answers: [{ type: "choice", name: "action", choice: "action-0", ignored: "private-key" }], usage: { input_tokens: 12, arbitrary: "private-key" } });
+    }
     expect(options.headers.Cookie).toBe("control=private");
     if (url.pathname === "/api/model-settings") return Response.json({ defaults: { providerId: "chosen" } });
     if (url.pathname === "/api/model-selection/default") return Response.json(selection);
@@ -73,6 +79,26 @@ async function setup({ managed = false, failing = false, credentialStore, now, a
 }
 
 describe("Eval production provider setup", () => {
+  it.each(["openai-decisions-codex-text-v1", "openai-decisions-codex-text-v2"])("%s preflights both pinned actor routes and confines API credentials to the Decisions transport", async contractId => {
+    const f = await setup({ openai: true });
+    await f.connect();
+    const native = { executable: "/managed/codex", environment: { CODEX_HOME: "/isolated" } };
+    const text = vi.fn().mockResolvedValue(native);
+    const service = { ...f.service, resolveCodexJudgeRuntime: text };
+    const config = { model: "gpt-test", modelReasoningEffort: "low", decision: { contractId, providerId: "chosen", model: "gpt-6-luna" } };
+    const runtime = await service.resolveTaskActorRuntime(config);
+    expect(runtime.textRuntime).toBe(native);
+    expect(text).toHaveBeenCalledWith(config, {});
+    const result = await runtime.decide({ model: "gpt-6-luna", questions: [] });
+    expect(result).toEqual({ answer: { type: "choice", name: "action", choice: "action-0" }, usage: { input_tokens: 12 } });
+    expect(JSON.stringify({ config, runtime, result })).not.toContain("private-key");
+    await expect(service.resolveTaskActorRuntime({ ...config, decision: { ...config.decision, providerId: "missing" } })).rejects.toMatchObject({ code: "actor_authentication_required" });
+    text.mockRejectedValueOnce(new Error("Text runtime unavailable"));
+    await expect(service.resolveTaskActorRuntime(config)).rejects.toThrow("Text runtime unavailable");
+    expect(f.fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/decisions"))).toHaveLength(1);
+    await service.resolveTaskActorRuntime({ model: "gpt-test" });
+    expect(text).toHaveBeenLastCalledWith({ model: "gpt-test" }, {});
+  });
   it("retains API credentials only in the execution lease while exposing safe persisted definitions and validated defaults", async () => {
     const fixture = await setup();
     await fixture.service.start();
@@ -247,4 +273,25 @@ describe("Eval production provider setup", () => {
     await expect(fixture.service.resolveCodexJudgeRuntime({ model: "gpt-test", modelReasoningEffort: "low" })).rejects.toMatchObject({ code: "actor_model_unsupported" });
   });
 
+});
+
+it("preflights the independently pinned Decisions completion judge and keeps its contract separate from actor execution", async () => {
+  const { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_EVIDENCE_V2, COMPLETION_DECISION_CONTRACT } = await import("../desktop/eval-main/task-completion-judge.mjs");
+  const f = await setup({ openai: true }); await f.connect();
+  const text = vi.fn(async () => ({ executable: "/managed/codex", environment: { CODEX_HOME: "/isolated" } }));
+  const service = { ...f.service, resolveCodexJudgeRuntime: text };
+  const config = { ...structuredClone(COMPLETION_JUDGE_SPEC), evidenceContract: structuredClone(COMPLETION_JUDGE_EVIDENCE_V2), decision: { contractId: COMPLETION_DECISION_CONTRACT.id, providerId: "chosen", model: "gpt-6-luna" } };
+  const runtime = await service.resolveCompletionJudgeRuntime(config);
+  expect(text).toHaveBeenCalledWith(config, {});
+  expect(f.fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/decisions"))).toHaveLength(0);
+  await runtime.decide({ model: "gpt-6-luna", questions: [] });
+  expect(JSON.stringify({ runtime, config })).not.toContain("private-key");
+  await expect(service.resolveTaskActorRuntime(config)).rejects.toThrow("contract");
+  await expect(service.resolveCompletionJudgeRuntime({ ...config, decision: { ...config.decision, contractId: "openai-decisions-codex-text-v2" } })).rejects.toThrow("configuration");
+  await expect(service.resolveCompletionJudgeRuntime({ ...config, decision: { ...config.decision, providerId: "missing" } })).rejects.toMatchObject({ code: "actor_authentication_required" });
+  text.mockRejectedValueOnce(new Error("Feedback route unavailable"));
+  await expect(service.resolveCompletionJudgeRuntime(config)).rejects.toThrow("Feedback route unavailable");
+  expect(f.fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/decisions"))).toHaveLength(1);
+  await service.resolveCompletionJudgeRuntime(COMPLETION_JUDGE_SPEC);
+  expect(text).toHaveBeenLastCalledWith(COMPLETION_JUDGE_SPEC, {});
 });

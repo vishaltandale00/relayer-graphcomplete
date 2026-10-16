@@ -6,6 +6,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { actorConfiguration } from "./task-actor.mjs";
+import { completionJudgeStageRequest } from "./task-completion-judge.mjs";
 
 const clone = (value) => structuredClone(value);
 const digest = (value) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
@@ -113,6 +114,11 @@ export class HumanTaskService {
     if (digest(input) !== event.inputDigest) throw failure("Completion judge input integrity failure.");
     return input;
   }
+  async completionJudgeStageInput(id, eventId) {
+    const event = this.find(id).events.find(item => item.id === eventId && item.kind === "actor_completion_stage");
+    if (!event) throw failure("Missing completion judge stage.", 404);
+    return completionJudgeStageRequest(event.stage, await this.completionJudgeInput(id, event.evidenceEventId));
+  }
   interruptActor(id, reason) {
     return this.serial(async () => {
       const session = this.find(id);
@@ -158,7 +164,8 @@ export class HumanTaskService {
         if (resolved.completionJudgeSetup) session.completionJudgeSetup = resolved.completionJudgeSetup;
         if (resolved.evaluatorRelease) session.evaluatorRelease = resolved.evaluatorRelease;
         if (setup) session.actorSetup = setup;
-        session.actor = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor); }
+        session.actor = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor);
+        if ((session.actor.decision || completionJudgeSpec(session)?.decision) && selection.liveAuthorization?.billingMode === "subscription-only") throw failure("This task authorizes subscription use only. Select native Codex actor and completion-judge revisions."); }
       this.sessions.unshift(session);
       await this.persist();
       try {
@@ -267,7 +274,7 @@ export class HumanTaskService {
       const previousEventCount = session.events.length;
       if (starts) {
         await abortable(signal, () => this.evalService.assertHumanTaskCatalog?.(session.prepared));
-        if (session.completions >= session.maxCompletions) throw failure("Completion limit reached. Finish this task session.", 409);
+        if (session.completions >= session.maxCompletions) throw failure("Completion limit reached. Browse existing results or finish this task.", 409);
         if (route === "/interactions" || retries) {
           const selection = session.prepared.execution.modelResolution;
           body = { ...body };
@@ -512,7 +519,7 @@ export class HumanTaskService {
           committed.set(`${threadId}:${turn.id}`, turn);
         }
       }
-      const currentNative = session.actorSetup?.behaviorContract?.observationContract?.id === "task-actor-observation-v3";
+      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4"].includes(session.actorSetup?.behaviorContract?.observationContract?.id);
       const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind)
         || (currentNative && (event.kind === "live_answer_reconciled" || (event.kind === "product_action" && event.path?.endsWith("/live-answers")))));
       const projected = candidates.slice(-80).map(event => {
@@ -659,7 +666,10 @@ export class HumanTaskService {
       if (!["completed", "failed", "interrupted"].includes(session.status)) throw failure("Finish the session before exporting immutable evidence.");
       if (session.status === "completed") await this.settled(session);
       const graphAnnotations = this.annotationSnapshotLoader && session.threadIds.length ? await this.annotationSnapshotLoader(session.threadIds) : null;
-      for (const event of session.events) { if (event.kind === "actor_completion_evidence" && event.input) await this.completionJudgeInput(id, event.id); }
+      for (const event of session.events) {
+        if (event.kind === "actor_completion_evidence" && event.input) await this.completionJudgeInput(id, event.id);
+        if (event.kind === "actor_completion_stage" && event.stage?.phase === "requested") await this.completionJudgeStageInput(id, event.id);
+      }
       const actorScreenshots = [];
       for (const event of session.events) {
         if (event.kind === "actor_observation" && event.observation?.screenshotArtifact) actorScreenshots.push({ eventId: event.id, ...event.observation.screenshotArtifact, dataUrl: await this.actorScreenshot(id, event.id) });

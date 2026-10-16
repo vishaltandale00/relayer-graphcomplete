@@ -7,6 +7,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { SetupRegistry, defaultActorSetup, setupDigest } from "../desktop/eval-main/setup-registry.mjs";
 import { HumanTaskService } from "../desktop/eval-main/human-task-service.mjs";
 import { TaskActorService } from "../desktop/eval-main/task-actor-service.mjs";
+import { createDecisionTaskActor } from "../desktop/eval-main/decision-task-actor.mjs";
 import { createEvalDashboard, createHumanTaskSurface } from "../desktop/eval-main/web-host.mjs";
 
 const cleanup = [];
@@ -73,6 +74,75 @@ it("publishes from exact human feedback and executes a selected immutable revisi
   expect(exported.bundle.session.actorSetup).toEqual(reopened.get(revised.actorSetup.id));
   expect(exported.bundle.session.actorSetup.feedback[1].feedback.value).toBe(1);
   expect(f.tasks.get(original.id).actorSetup).toEqual(oldSetup);
+});
+
+it("switches a pinned actor revision to Decisions and back without rewriting history, promotion or exports", async () => {
+  const f = await fixture();
+  const original = await f.start();
+  await f.tasks.grade(original.id, { satisfaction: 2, comment: "Try a different action-selection implementation" });
+  const baseline = f.registry.selected("actor");
+  const decision = { contractId: "openai-decisions-codex-text-v1", providerId: "openai-test", model: "gpt-6-luna" };
+  const candidate = await f.registry.publish({ ...baseline, name: "Decisions experiment", settings: { ...baseline.settings, decision },
+    predecessorId: baseline.id, feedback: [{ sessionId: original.id, gradeIndex: 0 }] });
+  const nativeFactory = f.actors.createActor;
+  const requests = [];
+  f.actors.resolveRuntime = async config => config.decision ? { textRuntime: {}, decide: async body => {
+    requests.push(body);
+    const choice = body.questions[0].choices.find(item => JSON.parse(item.description).kind === "finish").value;
+    return { answer: { type: "choice", name: "action", choice }, usage: { input_tokens: 20 } };
+  } } : {};
+  f.actors.createActor = async options => options.config.decision ? createDecisionTaskActor({ ...options, createTextActor: async textOptions => {
+    const native = await nativeFactory(textOptions);
+    let first = true;
+    return { ...native, decide: async (...args) => {
+      const result = await native.decide(...args);
+      if (first) { first = false; result.action.reason = "endpoint_reached"; }
+      return result;
+    } };
+  } }) : nativeFactory(options);
+  const task = await f.start(candidate.id);
+  expect(task.actorSetup).toEqual(candidate);
+  expect(task.actor.decision).toEqual(decision);
+  expect(task.status).toBe("completed");
+  expect(task.events.find(event => event.kind === "actor_action").decisionEvidence).toMatchObject(decision);
+  expect(requests).toHaveLength(2);
+  expect(task.events.find(event => event.kind === "actor_action_rejected")).toMatchObject({ category: "inconsistent_finish", retryAllowed: true, decisionEvidence: decision });
+  expect(JSON.stringify(requests)).not.toMatch(/Try a different|SECRET RUBRIC/);
+  const switchedBack = await f.start(baseline.id);
+  expect(switchedBack.actor).not.toHaveProperty("decision");
+  expect(requests).toHaveLength(2);
+  expect(f.registry.selected("actor").id).toBe(baseline.id);
+  const registry = await new SetupRegistry({ stateFile: f.stateFile }).open();
+  const tasks = await new HumanTaskService(f.options).open();
+  expect(registry.get(candidate.id)).toEqual(candidate);
+  expect((await tasks.export(task.id)).bundle.session.actorSetup.settings.decision).toEqual(decision);
+  expect(tasks.get(original.id).actorSetup).toEqual(baseline);
+  await expect(f.registry.publish({ ...candidate, predecessorId: candidate.id, feedback: [{ sessionId: original.id, gradeIndex: 0 }],
+    settings: { ...candidate.settings, decision: { ...decision, model: "unpinned" } } })).rejects.toThrow("decision execution contract");
+});
+
+it("rejects unavailable decision/text preflight and subscription-only selection before candidate dispatch", async () => {
+  const f = await fixture();
+  const original = await f.start();
+  await f.tasks.grade(original.id, { satisfaction: 2, comment: "Compare the selection engine" });
+  const baseline = f.registry.selected("actor");
+  const candidate = await f.registry.publish({ ...baseline, settings: { ...baseline.settings,
+    decision: { contractId: "openai-decisions-codex-text-v1", providerId: "openai-test", model: "gpt-6-luna" } },
+  predecessorId: baseline.id, feedback: [{ sessionId: original.id, gradeIndex: 0 }] });
+  const create = vi.spyOn(f.tasks, "create");
+  for (const error of [Object.assign(new Error("Missing decision auth"), { status: 401 }),
+    Object.assign(new Error("Decision model unavailable"), { code: "actor_model_unsupported" }), new Error("Text runtime unavailable")]) {
+    f.actors.resolveRuntime = vi.fn(async config => { expect(config.decision).toEqual(candidate.settings.decision); throw error; });
+    await expect(f.actors.create({ mode: "simulated", maxCompletions: 1, endpoint: "Agreement", actorSetupRevisionId: candidate.id })).rejects.toThrow();
+    expect(create).not.toHaveBeenCalled();
+  }
+  f.actors.resolveRuntime = vi.fn(async () => ({}));
+  const selection = { mode: "simulated", maxCompletions: 1, endpoint: "Agreement", actorSetupRevisionId: candidate.id,
+    liveAuthorization: { confirmed: true, billingMode: "subscription-only" } };
+  await expect(f.actors.create(selection)).rejects.toThrow("subscription use only");
+  expect(f.actors.resolveRuntime).not.toHaveBeenCalled();
+  await expect(f.tasks.create(selection)).rejects.toThrow("subscription use only");
+  expect(f.tasks.list()).toHaveLength(1);
 });
 
 it("rejects invalid selections before any runtime or candidate spending and rejects cross-kind predecessors/authority changes", async () => {
@@ -471,4 +541,59 @@ it("selects v2 evidence through a real release and preserves the actual changed-
   const reopened = await new HumanTaskService(f.options).open(); const exported = await reopened.export(task.id);
   expect(exported.bundle.session.events.find(e => e.id === evidence.id)).toEqual(evidence); expect(exported.bundle.session.evaluatorRelease).toEqual(release);
   expect(f.registry.selected("completion-judge").spec.evidenceContract.id).toBe("completion-evidence-v1");
+});
+
+it("publishes and reopens the file-backed Decisions completion judge and a release without changing native defaults or history", async () => {
+  const f = await fixture(); const original = await f.start();
+  const native = f.registry.selected("completion-judge"); const actor = f.registry.selected("actor");
+  expect(native.spec.decision).toBeUndefined(); expect(native.promptVersion).toBe("completion-judge-v1");
+  const config = f.registry.completionJudgeConfigs().find(c => c.file === "completion-judge-v3-decisions.yaml");
+  expect(config.definition.spec.decision).toMatchObject({ contractId: "openai-decisions-completion-judge-v1", model: "gpt-6-luna" });
+  await f.tasks.grade(original.id, { satisfaction: 2, comment: "Try independent verdict selection with the same evidence." });
+  const publication = { ...config.definition, predecessorId: native.id, feedback: [{ sessionId: original.id, gradeIndex: 0 }] };
+  await expect(f.registry.publish({ ...publication, spec: { ...config.definition.spec, decision: { ...config.definition.spec.decision, providerId: "forged-provider" } } })).rejects.toThrow("snapshot");
+  const judge = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: native.id, feedback: publication.feedback });
+  const release = await f.registry.publishRelease({ name: "Decisions endpoint experiment", actorRevisionId: actor.id, completionJudgeRevisionId: judge.id, judgeRevisionId: f.registry.selected("judge").id });
+  const reopened = await new SetupRegistry({ stateFile: f.stateFile }).open();
+  expect(reopened.get(judge.id)).toEqual(judge); expect(reopened.release(release.id).completionJudgeSetup).toEqual(judge);
+  expect(reopened.selected("completion-judge")).toEqual(native); expect(reopened.selected("actor")).toEqual(actor);
+  expect(f.tasks.get(original.id).completionJudgeSetup).toBeUndefined();
+  expect(f.tasks.get(original.id).actorSetup.behaviorContract.completionJudge.decision).toBeUndefined();
+  expect(reopened.catalog().promotions).toEqual([]);
+});
+
+it.each(["independent", "release"])("rejects subscription-only use of a Decisions completion judge before discovery and task creation (%s)", async mode => {
+  const f = await fixture(); const original = await f.start(); await f.tasks.grade(original.id, { satisfaction: 2, comment: "Review execution alternatives" });
+  const config = f.registry.completionJudgeConfigs().find(c => c.file === "completion-judge-v3-decisions.yaml");
+  const judge = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: f.registry.selected("completion-judge").id, feedback: [{ sessionId: original.id, gradeIndex: 0 }] });
+  const release = await f.registry.publishRelease({ name: "API reviewer", actorRevisionId: f.registry.selected("actor").id, completionJudgeRevisionId: judge.id, judgeRevisionId: f.registry.selected("judge").id });
+  const selection = { mode: "simulated", maxCompletions: 1, endpoint: "Agreement", liveAuthorization: { billingMode: "subscription-only" }, ...(mode === "release" ? { evaluatorReleaseId: release.id } : { completionJudgeRevisionId: judge.id }) };
+  const before = f.tasks.list().length; f.runtime.mockClear();
+  await expect(f.actors.create(selection)).rejects.toThrow("subscription use only");
+  await expect(f.tasks.create(selection)).rejects.toThrow("subscription use only");
+  expect(f.tasks.list()).toHaveLength(before); expect(f.runtime).not.toHaveBeenCalled();
+});
+
+it("rejects an unavailable Decisions completion judge before creating candidate work", async () => {
+  const f = await fixture(); const original = await f.start();
+  await f.tasks.grade(original.id, { satisfaction: 2, comment: "Try a separate reviewer" });
+  const config = f.registry.completionJudgeConfigs().find(c => c.file === "completion-judge-v3-decisions.yaml");
+  const judge = await f.registry.publishCompletionJudgeConfig({ configFile: config.file, configDigest: config.digest, predecessorId: f.registry.selected("completion-judge").id, feedback: [{ sessionId: original.id, gradeIndex: 0 }] });
+  f.actors.resolveCompletionJudgeRuntime = vi.fn(async spec => { expect(spec).toEqual(judge.spec); throw new Error("PRIVATE route unavailable"); });
+  const before = f.tasks.list().length;
+  await expect(f.actors.create({ mode: "simulated", maxCompletions: 1, endpoint: "Agreement", completionJudgeRevisionId: judge.id })).rejects.toThrow("without claiming task success");
+  expect(f.tasks.list()).toHaveLength(before); expect(f.actors.resolveCompletionJudgeRuntime).toHaveBeenCalledOnce();
+});
+
+it("bootstraps a native completion judge even when an API config sorts first", async () => {
+  const f = await fixture(); const directory = join(f.directory, "sort-configs"); await mkdir(directory);
+  for (const [source, target] of [["completion-judge-v1.yaml", "completion-judge-v1.yaml"], ["completion-judge-v3-decisions.yaml", "aaa-decisions.yaml"]]) {
+    await writeFile(join(directory, target), await readFile(join("eval-configs/completion-judges", source), "utf8"));
+  }
+  const options = { stateFile: join(f.directory, "sort-registry.json"), completionJudgeConfigDirectory: directory };
+  const registry = await new SetupRegistry(options).open();
+  expect(registry.completionJudgeConfigs()[0].definition.spec.decision).toBeDefined();
+  expect(registry.selected("completion-judge").promptVersion).toBe("completion-judge-v1");
+  expect(registry.catalog().revisions.filter(item => item.kind === "completion-judge")).toHaveLength(1);
+  expect((await new SetupRegistry(options).open()).selected("completion-judge")).toEqual(registry.selected("completion-judge"));
 });
