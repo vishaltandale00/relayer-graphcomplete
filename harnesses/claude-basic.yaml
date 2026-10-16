@@ -2,14 +2,14 @@ schemaVersion: 1
 name: claude-basic
 implementation: claude.basic
 implementationVersion: 1
-revision: 12
+revision: 13
 complete:
   agentAuthored: true
 permissionBindings:
   ask:
     approvalMode: default
   auto:
-    approvalMode: acceptEdits
+    approvalMode: auto
   full:
     approvalMode: bypassPermissions
 modelRules:

@@ -48,7 +48,8 @@ export interface ClaudeSdkQueryOptions {
   readonly model: string;
   readonly allowedTools: readonly string[];
   readonly mcpServers: Readonly<Record<string, unknown>>;
-  readonly permissionMode: "default" | "acceptEdits" | "bypassPermissions";
+  readonly permissionMode: ClaudePermissionMode;
+  readonly permissionPrompts?: "none";
   readonly allowDangerouslySkipPermissions?: boolean;
   readonly pathToClaudeCodeExecutable: string;
   readonly resume?: string;
@@ -275,9 +276,10 @@ export class ClaudeBasicHarness implements Harness {
           env: environment,
           model,
           allowedTools: [
-            "Bash",
+            // In auto, the SDK classifier reviews Bash like any other unlisted tool (PRD §11.6).
+            ...(permissionMode === "auto" ? [] : ["Bash"]),
             // Auto pre-approves the coarse browser unit and native web search (PRD §11.6).
-            ...(permissionMode === "acceptEdits" ? [CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL] : []),
+            ...(permissionMode === "auto" || permissionMode === "acceptEdits" ? [CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL] : []),
             ...(previewServer === undefined ? [] : [CLAUDE_PREVIEW_TOOL]),
           ],
           mcpServers: {
@@ -285,6 +287,8 @@ export class ClaudeBasicHarness implements Harness {
             ...(previewServer === undefined ? {} : { [CLAUDE_PREVIEW_SERVER_NAME]: previewServer }),
           },
           permissionMode,
+          // No approval surface exists, so a call the classifier cannot decide is denied.
+          ...(permissionMode === "auto" ? { permissionPrompts: "none" as const } : {}),
           ...(permissionMode === "bypassPermissions" ? { allowDangerouslySkipPermissions: true } : {}),
           pathToClaudeCodeExecutable: runtime.executable,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
@@ -294,12 +298,13 @@ export class ClaudeBasicHarness implements Harness {
           stderr: () => {},
         },
       });
-      const result = await collectClaudeResult(messages, attach, signal);
+      const result = await collectClaudeResult(messages, permissionMode, attach, signal);
       if (isRoot && resumeSessionId !== undefined && result.sessionId !== resumeSessionId) throw new Error("Native conversation identity changed during resume");
       if (isRoot && result.sessionId !== undefined) this.sessionLocationIdentity = locationIdentity;
       return result;
-    } catch {
+    } catch (error) {
       if (signal?.aborted) throw abortReason(signal);
+      if (error instanceof ClaudeAutoModeUnavailableError) throw error;
       throw new Error("Claude Agent SDK completion failed.");
     } finally {
       signal?.removeEventListener("abort", abort);
@@ -329,12 +334,23 @@ function redactPersonalPresentationResult(context: HarnessRunContext, text: stri
   );
 }
 
-export function claudePermissionMode(value: unknown): "default" | "acceptEdits" | "bypassPermissions" {
+export type ClaudePermissionMode = "default" | "acceptEdits" | "auto" | "bypassPermissions";
+
+/** Auto was requested but the SDK started the session in another mode. */
+export class ClaudeAutoModeUnavailableError extends Error {
+  constructor() {
+    super("Claude auto mode is unavailable for this account or model. Choose Ask for approval or Full access.");
+    this.name = "ClaudeAutoModeUnavailableError";
+  }
+}
+
+export function claudePermissionMode(value: unknown): ClaudePermissionMode {
   switch (value) {
     case "ask":
     case "default":
       return "default";
     case "auto":
+      return "auto";
     case "acceptEdits":
       return "acceptEdits";
     case "full":
@@ -440,6 +456,7 @@ function normalizePathKey(environment: Record<string, string>, platform: NodeJS.
 
 async function collectClaudeResult(
   messages: AsyncIterable<unknown>,
+  permissionMode: ClaudePermissionMode,
   attach?: (identity: JsonObject) => void,
   signal?: AbortSignal,
 ): Promise<{ text: string; sessionId?: string }> {
@@ -448,6 +465,10 @@ async function collectClaudeResult(
   for await (const message of messages) {
     if (signal?.aborted) throw abortReason(signal);
     if (!isRecord(message)) continue;
+    // The SDK may start in another mode where auto is unavailable; never run degraded.
+    if (permissionMode === "auto" && message.type === "system" && message.subtype === "init" && message.permissionMode !== "auto") {
+      throw new ClaudeAutoModeUnavailableError();
+    }
     if (typeof message.session_id === "string" && message.session_id.trim() !== "") {
       sessionId = message.session_id;
       if (!attached) {

@@ -543,17 +543,22 @@ export class HarnessHost {
       return;
     }
     const prior = this.saved.get(descriptor.threadId);
-    const priorUpgrade = prior !== undefined
+    const priorCodexUpgrade = prior !== undefined
       && productCodexUpgradeMatches(prior.configuration, descriptor.configuration);
+    const priorClaudeUpgrade = prior !== undefined
+      && productClaudeAutoUpgradeMatches(prior.configuration, descriptor.configuration);
     const priorMatches = prior !== undefined && (canResumeHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
-      || priorUpgrade);
+      || priorCodexUpgrade || priorClaudeUpgrade);
     if (prior !== undefined && (!priorMatches
       || prior.permissionProfileId !== descriptor.permissionProfileId
       || prior.workingDirectory !== descriptor.workingDirectory)) {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
     }
-    if (priorUpgrade) {
+    if (priorCodexUpgrade) {
       console.warn(`Migrating retired product Codex configuration for harness thread ${descriptor.threadId} during registration`);
+    }
+    if (priorClaudeUpgrade) {
+      console.warn(`Migrating product Claude Auto binding for harness thread ${descriptor.threadId} during registration`);
     }
     const legacy = this.legacySaved.get(descriptor.threadId);
     const legacyUpgrade = legacy !== undefined
@@ -2652,6 +2657,30 @@ function productCodexUpgradeMatches(
 ): boolean {
   const migrated = migratedProductCodexConfiguration(prior);
   return migrated !== prior && sameHarnessExecutionConfiguration(migrated, current);
+}
+
+/**
+ * Claude Auto moved from SDK acceptEdits to the SDK classifier (PRD §11.6).
+ * The SDK takes its permission mode per query, so the native session resumes unchanged.
+ */
+function migratedProductClaudeAutoConfiguration(configuration: HarnessConfiguration): HarnessConfiguration {
+  const auto = configuration.permissionBindings.auto;
+  if ((configuration.name !== "claude-basic" && configuration.name !== "claude-basic-node-detail")
+    || configuration.implementation !== "claude.basic"
+    || configuration.implementationVersion !== 1
+    || auto?.approvalMode !== "acceptEdits") return configuration;
+  return parseHarnessConfiguration({
+    ...configuration,
+    permissionBindings: { ...configuration.permissionBindings, auto: { ...auto, approvalMode: "auto" } },
+  });
+}
+
+function productClaudeAutoUpgradeMatches(
+  prior: HarnessConfiguration,
+  current: HarnessConfiguration,
+): boolean {
+  const migrated = migratedProductClaudeAutoConfiguration(prior);
+  return migrated !== prior && canResumeHarnessExecutionConfiguration(migrated, current);
 }
 
 function migratedLegacyProductCodexConfiguration(

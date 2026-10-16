@@ -189,6 +189,15 @@ describe("harness configuration", () => {
     },
   );
 
+  it.each(["claude-basic", "claude-basic-node-detail"])("binds the shipped %s Auto profile to the Claude SDK classifier", async (name) => {
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`));
+    expect(configuration.permissionBindings).toEqual({
+      ask: { approvalMode: "default" },
+      auto: { approvalMode: "auto" },
+      full: { approvalMode: "bypassPermissions" },
+    });
+  });
+
   it("admits every production Claude subscription alias through the checked-in harness", async () => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/claude-basic.yaml"));
     expect(configuration.modelDefaults).toEqual({

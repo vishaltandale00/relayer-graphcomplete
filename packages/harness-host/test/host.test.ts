@@ -5,10 +5,12 @@ import { Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 import { RelayerGraphClient, type InteractionInput, type ResolvedPersonalPresentation } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
 import { nativeExecutionHandle } from "../src/completion-execution.js";
+import { loadHarnessConfiguration } from "../src/configuration.js";
 import { PrimeAgentHarness } from "../src/implementations/prime-agent.js";
 import type {
   Harness,
@@ -3389,6 +3391,52 @@ describe("HarnessHost", () => {
         schemaVersion: 6,
         sessions: [{ threadId: 1, configuration: current, state: { providerSessionId: "existing-session" } }],
       });
+    } finally {
+      warning.mockRestore();
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["claude-basic", "claude-basic-node-detail"])("resumes a saved %s thread across the Auto move to the SDK classifier, and only that change", async (name) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-harness-state-product-claude-"));
+    const stateFile = join(directory, "sessions.json");
+    const current = await loadHarnessConfiguration(fileURLToPath(new URL(`../../../harnesses/${name}.yaml`, import.meta.url)));
+    const saved: HarnessConfiguration = {
+      ...current,
+      revision: current.revision! - 1,
+      permissionBindings: { ...current.permissionBindings, auto: { approvalMode: "acceptEdits" } },
+    };
+    const session = (configuration: HarnessConfiguration) => ({
+      threadId: 1, configuration, permissionProfileId: "auto", workingDirectory: directory,
+      state: { claudeSessionId: "existing-session" },
+    });
+    let restoredState: HarnessSessionState | undefined;
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const host = new HarnessHost({
+      stateFile,
+      controlToken: "control",
+      implementations: { "claude.basic": (context) => {
+        restoredState = context.savedState;
+        return { async complete() {}, state: () => context.savedState ?? emptyState() };
+      } },
+    });
+    try {
+      await writeFile(stateFile, JSON.stringify({ schemaVersion: 6, sessions: [session(saved), { ...session(saved), threadId: 2 }] }), { mode: 0o600 });
+      await host.initialize();
+
+      await host.createSession({ threadId: 1, permissionProfileId: "auto", configuration: current, workingDirectory: directory });
+
+      expect(warning).toHaveBeenCalledWith("Migrating product Claude Auto binding for harness thread 1 during registration");
+      expect(restoredState).toEqual({ claudeSessionId: "existing-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8")).sessions[0]).toMatchObject({ configuration: current });
+      // Any other execution change still refuses to reuse the saved native session.
+      await expect(host.createSession({
+        threadId: 2,
+        permissionProfileId: "auto",
+        configuration: { ...current, settings: { ...current.settings, unexpected: true } },
+        workingDirectory: directory,
+      })).rejects.toThrow("Thread 2 is already pinned");
     } finally {
       warning.mockRestore();
       await host.close();
