@@ -13,11 +13,11 @@ const THREAD_COLUMNS: &str = concat!(
            COALESCE((SELECT group_project_id FROM projects WHERE id=t.project_id),t.project_id),t.checkout_context_json,
            (WITH turn AS (
                 -- The thread's human turns. Runs from invoke actions run beside the message
-                -- turns, so the most urgent active turn wins over the latest one. A turn a
-                -- model failure returned to unsent is not running, nor is a preparation that
-                -- waits for its action's Retry.
+                -- turns, so the most urgent active turn wins over the latest one. A run queued
+                -- behind another on its node is active work. A turn a model failure returned to
+                -- unsent is not running, nor is a preparation that waits for its action's Retry.
                 SELECT i.sequence,i.completion_status,
-                       i.completion_status IN ('not_started','running','submitted','waiting_for_approval')
+                       i.completion_status IN ('not_started','queued','running','submitted','waiting_for_approval')
                          AND NOT (i.completion_status='not_started' AND (SELECT a.outcome FROM interaction_attempts a WHERE a.interaction_id=i.id ORDER BY a.attempt_number DESC LIMIT 1) IS 'model_failed')
                          AND NOT "#,
     recoverable_user_preparation!("i.id"),

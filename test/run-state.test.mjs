@@ -23,6 +23,8 @@ describe("explicit run-state symbols", () => {
     expect(threadActivity([turn("failed"), turn("accepted")])).toBeNull();
     // A run a model failure returned to unsent is not running.
     expect(threadActivity([turn("not_started", { latestAttempt: { outcome: "model_failed" } })])).toBeNull();
+    // A run queued behind another on its node is active work, as the app server counts it.
+    expect(threadActivity([turn("accepted"), turn("queued")])).toBe("running");
     expect(threadActivity([])).toBeNull();
   });
 
@@ -71,6 +73,10 @@ describe("explicit run-state symbols", () => {
     expect(nodeActiveRuns(node, actions, [invocation(11, 6, "not_started")], [run(6, "not_started")])).toEqual([]);
     expect(nodeActiveRuns(node, actions, [{ ...invocation(11, 6, "submitted"), preparationRecoverable: true }], [run(6, "submitted")])).toEqual([]);
     expect(nodeRunState(node, actions, [{ ...invocation(11, 6, "not_started"), preparationRecoverable: true }], [run(6, "not_started")])).toBeNull();
+    // PAR-010 (#718): a run queued behind another on its node has its own Stop, which stops it
+    // before it starts, and the node stays marked running.
+    expect(ids(nodeActiveRuns(node, actions, [invocation(10, 5, "running"), invocation(11, 6, "queued")]))).toEqual([5, 6]);
+    expect(nodeRunState(node, actions, [invocation(10, 5, "accepted"), invocation(11, 6, "queued")])).toBe("running");
   });
 
   it("never shows an invoke waiting for its preparation's Retry as running", () => {

@@ -160,6 +160,7 @@ describe("product workspace navigation controls", () => {
     expect(turns.map((turn) => turn.id)).toEqual(["first", "second", "third"]);
     expect([
       "not_started",
+      "queued",
       "running",
       "submitted",
       "accepted",
@@ -169,6 +170,7 @@ describe("product workspace navigation controls", () => {
       "stopped",
     ].map((status) => turnStatusPresentation(status).label)).toEqual([
       "Waiting",
+      "Queued",
       "Running",
       "Running",
       "",

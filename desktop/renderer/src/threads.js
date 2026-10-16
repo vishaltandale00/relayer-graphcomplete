@@ -426,6 +426,7 @@ function layerContainsUnresolvedInvokedAction(layer, invocations = appState.acti
 
 const NONTERMINAL_INVOCATION_STATUSES = new Set([
   "not_started",
+  "queued",
   "running",
   "submitted",
   "waiting_for_approval",
@@ -500,7 +501,7 @@ function schedulePendingRefresh(threadId, { force = false } = {}) {
     && (
       interaction.projectionFresh === false
       || (thread.imported !== true
-        && ["not_started", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
+        && ["not_started", "queued", "running", "submitted", "waiting_for_approval"].includes(interaction.completionStatus)
         && !restoredDraftForInteraction(interaction))
     )
   ))

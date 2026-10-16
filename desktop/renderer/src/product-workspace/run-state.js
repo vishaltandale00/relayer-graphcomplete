@@ -9,7 +9,8 @@ export const THREAD_ACTIVITY = Object.freeze({
   failed: Object.freeze({ label: "Failed", icon: "OctagonX", live: false }),
 });
 
-const ACTIVE_STATUSES = new Set(["not_started", "running", "submitted", "waiting_for_approval"]);
+// A run queued behind another on its node (#718) is active work: it starts once that run settles.
+const ACTIVE_STATUSES = new Set(["not_started", "queued", "running", "submitted", "waiting_for_approval"]);
 
 // A thread's symbol from its latest interaction; the app server applies the same rule to thread lists.
 export function interactionActivity(interaction) {
@@ -74,12 +75,13 @@ function runIsActive(run) {
   return ACTIVE_STATUSES.has(run.completionStatus) && !interactionReturnsToUnsent(run);
 }
 
-// The statuses the product's Stop accepts. A run still starting has nothing to stop yet.
-const STOPPABLE_STATUSES = new Set(["submitted", "running", "waiting_for_approval"]);
+// The statuses the product's Stop accepts. A run still starting has nothing to stop yet; a
+// queued run stops without starting.
+const STOPPABLE_STATUSES = new Set(["queued", "submitted", "running", "waiting_for_approval"]);
 
 /**
  * The active runs a person started from the node's invoke actions, oldest first: each gets its
- * own Stop on the node. An agent's child is never one, because only its parent agent may stop it,
+ * own Stop on the node. Runs on one node run in order, so later ones wait as queued. An agent's child is never one, because only its parent agent may stop it,
  * and neither is a preparation waiting for its action's Retry.
  */
 export function nodeActiveRuns(node, actions = [], invocations = [], interactions = []) {
