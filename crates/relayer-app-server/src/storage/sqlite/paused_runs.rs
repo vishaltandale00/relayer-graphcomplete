@@ -316,8 +316,29 @@ impl SqliteProductStore {
                 RestartDiscard::SettleBeforeStart
             }
         };
+        // Durable evidence that the user discarded it, so a repeated Discard can report it as
+        // it stands while its graph Stop settles and after.
+        if matches!(
+            outcome,
+            RestartDiscard::Stopped | RestartDiscard::SettleBeforeStart
+        ) {
+            sqlx::query("INSERT INTO run_discards(interaction_id,discarded_at) VALUES (?1,strftime('%s','now') || '000') ON CONFLICT(interaction_id) DO NOTHING")
+                .bind(run.value())
+                .execute(&mut *transaction)
+                .await?;
+        }
         transaction.commit().await?;
         Ok(outcome)
+    }
+
+    /// Whether the user discarded this run after a restart (#722).
+    pub(crate) async fn was_discarded(&self, run: InteractionId) -> Result<bool, StorageError> {
+        Ok(
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM run_discards WHERE interaction_id=?1)")
+                .bind(run.value())
+                .fetch_one(&self.pool)
+                .await?,
+        )
     }
 }
 
@@ -561,6 +582,10 @@ mod tests {
         let settling = store.get_interaction(runs[3]).await.unwrap().unwrap();
         assert_eq!(settling.completion_status, "submitted");
         assert!(settling.stop_requested);
+        // Both Discards are on record; a run never discarded is not.
+        assert!(store.was_discarded(runs[3]).await.unwrap());
+        assert!(store.was_discarded(runs[0]).await.unwrap());
+        assert!(!store.was_discarded(runs[1]).await.unwrap());
         // A run with a Stop is never returned to paused.
         assert!(
             !store

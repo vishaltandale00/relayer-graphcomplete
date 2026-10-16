@@ -6650,17 +6650,6 @@ async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
     }
     // A repeated Discard reports the run it discarded as it stands; a Discard of a run that
     // was never paused or interrupted is refused.
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while !fixture.interaction(other).await["completionError"]
-        .as_str()
-        .is_some_and(|error| error.starts_with("Discarded"))
-    {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "the Discard was never marked"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
     let (status, discarded) = fixture.run_action(other, "discard").await;
     assert_eq!(status, StatusCode::OK, "{discarded}");
     assert_eq!(discarded["completionStatus"], "stopped");
@@ -6704,6 +6693,10 @@ async fn a_restart_recovers_an_interrupted_run_the_graph_accepted() {
     let (status, discarded) = fixture.run_action(second, "discard").await;
     assert_eq!(status, StatusCode::OK, "{discarded}");
     fixture.settled(second, "accepted").await;
+    // A repeated Discard of it reports the accepted run as it stands.
+    let (status, repeated) = fixture.run_action(second, "discard").await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["completionStatus"], "accepted");
     fixture.restart().await;
     let recovered = fixture.interaction(first).await;
     assert_eq!(recovered["completionStatus"], "accepted", "{recovered}");

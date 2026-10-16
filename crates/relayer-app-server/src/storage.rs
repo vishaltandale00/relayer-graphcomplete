@@ -12,8 +12,8 @@ use crate::{
     },
 };
 pub(crate) use sqlite::{
-    PersonalPresentationPin, QueuedStop, RESTART_DISCARDED, RESTART_INTERRUPTED, RESTART_PAUSED,
-    RestartDiscard, SqliteProductStore,
+    PersonalPresentationPin, QueuedStop, RESTART_INTERRUPTED, RESTART_PAUSED, RestartDiscard,
+    SqliteProductStore,
 };
 use thiserror::Error;
 
