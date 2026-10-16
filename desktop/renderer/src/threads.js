@@ -2034,5 +2034,11 @@ export async function stopInteraction(threadId, interactionId) {
   const existing = appState.interactions?.find((turn) => turn.id === interactionId && turn.threadId === threadId);
   if (existing) Object.assign(existing, interaction);
   renderThread();
+  // A run removed before it started ends at once (#720), leaving no pending work to poll, so
+  // the thread's own state, such as whether it can be archived, is refreshed now.
+  if (["stopped", "failed", "accepted"].includes(interaction?.completionStatus)) {
+    await refreshState(threadId).catch(() => {});
+    return;
+  }
   schedulePendingRefresh(viewState.currentThreadId);
 }

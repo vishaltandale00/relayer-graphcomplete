@@ -5284,6 +5284,12 @@ async fn start_admitted_interaction(
     slot: CapacitySlot,
     record_deterministic_failure: bool,
 ) -> Result<Interaction, ApiError> {
+    // The slot is released on every exit, including a panic during preparation.
+    let held_slot = HeldSlot {
+        state: state.clone(),
+        slot,
+        run: interaction.id,
+    };
     let prepared =
         match prepare_and_claim_interaction(state, thread, &interaction, claimed, false).await {
             Ok(prepared) => prepared,
@@ -5297,12 +5303,12 @@ async fn start_admitted_interaction(
                     )
                     .await;
                 }
-                release_run_capacity(state.clone(), slot, interaction.id);
+                drop(held_slot);
                 return Err(error);
             }
         };
     let Some(prepared) = prepared else {
-        release_run_capacity(state.clone(), slot, interaction.id);
+        drop(held_slot);
         return state
             .product
             .get_interaction(interaction.id)
@@ -5316,9 +5322,7 @@ async fn start_admitted_interaction(
     running.graph_node_id = Some(prepared.graph_node_id);
     running.waiting_for_capacity = false;
     let execution_state = state.clone();
-    let release_state = state.clone();
     let thread = thread.clone();
-    let run = interaction.id;
     tokio::spawn(async move {
         let execution = tokio::spawn(async move {
             execution_state
@@ -5330,7 +5334,7 @@ async fn start_admitted_interaction(
         });
         // The execution has settled the run, or panicked. Either way its slot is free.
         let _ = execution.await;
-        release_run_capacity(release_state, slot, run);
+        drop(held_slot);
     });
     match state.product.get_interaction(running.id).await {
         Ok(current) => Ok(current),
