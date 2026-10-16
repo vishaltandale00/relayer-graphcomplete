@@ -1,0 +1,5 @@
+Actual Electron node-input runner: PASS, exit 0.
+Result file: authored-answer-desktop-input.json (passed=true).
+Runner explicitly reports 0 paid inference calls.
+Known fixture IPC/CSP/cache diagnostics remain in .relayer/authored-live-answer-desktop-input.txt; they are not certification of those other subsystems.
+Raw output SHA-256: 802d8a5608e635a4d17a7d343088fc6bc9d383291d0a32ecfc47587c0cf0ec33

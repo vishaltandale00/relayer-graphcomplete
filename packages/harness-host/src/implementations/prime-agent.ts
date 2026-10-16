@@ -1125,7 +1125,7 @@ export class PrimeAgentHarness implements Harness {
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
-For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. Standalone Input feeds chat; Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
+For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
 ${primeVisualExample(interaction.id)}
 ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
@@ -1149,7 +1149,7 @@ ${PYTHON_GRAPH_API_REFERENCE}
 ${currentWorkspaceMechanicsPython()}
 ${semanticChildGuidancePython(context)}${graphSearchGuidancePython(grantsGraphSearch(this.context.configuration))}${draftPreviewGuidancePython(context)}
 
-The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires await graph.submit(${interaction.id}).
+The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires successful terminal submission: await graph.submit(${interaction.id}), or the published-Current Return alternative above.
 
 Author nodes, edges, layers, and useful expand, reference, or invoke actions. For supporting evidence or reusable context, use await graph.add_navigate_action(node, "View evidence", evidence_layer, relation="reference", source_layer=response_layer, client_key="node-evidence") after submitting the referenced layer. The visible response layer must contain 1 to 8 connected nodes. The interaction node needs exactly one new root navigate action, relation="expand" with no source_layer; on a rerun, reuse its client_key rather than adding another.
 
@@ -1160,11 +1160,11 @@ ${LAYER_EDGE_SHAPE_GUIDANCE}
 
 ${ARTIFACT_LAYER_GUIDANCE_PYTHON}
 
-Finish the root execution only by calling:
+Finish the root execution with a terminal submission (or the published-Current Return alternative above):
 
 await graph.submit(${interaction.id})
 
-If a graph call fails, edit and rerun the same authoring code with the same client_key values so it updates the same drafts instead of creating duplicates. Do not add fake navigation merely to make abandoned drafts reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its graph objects. A model turn ending is not completion. If graph.submit() has not succeeded, continue working or report the blocking graph error.`;
+If a graph call fails, repair only unaccepted draft phases; skip every phase already accepted by Advance. Edit and rerun the same authoring code with the same client_key values so it updates the same drafts instead of creating duplicates. Do not add fake navigation merely to make abandoned drafts reachable. Only when Advance or terminal submission identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its graph objects. A model turn ending is not completion. If neither terminal submit nor Return has succeeded, continue working or report the blocking graph error.`;
   }
 
   private layeredNavigationPrompt(context: HarnessRunContext, includePersonalPresentation: boolean): string {
@@ -1174,7 +1174,7 @@ If a graph call fails, edit and rerun the same authoring code with the same clie
 ${GRAPH_PRESENTATION_GUIDANCE}
 ${threadIconGuidance(context, "python")}
 ${PRIME_VISUAL_GUIDANCE}
-For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. Standalone Input feeds chat; Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
+For Input plus Invoke, declare field = ActionObject("input", ..., control="text", prompt="...") and invoke = ActionObject("invoke", ..., interaction_text="...", input_actions=(field,)). Mount these exact objects on the same Node. After submitting Node and Layer, await graph.add_action(node, invoke) writes or recovers the referenced Input first and stores canonical IDs. Never guess IDs or infer connections from proximity. An ordinary human-root Current Input supports live Answer; child and Invoke-bound inputs use the next ordinary interaction. Invoke consumes explicit bindings. One call is the default; set reusable=True only for meaningful repeat use.
 ${primeVisualExample(interaction.id)}
 ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${includePersonalPresentation ? personalPresentationPrompt(context) : ""}
 
@@ -1198,7 +1198,7 @@ ${PYTHON_GRAPH_API_REFERENCE}
 ${currentWorkspaceMechanicsPython()}
 ${semanticChildGuidancePython(context)}${graphSearchGuidancePython(grantsGraphSearch(this.context.configuration))}${draftPreviewGuidancePython(context)}
 
-The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires await graph.submit(${interaction.id}).
+The graph scope is supplied by the host for this complete() execution and is inherited by your RLM children. Do not read graph credentials from environment variables or files. Use the scoped recipe above for new drafts; final acceptance requires successful terminal submission: await graph.submit(${interaction.id}), or the published-Current Return alternative above.
 
 The current interaction may carry an invoke lease created by the product. Before authoring, use await graph.get_node(${interaction.id}) and await graph.get_neighbors(${interaction.id}) to inspect the current node and any relevant source context exposed by the graph. Treat that context as input to your answer; do not copy, forge, or manage lease metadata. Author the response normally. A successful ordinary graph.submit(${interaction.id}) automatically fulfills any lease held by this interaction. There is no separate resolve_action call.
 
@@ -1229,7 +1229,7 @@ ${PYTHON_GRAPH_AUTHORING_RULES}
 
 At any layer, add expand, reference, or invoke actions only when they materially improve the response.
 
-The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue, edit the same authoring code, and rerun it with the same client_key values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when graph.submit identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. The task is complete only when the final graph.submit call succeeds.`;
+The graph service enforces exact provenance, target visibility, layer size, expansion cycles, and accepted closure. If a call fails, read every natural-language issue; repair only unaccepted draft phases and skip every phase already accepted by Advance. Edit the remaining authoring code and rerun it with the same client_key values; stable keys make the whole-program rerun update the same drafts instead of creating duplicates. Do not add fake navigate or reference actions merely to make abandoned draft layers reachable. Only when Advance or terminal submission identifies a genuinely abandoned orphan draft, recover with await graph.discard_layer(layer); this preserves that layer as stopped history without discarding its nodes, edges, actions, or child layers. A model turn ending is not completion. The GraphComplete response completes only after a successful terminal submit or Return; this does not certify that the underlying user task is done.`;
   }
 }
 

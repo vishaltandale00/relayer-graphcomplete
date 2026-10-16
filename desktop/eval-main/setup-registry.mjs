@@ -6,7 +6,7 @@ import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseDocument } from "yaml";
 import { GRAPH_PRESENTATION_RUBRIC_V11 } from "@relayer/eval-runner";
-import { actorConfiguration, ACTOR_PROMPT_TEMPLATE, ACTOR_PROMPT_V8_GUIDANCE, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION } from "./task-actor.mjs";
+import { actorConfiguration, ACTOR_PROMPT_TEMPLATE, ACTOR_PROMPT_V8_GUIDANCE, ACTOR_PROMPT_V9_GUIDANCE, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION } from "./task-actor.mjs";
 
 const copy = (value) => structuredClone(value);
 const fail = (message) => { throw Object.assign(new Error(message), { status: 400 }); };
@@ -71,8 +71,8 @@ function completionJudgeConfigurations(directory) {
 }
 export function defaultCompletionJudgeSetup() { return completionJudgeConfigurations(defaultCompletionJudgeDirectory)[0].definition; }
 export function defaultActorSetup() {
-  return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE + "\n" + ACTOR_PROMPT_V8_GUIDANCE,
-    settings: actorConfiguration(), behaviorContract: { id: "task-actor-v5", participantMayStopIncomplete: true, actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
+  return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE + "\n" + ACTOR_PROMPT_V8_GUIDANCE + "\n" + ACTOR_PROMPT_V9_GUIDANCE,
+    settings: actorConfiguration(), behaviorContract: { id: "task-actor-v6", participantMayStopIncomplete: true, actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
 }
 export function defaultJudgeSetup() {
   const config = judgeConfigurations(defaultJudgeDirectory)[0];
@@ -102,13 +102,14 @@ function normalize(input) {
   }
   if (input.kind === "actor") {
     const behaviorContract = defaultActorSetup().behaviorContract;
-    const guidedContract = { ...copy(behaviorContract), id: "task-actor-v4" }; delete guidedContract.participantMayStopIncomplete;
-    const nativeMenuContract = { id: "task-actor-v3", actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT) };
+    const settledContract = { ...copy(behaviorContract), id: "task-actor-v5", observationContract: { id: "task-actor-observation-v2", optionObservation: "opened-native-select-accessibility" } };
+    const guidedContract = { ...copy(settledContract), id: "task-actor-v4" }; delete guidedContract.participantMayStopIncomplete;
+    const nativeMenuContract = { id: "task-actor-v3", actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(settledContract.observationContract) };
     const priorContract = { id: "task-actor-v2", actionSchema: copy(ACTOR_ACTION_SCHEMA) };
     const legacyContract = copy(priorContract);
     legacyContract.actionSchema.properties.reason = { type: "string" };
     // Publication may upgrade a known historical contract; stored revisions stay immutable.
-    if (![behaviorContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
+    if (![behaviorContract, settledContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
     return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion,
       promptTemplate: template(input.promptTemplate, ["request", "endpoint", "privateBrief", "exploration", "meticulousness"]),
       settings: actorConfiguration(input.settings), behaviorContract: input.promptVersion === ACTOR_PROMPT_VERSION ? behaviorContract : copy(input.behaviorContract) };

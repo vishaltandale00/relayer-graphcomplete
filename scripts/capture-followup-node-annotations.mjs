@@ -17,6 +17,9 @@ import { RelayerAppServerService } from "../desktop/main/services/relayer-app-se
 import { createWindowFactory } from "../desktop/main/window.mjs";
 import { createElectronWorkspaceDriver } from "./electron-workspace-driver.mjs";
 
+// Keep Electron alive while service and temporary-directory cleanup settles.
+app.on("window-all-closed", () => {});
+
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const dataDirectory = mkdtempSync(join(tmpdir(), "relayer-interaction-context-lifecycle-"));
 const projectDirectory = join(dataDirectory, "project");
@@ -44,7 +47,8 @@ let releasePendingFixture;
 const pendingFixtureGate = new Promise((resolveGate) => { releasePendingFixture = resolveGate; });
 
 app.setName("Relayer Interaction Context Lifecycle Test");
-app.setPath("userData", join(dataDirectory, "electron-profile"));
+// A proof parent can retain Chromium storage until the Electron process exits.
+app.setPath("userData", process.env.RELAYER_ANNOTATION_EVIDENCE_PROFILE || join(dataDirectory, "electron-profile"));
 app.commandLine.appendSwitch("disable-gpu");
 
 const catalogSnapshot = {
@@ -142,6 +146,8 @@ function unregisterIpc() {
 
 async function startServices() {
   runtime = new GraphCompleteRuntimeService({
+    // Capture infrastructure allowance; this proof does not measure startup latency.
+    startupTimeoutMs: 60_000,
     userDataDirectory: dataDirectory,
     graphServerBinary,
     configurationPaths: [configurationPath],
@@ -170,6 +176,7 @@ async function startServices() {
     refresh: () => product.seedProviderCatalog(catalogSnapshot),
   });
   product = new RelayerAppServerService({
+    startupTimeoutMs: 60_000,
     userDataDirectory: dataDirectory,
     binaryPath: appServerBinary,
     webDirectory: rendererDirectory,
@@ -324,7 +331,13 @@ async function stop() {
   await rm(dataDirectory, { recursive: true, force: true });
 }
 
-app.whenReady().then(run).then(async () => { await stop(); app.exit(0); }).catch(async (error) => {
+app.whenReady().then(run).then(async () => {
+  await stop();
+  if (process.env.RELAYER_ANNOTATION_EVIDENCE_RESULT) {
+    await writeFile(process.env.RELAYER_ANNOTATION_EVIDENCE_RESULT, JSON.stringify({ passed: true }) + "\n");
+  }
+  app.exit(0);
+}).catch(async (error) => {
   console.error(error);
   receipt.passed = false;
   receipt.error = error?.stack || String(error);

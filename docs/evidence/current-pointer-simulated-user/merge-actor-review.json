@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "sourceOverlay": "merge-actor-source.json",
+  "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+  "sourceEvidenceDigest": "ece1f598c43bacfc68ff703cc474c4fbacce1b289c5c5fb8aea4612e3ee706b6",
+  "sourceEvidencePaths": 82,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "additionalEvidence": [
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-actor-source.json",
+      "sha256": "ee4eb18faad7df08b46267fcdce004134f7efd5a82548c0504f62063ff39eab0"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-actor-verification.json",
+      "sha256": "694e064e5c78994ad1a79052297bd43dd99025ae05a63e04af95ba35d4478c7e"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-actor-20261014.md",
+      "sha256": "ad4f925daad4adb3aadd382c3d11d5509b2766ffd7ec96c42864a6a71360250b"
+    }
+  ],
+  "reviews": [
+    {
+      "reviewer": "actor_renderer_review",
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "sourceEvidenceDigest": "ece1f598c43bacfc68ff703cc474c4fbacce1b289c5c5fb8aea4612e3ee706b6",
+      "scope": "Assigned findings1\u20133: trusted authored navigation/forged clone/remount/rebinding; rendered same-revision delivery identity and privacy/capture binding; one working recovery and budget/reset boundaries. Independently reconstructed82 source/evidence hashes and40 referenced raw-log/result hashes; complete actual browser inner chapters, assertion repair and retained failures inspected.",
+      "verdict": "PASS for assigned source/mapping and qualified evidence",
+      "unresolvedFindings": [],
+      "limits": "Does not certify gateway/judge implementation, clean whole local suite, quality, performance or release. Fresh exact-head hosted CI/freshness required."
+    },
+    {
+      "reviewer": "design_authority_review",
+      "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+      "sourceEvidenceDigest": "ece1f598c43bacfc68ff703cc474c4fbacce1b289c5c5fb8aea4612e3ee706b6",
+      "scope": "Receipt/gateway/judge/export authority and durability mappings; exact trusted reconciliation, original uncertainty, immutable exports and unproven incorporation. Independently verified82 source/evidence hashes and40 referenced log/result hashes; actual build/browser/compiled and isolated-native outcomes distinguished from failed whole attempts.",
+      "verdict": "PASS for reviewed source/mapping and qualified evidence",
+      "unresolvedFindings": [],
+      "limits": "Local whole check remains failed; original failure causes unknown. Merge readiness conditional on fresh exact-head hosted CI/freshness and resolved review threads. No clean-local-suite, quality or release certification."
+    }
+  ],
+  "qualification": "Local whole check remains failed; exact isolated case, build, warm and complete browser/compiled proof are separate. Fresh exact-head hosted CI/freshness still required after push. Historical evidence remains bound to its original source. No paid inference, quality or release claim."
+}

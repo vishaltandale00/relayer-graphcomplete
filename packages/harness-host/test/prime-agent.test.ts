@@ -37,7 +37,23 @@ describe("PrimeAgentHarness", () => {
         expect(prompt).toContain("Your current layer is how you explain the work to the user while doing it.");
         expect(prompt).toContain("read each changed current.current_layer_id with graph.get_layer");
         expect(prompt).toContain("skip Exception values before reading current.current_layer_id");
-        expect(prompt).toContain("input answers arrive through the next ordinary interaction");
+        expect(prompt).toContain("an ordinary Input on your current root layer exposes an explicit Answer control");
+    expect(prompt).toContain("Even byte-identical objects recreated in a fresh client");
+    expect(prompt).toContain("A prose list of unknowns or invented preferences does not obtain that decision");
+    expect(prompt).toContain("finish-published-current");
+    expect(prompt).toContain("skip every phase already accepted by Advance");
+    expect(prompt).not.toContain("Input alone feeds chat");
+    expect(prompt).not.toContain("Standalone Input feeds chat");
+    expect(prompt).toContain("No answer means unresolved");
+        expect(prompt).toContain("graph.get_live_answers(cursor)");
+        expect(prompt).toContain("graph.wait_for_live_answers(cursor)");
+        expect(prompt).toContain("The sealed initial contract remains unchanged");
+        expect(prompt).not.toContain('value for their next ordinary interaction');
+        expect(prompt).toContain('Preserve the question when repairing its control');
+        expect(prompt).toContain('<textarea');
+        expect(prompt).toContain('viewer.artifact_node');
+        expect(prompt).toContain('discard_layer');
+        expect(prompt).toContain("Semantic children and Invoke-bound inputs use the next ordinary interaction");
         expect(prompt).toContain('graph.authoring("first-finding-');
         expect(prompt).toContain('target=GraphLayer.from_dict(prior["layer"])');
         expect(prompt).toContain('operation_key="first-finding-publication"');
@@ -782,11 +798,11 @@ describe("PrimeAgentHarness", () => {
     expectGraphPresentationGuidance(prompts[0]!.text);
     expectGraphAuthoringRules(prompts[0]!.text);
     // The submit call directly follows the sentence that introduces it.
-    expect(prompts[0]!.text).toContain("Finish the root execution only by calling:\n\nawait graph.submit(11)");
+    expect(prompts[0]!.text).toContain("Finish the root execution with a terminal submission (or the published-Current Return alternative above):\n\nawait graph.submit(11)");
     expect(prompts[0]!.text).toContain("exactly one new root navigate action");
     expect(prompts[0]!.text).toContain("add_navigate_action(node, \"View evidence\"");
     expect(prompts[0]!.text).toContain("Keep snapshot and local keys stable");
-    expect(prompts[0]!.text).toContain("rerun the same authoring code with the same client_key values");
+    expect(prompts[0]!.text).toContain("skip every phase already accepted by Advance. Edit and rerun the same authoring code with the same client_key values");
     expect(prompts[0]!.text).toContain("Do not add fake navigation");
     expect(prompts[0]!.text).toContain("await graph.discard_layer(layer)");
     await expect(hostHandlers[0]?.({}, invocation(first))).resolves.toEqual({
@@ -1920,7 +1936,7 @@ describe("PrimeAgentHarness", () => {
     expectGraphAuthoringRules(prompt);
     expect(prompt).toContain("A flat answer is valid");
     expect(prompt).toContain("writer persists drafts");
-    expect(prompt).toContain("final acceptance requires await graph.submit(11)");
+    expect(prompt).toContain("final acceptance requires successful terminal submission: await graph.submit(11)");
     expect(prompt).toContain("await graph.get_node(11)");
     expect(prompt).toContain("await graph.get_neighbors(11)");
     expect(prompt).toContain("ordinary graph.submit(11) automatically fulfills any lease");
@@ -2412,7 +2428,13 @@ describe("PrimeAgentHarness", () => {
     };
     const harness = await createHarness(session);
 
-    await harness.complete(attachedRunContext(11, "token"));
+    const run = attachedRunContext(11, "token");
+    // Adversarial extra fields exercise the serializer's whitelist. These are
+    // not canonical InteractionContext fields or sealed-contract provenance.
+    const extraFields = { sourceNodeId: 9_876_540_321, sourceLayerId: 9_876_540_322 };
+    await harness.complete({ ...run, interactionInput: { ...run.interactionInput,
+      contexts: run.interactionInput.contexts.map(context => ({ ...context, ...extraFields })),
+    } });
 
     expect(prompt).toContain('"message": "Question"');
     expect(prompt.indexOf('"title": "First target"')).toBeLessThan(prompt.indexOf('"title": "Second target"'));
@@ -2420,8 +2442,19 @@ describe("PrimeAgentHarness", () => {
     expect(prompt).toContain("product assigns no semantic precedence");
     expect(prompt).toContain("including in native child agents");
     expect(prompt).toContain("await graph.get_interaction_input()");
-    expect(prompt).not.toContain("sourceNodeId");
-    expect(prompt).not.toContain("sourceLayerId");
+    const sections = [...prompt.matchAll(/Normalized interaction input:\n([\s\S]*?)\n\n/g)];
+    expect(sections).toHaveLength(1);
+    const normalized = sections[0]![1]!;
+    expect(JSON.parse(normalized)).toEqual({
+      message: "Question",
+      contexts: [
+        { targetNode: { id: 20, kind: "concept", icon: "box", title: "First target", detail: "First detail", state: "accepted" }, annotations: ["first annotation", "second annotation"] },
+        { targetNode: { id: 21, kind: "concept", icon: "box", title: "Second target", detail: "Second detail", state: "accepted" }, annotations: ["third annotation"] },
+      ],
+    });
+    expect(normalized).not.toContain("sourceNodeId");
+    expect(normalized).not.toContain("sourceLayerId");
+    for (const canary of Object.values(extraFields)) expect(prompt).not.toContain(String(canary));
   });
 
   it("does not start a prompt when the run was already cancelled", async () => {

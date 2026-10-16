@@ -320,6 +320,7 @@ impl InteractionExecutionService {
             match execution
                 .product
                 .begin_interaction_attempt(super::BeginInteractionAttempt {
+                    live_answer_authority_epoch: prepared.live_answer_authority_epoch(),
                     interaction_id: interaction.id,
                     attempt_admission_id: attempt_admission_id
                         .as_deref()
@@ -360,6 +361,7 @@ impl InteractionExecutionService {
                         return;
                     }
                     let failed_receipt = super::BeginInteractionAttempt {
+                        live_answer_authority_epoch: None,
                         interaction_id: interaction.id,
                         attempt_admission_id: attempt_admission_id
                             .as_deref()

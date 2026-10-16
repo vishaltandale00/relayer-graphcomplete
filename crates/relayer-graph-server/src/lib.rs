@@ -202,6 +202,18 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/control/interactions/{id}/input", get(control_input))
         .route(
+            "/api/control/interactions/{id}/live-answers",
+            get(control_live_answers).post(control_live_answer),
+        )
+        .route(
+            "/api/control/interactions/{id}/live-answers/layers/{layer}",
+            get(control_live_answer_receipts),
+        )
+        .route(
+            "/api/control/interactions/{id}/live-answer-presentation/{layer}",
+            get(control_live_answer_presentation),
+        )
+        .route(
             "/api/control/interactions/{id}/input-children",
             get(control_input_children),
         )
@@ -333,6 +345,7 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
         .route("/api/graph/input", get(interaction_input))
+        .route("/api/graph/live-answers", get(graph_live_answers))
         .route(
             "/api/graph/personal-presentation",
             get(graph_personal_presentation),
@@ -2236,6 +2249,7 @@ struct RemintCapabilityRequest {
 #[serde(rename_all = "camelCase")]
 struct RemintCapabilityResponse {
     graph_token: String,
+    authority_epoch: u64,
 }
 
 async fn remint_capability(
@@ -2245,14 +2259,26 @@ async fn remint_capability(
 ) -> Result<Json<RemintCapabilityResponse>, ApiError> {
     require_bearer(&headers, &state.control_token)?;
     state.graph.writer_for_subgraph(input.node_id).await?;
+    let graph_token = mint_capability_with_profile(
+        &state,
+        input.node_id,
+        input.graph_token,
+        input.graph_capability_profile,
+    )
+    .await?;
+    // Bind the response to the minted token, never to a later completion epoch.
+    let authority_epoch = state
+        .sessions
+        .lock()
+        .map_err(|_| ApiError::internal("session lock poisoned"))?
+        .get(&graph_token)
+        .ok_or_else(|| {
+            ApiError::conflict("stale_capability", "Capability changed during activation.")
+        })?
+        .epoch;
     Ok(Json(RemintCapabilityResponse {
-        graph_token: mint_capability_with_profile(
-            &state,
-            input.node_id,
-            input.graph_token,
-            input.graph_capability_profile,
-        )
-        .await?,
+        graph_token,
+        authority_epoch,
     }))
 }
 
@@ -2934,6 +2960,100 @@ async fn interaction_input(
             .await?,
     ))
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct LiveAnswerCursor {
+    #[serde(default)]
+    after_sequence: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ControlLiveAnswerRequest {
+    thread_id: ThreadId,
+    answer: relayer_graph_core::LiveAnswerRequest,
+}
+
+async fn control_live_answer(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Json(input): Json<ControlLiveAnswerRequest>,
+) -> Result<Json<relayer_graph_core::LiveAnswer>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .accept_live_answer(id, input.thread_id, &input.answer)
+            .await?,
+    ))
+}
+
+async fn control_live_answers(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Query(cursor): Query<LiveAnswerCursor>,
+) -> Result<Json<relayer_graph_core::LiveAnswerPage>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .live_answers(cursor.after_sequence)
+            .await?,
+    ))
+}
+
+async fn control_live_answer_presentation(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, layer)): Path<(NodeId, LayerId)>,
+) -> Result<Json<relayer_graph_core::LiveAnswerPresentation>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .live_answer_presentation(layer)
+            .await?,
+    ))
+}
+
+async fn control_live_answer_receipts(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path((id, layer)): Path<(NodeId, LayerId)>,
+) -> Result<Json<Vec<relayer_graph_core::LiveAnswer>>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_subgraph(id)
+            .await?
+            .live_answer_receipts(layer)
+            .await?,
+    ))
+}
+
+async fn graph_live_answers(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(cursor): Query<LiveAnswerCursor>,
+) -> Result<Json<relayer_graph_core::LiveAnswerPage>, ApiError> {
+    let authority = session(&state, &headers)?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .live_answers(cursor.after_sequence)
+            .await?,
+    ))
+}
+
 async fn graph_personal_presentation(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -6426,6 +6546,29 @@ mod tests {
         let reminted: RemintCapabilityResponse =
             serde_json::from_slice(&to_bytes(reminted.into_body(), usize::MAX).await.unwrap())
                 .unwrap();
+
+        assert!(reminted.authority_epoch > 0);
+        let repeated = restarted
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/api/control/capabilities")
+                    .header("content-type", "application/json")
+                    .header("authorization", "Bearer control")
+                    .body(Body::from(
+                        json!({"nodeId":created.node.id.value(),"graphToken":reminted.graph_token})
+                            .to_string(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        let repeated: RemintCapabilityResponse =
+            serde_json::from_slice(&to_bytes(repeated.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert_eq!(repeated.graph_token, reminted.graph_token);
+        assert_eq!(repeated.authority_epoch, reminted.authority_epoch);
 
         let readable = restarted
             .oneshot(

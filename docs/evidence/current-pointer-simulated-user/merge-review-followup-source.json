@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "baseCommit": "964e34886bb06a6140a86980299772e56d21beda",
+  "baseSourceManifest": "merge-live-integrity-source.json",
+  "baseSourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+  "sourceDigest": "d074d0aff4e3d7473d2401c7e639e8fa05be814ecba401add783eb7d65a43d70",
+  "sourcePaths": 90,
+  "changes": [
+    {
+      "path": "crates/relayer-app-server/src/api/input_drafts.rs",
+      "beforeSha256": "f8a8aa92e7eb64f0adc65612176c3d586b19ee711372a4a1ce5a12aafb75fe40",
+      "afterSha256": "00a2b6b3d709d066172013768e21acdcc4d3c20e5b5053f8e9e4df08a18bb2a2"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/live_answers.rs",
+      "beforeSha256": "994f24d609ac9f92d53d9b183bbfb5e64fefdf8b004b8f138617f15e1d73abad",
+      "afterSha256": "9f3506da6641ead401cf6c181fa29471cffc0690e3f432e8cc1ff9767791a89c"
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "beforeSha256": "51ad28cf15c65e876864798c32337ad20b5762e4c0dc3ab80a0a2b15abf1c0ad",
+      "afterSha256": "8dc0610f3f1518a8ee0ada9db33a40510559c37433922bece218c12213fd31a1"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/execution.rs",
+      "beforeSha256": "9d8a6ea9d0a8ab4d8a841251b870f33b747c869cd583b058a6744df0d5ed58d5",
+      "afterSha256": "a4af5d6df4c61c79cf1e6e5676d35a4e040cc29c276492ea575eb29b9d77baa9"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/models.rs",
+      "beforeSha256": "7a5ba534c307086d7f9f1bcb6b5e714506cc1dcd7b616daf35517fb688568841",
+      "afterSha256": "0a0ea20dd73c5eca0a5771582de706ad0d074e10dd18ecec42a96eddf71e61ab"
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "beforeSha256": "b2eda63fe60a797a21af8c7642d640daa4eaf73c6cf131bfca9b137e11782e7a",
+      "afterSha256": "59e51f5fb0cdbefffa27c593b35d49a6badada6b43a91ba60c28a5fbb904450a"
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "beforeSha256": "9819dee7e926670a0ae4834fd5555af002e5089bad26745536a6da6cbbb33a07",
+      "afterSha256": "55dadb8bf6fb04e7cfe77c0e9f4eea545ae3c0734d34d3ef36016936b69e895f"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/attempts.rs",
+      "beforeSha256": "30cdc4bb9ad0ddccd25210653f824d3fcdbf05c6f16fb315ea15dff1a4970a08",
+      "afterSha256": "6254638b890ce92b2d331ed5f6bae90a02971738f211d0bd7b0fc1727ed92564"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
+      "beforeSha256": "6dc0efd0948d73d8c6ea29f80532e4b878d4daa07595dfbcfc7a39f7ef217b39",
+      "afterSha256": "ed468b6771a2048816b5ed050f5e8a63ce3f3797f4e7be9e9840d1d0b9a8f451"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0048_attempt_live_answer_authority.sql",
+      "beforeSha256": null,
+      "afterSha256": "6457d0d332aa29c149576a26970e5669bd1f94a00990342824af22887b93e503"
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "beforeSha256": "df90c8e5646d33acd8d3f325b4163ddbd2fa3a8e1bfe31e87781624e49fffc54",
+      "afterSha256": "d11c5f6e06fddfb24d41675c65ceeafbc38e34810329628e7b1b669eb5630354"
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "beforeSha256": "340d0efcdee534dca5cfbb9fce25649d9a9fa513020c7d8d3fa91dd59bd15e55",
+      "afterSha256": "df9eb4dfcc009b9bf6e3fa95dc0ec113594e099e776285a6a2bb6512da6646ee"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "beforeSha256": "1dd713c3a8299d1feb2061439f04296dd150e08b9a2c986051d15430f7517445",
+      "afterSha256": "ca322ae8531232a95046be460f2de14f02de6ede1fff4ec94c6d555a63f14034"
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "beforeSha256": "426b83b82283fa3c91a6be08538c7079e8e8d1f2b20dd5d95d9eb721a42235ab",
+      "afterSha256": "78c3cae5647c8f3f940f50a5edb9849609c826e4305b002666b07b38ee97ab2e"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-browser.mjs",
+      "beforeSha256": "4007af11fa29ef3ecb7759d563850ea868ca1f5cd40e9ffcaa8e8a459dbad56e",
+      "afterSha256": "6bc85ab3ca2c462296c244e0635083c5c1ab681ca05b3a92bcb7fbce00094cc5"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "beforeSha256": "da88a75cb42f0e657bba5c56f1533d2c4ac59765ba20f93338b6272a3e140f02",
+      "afterSha256": "3ea99024634cac950dd947acc92dc18452fe225d7a7c6c6e038c43a2dfc11457"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "beforeSha256": "2da075c669ab7d3c8462abf362303283ad9d38bca45c5e2f8ad496e755a2b6fe",
+      "afterSha256": "81c57e1f19a6ae9cffc1a8884e6ef070220de7c0205ae6d3da920b632054680f"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/graph-presentation-guidance.ts",
+      "beforeSha256": "9b8802fe6f688c5730cf06ddb2410655ddaaba11bac34e48316db3d244e14d1d",
+      "afterSha256": "94dda262ad4cecb426c87d16a2173b30e5110993cd1662427e42a7df6ca11ddd"
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "beforeSha256": "736a01f3c5e1bf359fd6cd2b9b65c1e51b5721fa6a623773803916e0bba15642",
+      "afterSha256": "6343226a2ee79132932c135551b3abeb77ea75825b8427419d4d70fc4d6648b6"
+    },
+    {
+      "path": "packages/harness-host/test/prime-agent.test.ts",
+      "beforeSha256": "45fafba1e77f579ac5db5058b8fe7187239208b313a0251180bb501f021cbd66",
+      "afterSha256": "e4d3b46b4d7a2ec9487a692c46651e02fda733b03435c88ee9b5092b90cf1229"
+    },
+    {
+      "path": "scripts/eval-current-actor-proof.mjs",
+      "beforeSha256": "c82abcae25dd92cfa09b361028d6ead477ae4d4d0261e7a6dafb6cbcda87aa0c",
+      "afterSha256": "4fe91308443a9e0b72f6d383a89455f550531dc4e788a8b694fb47c66a70d109"
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "beforeSha256": "d1e95ddef312ee94d4d1e826573dea5acb929091a3c8382cd814bc2a99212021",
+      "afterSha256": "cbc338ad1d8a8698de0f8b0eb478c390d3562cebf2b6775abce83d4e13272f43"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "beforeSha256": "23f98473b1c531f51a27f743287d28b94315e00d1d5b80ce8a0526f7f8c66323",
+      "afterSha256": "e4f39dbab965b1a44f70eb2c2d323ba87f23add87371bd9665403a4702032114"
+    },
+    {
+      "path": "test/graph-authoring-replay.test.mjs",
+      "beforeSha256": "329992c97717e5d3091f1e3580baba71068a79e9f68fd0e1e1caf7a23315a443",
+      "afterSha256": "3168a79300e2d48152d937a994cb58bd6e86f335c2004ec33fde5e0f4773607d"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "beforeSha256": "e00974395b56dca9aedf99a6c9095e534dc065bab26f9a05e0a088874f47729c",
+      "afterSha256": "61a49229a89652a0cb719e49b548346e4a41216914b5b1a0d4b55715ea3882a3"
+    }
+  ],
+  "scope": "Durable exact activation epoch/native-attempt pair and additive immutable Product migration; Product cursor forwarding and complete ambiguous-receipt traversal; actor abort propagation and same-revision status capture; occurrence/source-specific bounded JS/Python reply guidance; safe readable Answer graph error messages; real approval/resume browser checkpoint."
+}
