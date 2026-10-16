@@ -26,6 +26,7 @@ Product authority: PRD §13.2.3 and provider promises PROV004/008; ADR0003
 | A native actor request cannot silently stall for the whole session | `createRestrictedCodexActor` → SDK `thread.run` | Fake-time five-minute deadline aborts one native request; no retry/action returned; late cancellation rejected |
 | Preserve overall deadline and unknown dispatch | Same actor boundary → `TaskActorService` | Outer cancellation and already-aborted cases; no retry; native cancellation awaited; existing orchestration/cancel/unknown-write cases retained |
 | Failures are diagnosable without storing native text | Actor wrapper → service `actor_error` | Closed prepare/execute/validate and none/unknown/completed values; malformed output and forbidden tool rejected; provider secrets omitted |
+| Implicit stop identity is discoverable without influencing a rating | MCP published tool description → ordered allocation validator | Real MCP leaf journey: forged stop ID rejected with exact expected encoding and zero stored nodes; JSON null accepted while preferred choice remains input |
 | Operational budget is visible in receipts | Service `actor_started` | Native call timeout recorded separately from immutable actor setup; actor orchestration fixture |
 
 The five-minute per-call bound is operational containment. The historical
@@ -101,3 +102,40 @@ an inert local executable, received cancellation, and observed its exit in 2 ms
 without returning an action or retrying. This uses no provider authentication,
 model inference or browser dispatch. It verifies SDK-to-child cancellation,
 not behavior of a native process that ignores termination.
+
+## Follow-up: implicit-stop tool guidance
+
+The first two repaired live judges authenticated and inspected original graphs
+and artifact screenshots, then repeatedly invented string action IDs for the
+implicit stop. Neither attempted literal JSON null. Both owned native judge
+processes were stopped; partial review artifacts, journals and the halted
+supervisor are retained. No new candidate session was admitted.
+
+The initial hypothesis of an inconsistent nullable schema was disproved: the
+MCP schema and validator already accepted null, and the existing real MCP test
+proved it. The failure was undiscoverable encoding and unhelpful errors.
+The follow-up adds explicit stop encoding to published tool descriptions and
+reports expected authored identity in validation errors. Acceptance predicates,
+preferred-choice judgment, rubric, scoring and immutable revisions are unchanged.
+The valid leaf fixture still prefers input over the authored stop; null is an
+identity encoding, not a requirement to judge stop best.
+
+Three-file review `/root/repair_authority_review`, digest
+`11a76254c4f38828d57d13dfe31e1e3fee2f879729ba0a4df661860cc4d8f18c`
+(same digest algorithm), no authority/scoring blockers; reviewer30/30 MCP and
+recursive review tests passed. Independent MCP, recursive review and native
+judge-runner fixtures:40/40 passed. The follow-up aggregate passed native checks and 4,357 JavaScript tests, with
+three skipped tests. It failed the unchanged input-invocation and 10,000-layer
+public-share timing tests, plus provider Electron capture. The aggregate is
+not green. Build and the complete final-source Eval browser journey passed.
+Actual native compliance with the clarified stop guidance remains pending. A separate v3 protocol directory
+preserves the failed regrade attempt and will regrade the same original graphs
+before admitting the same nine remaining/replacement cells.
+
+V3 continuation review: `/root/repair_authority_review`, ten-file digest
+`1a29fd6b51e9f930b77d946c571e58c28b2ab9e43fd35850ed93b3aa94fb09d4`,
+no static blockers. Original cases, models, families, immutable setups, profiles
+and budgets match the prior protocol. Prior partial reviews and journals remain
+separate; reopened task/accepted-turn identities must equal the pre-regrade
+baseline. All ten controller syntax checks passed. Actual freeze and live
+outcomes remain separately required.

@@ -255,7 +255,12 @@ describe("simulated-user MCP server", () => {
     openServers.push(server);
     const { client, transport } = await connectClient(server);
 
-    const result = await client.callTool({
+    const tools = await client.listTools();
+    const nodeTool = tools.tools.find(tool => tool.name === "reviewNode");
+    const schema = JSON.stringify(nodeTool?.inputSchema);
+    expect(schema).toContain("JSON null for the final implicit stop");
+
+    const request = {
       name: "reviewNode",
       arguments: { review: {
         layerId: "layer-1",
@@ -305,7 +310,12 @@ describe("simulated-user MCP server", () => {
         actions: [],
         findings: [],
       } },
-    });
+    };
+    const invalidSteps = request.arguments.review.allocationSteps.map(step => ({ ...step, authoredActionId: "invented-stop" }));
+    const rejected = await client.callTool({ ...request, arguments: { review: { ...request.arguments.review, allocationSteps: invalidSteps } } });
+    expect(rejected.structuredContent).toMatchObject({ ok: false, error: { message: expect.stringContaining("authoredActionId must be JSON null for implicit stop") } });
+    expect(reviewStore.snapshot().nodes).toHaveLength(0);
+    const result = await client.callTool(request);
 
     expect(result.structuredContent).toMatchObject({ ok: true, nodeId: "node-1" });
     expect(reviewStore.snapshot().nodes[0]?.history.current.missingActionOpportunities).toEqual([expect.objectContaining({
