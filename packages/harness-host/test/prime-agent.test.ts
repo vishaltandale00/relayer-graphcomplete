@@ -85,38 +85,6 @@ describe("PrimeAgentHarness", () => {
     } finally { await harness.dispose(); }
   });
 
-  it.each(["missing", "changed-presentation"])("refuses legacy continuation without executing or replacing Prime history when %s", async (reason) => {
-    const session = primeSession("/tmp/legacy-prime-session.jsonl");
-    const create = vi.fn(() => "fresh-session");
-    const open = vi.fn(() => "saved-session");
-    const createSession = vi.fn(async () => ({ session }));
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-      ...(reason === "changed-presentation" ? { savedState: {
-        primeAgentSessionFile: session.sessionFile,
-        primeAgentSessionPersonalPresentationVersionId: 17,
-      } } : {}),
-    }, { loadModule: async () => ({
-      ...runScopeApi(), SessionManager: { create, open },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices: createSession,
-    }) as never });
-    const saved = harness.state();
-    create.mockClear(); open.mockClear(); createSession.mockClear();
-    try {
-      await expect(harness.complete({ ...runContext(31, "fixture"), requireNativeContinuity: true }))
-        .rejects.toThrow("native history is unavailable or incompatible");
-      expect(session.promptAndWait).not.toHaveBeenCalled();
-      expect(create).not.toHaveBeenCalled();
-      expect(open).not.toHaveBeenCalled();
-      expect(createSession).not.toHaveBeenCalled();
-      expect(harness.state()).toEqual(saved);
-    } finally {
-      await harness.dispose();
-    }
-  });
-
   it("uses only explicit managed Prime profile and session paths in the production factory", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-factory-"));
     const runtime = managedRuntimePaths(root);
@@ -125,7 +93,7 @@ describe("PrimeAgentHarness", () => {
     const createSessionManager = vi.fn(() => "managed-session");
     const loadModule = vi.fn(async () => ({
       ...runScopeApi(),
-      SessionManager: { create: createSessionManager, open: vi.fn() },
+      SessionManager: { create: createSessionManager },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices,
       createAgentSessionFromServices: vi.fn(async () => ({ session })),
@@ -133,9 +101,12 @@ describe("PrimeAgentHarness", () => {
 
     try {
       await mkdir(runtime.privateStateRoot, { recursive: true });
-      await PrimeAgentHarness.create({
+      const harness = await PrimeAgentHarness.create({
         threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
       }, { loadModule, resolvePrimeRuntime: async () => runtime });
+      // Creating the harness creates no session; each run creates its own.
+      expect(createSessionManager).not.toHaveBeenCalled();
+      await harness.complete(runContext(11, "token"));
 
       expect(loadModule).toHaveBeenCalledOnce();
       expect(createAgentSessionServices).toHaveBeenCalledWith(expect.objectContaining({
@@ -148,7 +119,7 @@ describe("PrimeAgentHarness", () => {
     }
   });
 
-  it("does not open symlinked managed session state that resolves outside private state", async () => {
+  it("ignores a saved session file outside private state and refuses a symlinked sessions directory", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-session-"));
     const outside = await mkdtemp(join(tmpdir(), "relayer-prime-session-outside-"));
     const runtime = managedRuntimePaths(root);
@@ -162,7 +133,8 @@ describe("PrimeAgentHarness", () => {
       await writeFile(join(outside, "outside.jsonl"), "outside session", { mode: 0o600 });
       await symlink(join(outside, "outside.jsonl"), savedSession);
 
-      await expect(PrimeAgentHarness.create({
+      // A saved file from a release that resumed root sessions is never opened (#719).
+      const ignoring = await PrimeAgentHarness.create({
         threadId: 7,
         workingDirectory: "/tmp/project",
         ...fullPermission,
@@ -180,7 +152,8 @@ describe("PrimeAgentHarness", () => {
           createAgentSessionFromServices: vi.fn(async () => ({ session: primeSession(join(sessions, "fresh.jsonl")) })),
         }) as never,
         resolvePrimeRuntime: async () => runtime,
-      })).rejects.toThrow("saved state was preserved");
+      });
+      expect(ignoring.state()).toEqual({});
 
       expect(open).not.toHaveBeenCalled();
       expect(create).not.toHaveBeenCalled();
@@ -217,38 +190,90 @@ describe("PrimeAgentHarness", () => {
     }
   });
 
-  it("restores a regular saved session from the managed sessions directory", async () => {
+  it("runs every root run in its own fresh session, never opening legacy saved state, and points it at the accepted history", async () => {
     const root = await mkdtemp(join(tmpdir(), "relayer-prime-managed-session-"));
     const runtime = managedRuntimePaths(root);
-    const { privateStateRoot } = runtime;
-    const sessions = join(privateStateRoot, "sessions");
-    const savedSession = join(sessions, "saved.jsonl");
+    const sessionsDirectory = join(runtime.privateStateRoot, "sessions");
+    const savedSession = join(sessionsDirectory, "saved.jsonl");
     const open = vi.fn(() => "managed-session");
-    const create = vi.fn();
+    const create = vi.fn(() => "fresh-manager");
+    const sessions = [primeSession(join(sessionsDirectory, "first.jsonl")), primeSession(join(sessionsDirectory, "second.jsonl"))];
+    const created = [...sessions];
     try {
-      await mkdir(sessions, { recursive: true });
+      await mkdir(sessionsDirectory, { recursive: true });
+      // A regular, restorable file saved by a release that resumed root sessions.
       await writeFile(savedSession, "managed session", { mode: 0o600 });
-      await PrimeAgentHarness.create({
+      const harness = await PrimeAgentHarness.create({
         threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
         savedState: {
           primeAgentSessionFile: savedSession,
           primeAgentSessionPersonalPresentationVersionId: null,
+          primeRootResetReason: "force_stopped",
         },
       }, {
         loadModule: async () => ({
           ...runScopeApi(), SessionManager: { create, open },
           createHostRequestHandler: (handler: unknown) => handler,
           createAgentSessionServices: vi.fn(async () => nativeServices()),
-          createAgentSessionFromServices: vi.fn(async () => ({ session: primeSession(savedSession) })),
+          createAgentSessionFromServices: vi.fn(async () => ({ session: sessions.shift() })),
         }) as never,
         resolvePrimeRuntime: async () => runtime,
       });
+      expect(harness.state()).toEqual({});
 
-      expect(open).toHaveBeenCalledWith(await realpath(savedSession));
-      expect(create).not.toHaveBeenCalled();
+      const first = harness.complete({ ...runContext(11, "first"), threadHistory: [] });
+      await first;
+      const second = harness.complete({ ...runContext(13, "second"), threadHistory: [{ interactionNodeId: 11, responseLayerId: 12 }] });
+      await second;
+
+      expect(open).not.toHaveBeenCalled();
+      expect(create.mock.calls).toEqual([["/tmp/project", sessionsDirectory], ["/tmp/project", sessionsDirectory]]);
+      expect(created.map((session) => session.promptAndWait.mock.calls.length)).toEqual([1, 1]);
+      expect(created.map((session) => session.disposeAsync!.mock.calls.length)).toEqual([1, 1]);
+      await expect(first.attached).resolves.toMatchObject({ sessionDigest: `sha256:${createHash("sha256").update(join(sessionsDirectory, "first.jsonl")).digest("hex")}` });
+      await expect(second.attached).resolves.toMatchObject({ sessionDigest: `sha256:${createHash("sha256").update(join(sessionsDirectory, "second.jsonl")).digest("hex")}` });
+      // A follow-up such as "now change that" finds the earlier turn through the accepted graph alone.
+      const prompts = created.map((session) => String(session.promptAndWait.mock.calls[0]?.[0]));
+      expect(prompts[0]).toContain("This run starts a fresh session");
+      // Pointers only: the turn's message stays in the graph.
+      expect(prompts[1]).toContain(JSON.stringify([{ interactionNodeId: 11, responseLayerId: 12 }], null, 2));
+      expect(prompts[1]).toContain("await graph.get_node(interaction_node_id)");
+      expect(prompts[1]).toContain("await graph.get_layer(response_layer_id)");
+      expect(harness.state()).toEqual({});
+      await harness.dispose();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
+  });
+
+  it("gives two root runs that overlap in time their own sessions", async () => {
+    const firstGate = deferred<void>();
+    const first = primeSession("/tmp/overlap-first.jsonl", { promptAndWait: vi.fn(() => firstGate.promise) });
+    const second = primeSession("/tmp/overlap-second.jsonl");
+    const sessions = [first, second];
+    const harness = await PrimeAgentHarness.create({
+      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+    }, { loadModule: async () => ({
+      ...runScopeApi(),
+      SessionManager: { create: vi.fn(() => "new-session") },
+      createHostRequestHandler: (handler: unknown) => handler,
+      createAgentSessionServices: vi.fn(async () => nativeServices()),
+      createAgentSessionFromServices: vi.fn(async () => ({ session: sessions.shift() })),
+    }) as never });
+
+    const running = harness.complete(runContext(11, "first"));
+    await vi.waitFor(() => expect(first.promptAndWait).toHaveBeenCalledOnce());
+    // The second root run starts and finishes while the first is still running.
+    await harness.complete(runContext(13, "second"));
+    expect(second.promptAndWait).toHaveBeenCalledOnce();
+    expect(first.promptAndWait).toHaveBeenCalledOnce();
+    expect(second.disposeAsync).toHaveBeenCalledOnce();
+    expect(first.disposeAsync).not.toHaveBeenCalled();
+
+    firstGate.resolve();
+    await running;
+    expect(first.disposeAsync).toHaveBeenCalledOnce();
+    expect(harness.state()).toEqual({});
   });
 
   it("rejects a symlinked private state root before managed Prime services can write", async () => {
@@ -257,7 +282,7 @@ describe("PrimeAgentHarness", () => {
     const runtime = managedRuntimePaths(root);
     const createAgentSessionServices = vi.fn(async () => nativeServices());
     const loadModule = vi.fn(async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn() },
+      ...runScopeApi(), SessionManager: { create: vi.fn() },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices,
       createAgentSessionFromServices: vi.fn(),
@@ -284,7 +309,7 @@ describe("PrimeAgentHarness", () => {
     const runtime = managedRuntimePaths(root);
     const createAgentSessionServices = vi.fn(async () => nativeServices());
     const loadModule = vi.fn(async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn() },
+      ...runScopeApi(), SessionManager: { create: vi.fn() },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices,
       createAgentSessionFromServices: vi.fn(),
@@ -316,7 +341,7 @@ describe("PrimeAgentHarness", () => {
       dispose: nativeSyncDispose,
       disposeAsync: vi.fn(async () => undefined),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     harness.forceShutdown();
     harness.forceShutdown();
@@ -326,124 +351,13 @@ describe("PrimeAgentHarness", () => {
     expect(session.disposeAsync).not.toHaveBeenCalled();
   });
 
-  it("forgets the root session a force shutdown kills during a root turn, and keeps an idle one", async () => {
-    // PRD: a root turn force-stopped while its native conversation ran is not resumed.
-    const idle = await createHarness(primeSession("/tmp/idle.jsonl"));
-    await idle.complete(runContext(11, "token"));
-    idle.forceShutdown();
-    expect(idle.state()).toEqual({ primeAgentSessionFile: "/tmp/idle.jsonl", primeAgentSessionPersonalPresentationVersionId: null });
-
-    const session = primeSession("/tmp/killed.jsonl", {
-      promptAndWait: vi.fn().mockResolvedValueOnce(undefined).mockReturnValueOnce(new Promise<void>(() => {})),
-    });
-    const harness = await createHarness(session);
-    await harness.complete(runContext(11, "token"));
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/killed.jsonl", primeAgentSessionPersonalPresentationVersionId: null });
-    void harness.complete(runContext(12, "token")).catch(() => undefined);
-    await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalledTimes(2));
-
-    harness.forceShutdown();
-
-    expect(session.abort).toHaveBeenCalledOnce();
-    expect(harness.state()).toEqual({ primeRootResetReason: "force_stopped" });
-  });
-
-  it("keeps the next root turn's session at force shutdown after an earlier root turn was force-stopped", async () => {
-    const stuck = primeSession("/tmp/stuck.jsonl", { promptAndWait: vi.fn(() => new Promise<void>(() => {})) });
-    const next = primeSession("/tmp/next.jsonl");
-    const sessions = [stuck, next];
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => ({ session: sessions.shift() })),
-    }) as never });
-    const force = new AbortController();
-    // The stuck root turn's native prompt never settles, even after its force-stop.
-    const stuckTurn = harness.complete({ ...runContext(11, "stuck"), forceSignal: force.signal });
-    await vi.waitFor(() => expect(stuck.promptAndWait).toHaveBeenCalledOnce());
-    force.abort(new Error("force-stopped after two minutes"));
-    await expect(stuckTurn).rejects.toThrow("force-stopped after two minutes");
-    await harness.complete({ ...runContext(12, "next"), forceSignal: new AbortController().signal });
-
-    harness.forceShutdown();
-
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/next.jsonl", primeAgentSessionPersonalPresentationVersionId: null });
-  });
-
-  it("keeps the root session when force shutdown ends a root turn still acquiring it", async () => {
-    // The reload for a new pin never settles: no conversation ran on the restored session.
-    const session = primeSession("/tmp/restored.jsonl", { reload: vi.fn(() => new Promise<void>(() => {})) });
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-      savedState: { primeAgentSessionFile: "/tmp/restored.jsonl", primeAgentSessionPersonalPresentationVersionId: 90 },
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(), open: vi.fn(() => "restored-manager") },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => ({ session })),
-    }) as never });
-    void harness.complete(presentationRunContext(11, "root", 90)).catch(() => undefined);
-    await vi.waitFor(() => expect(session.reload).toHaveBeenCalledOnce());
-
-    harness.forceShutdown();
-
-    expect(session.promptAndWait).not.toHaveBeenCalled();
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/restored.jsonl", primeAgentSessionPersonalPresentationVersionId: 90 });
-  });
-
-  it("records a visible notice whenever a root turn cannot continue the previous native session", async () => {
-    const pinned = primeSession("/tmp/pinned.jsonl", { reload: vi.fn(async () => undefined) });
-    const neutral = primeSession("/tmp/neutral.jsonl", { promptAndWait: vi.fn(() => new Promise<void>(() => {})) });
-    const fresh = primeSession("/tmp/fresh.jsonl");
-    const sessions = [pinned, neutral, fresh];
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-      savedState: { primeAgentSessionFile: "/tmp/pinned.jsonl", primeAgentSessionPersonalPresentationVersionId: 90 },
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn(() => "saved-session") },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => ({ session: sessions.shift() })),
-    }) as never });
-    const resets = (trace: { events: HarnessTraceEventInput[] }) => trace.events
-      .filter((event) => event.type === "warning" && typeof event.data.nativeSessionReset === "string")
-      .map((event) => event.data.nativeSessionReset);
-
-    // The restored conversation continues under its own pin.
-    const resumed = recordingTrace();
-    await harness.complete({ ...presentationRunContext(11, "resumed", 90), trace: resumed.sink });
-    expect(resets(resumed)).toEqual([]);
-
-    // A new pin rotates away from a session that held a conversation.
-    const rotated = recordingTrace();
-    const force = new AbortController();
-    const stuck = harness.complete({ ...runContext(12, "rotated", rotated.sink), forceSignal: force.signal });
-    await vi.waitFor(() => expect(neutral.promptAndWait).toHaveBeenCalledOnce());
-    expect(resets(rotated)).toEqual(["presentation_changed"]);
-
-    // A force-stopped conversation is not resumed, and the reason survives a restart.
-    force.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-    expect(harness.state()).toEqual({ primeRootResetReason: "force_stopped" });
-    const next = recordingTrace();
-    await harness.complete({ ...runContext(13, "next", next.sink), forceSignal: new AbortController().signal });
-    expect(resets(next)).toEqual(["force_stopped"]);
-    expect(harness.state()).toEqual({ primeAgentSessionFile: "/tmp/fresh.jsonl", primeAgentSessionPersonalPresentationVersionId: null });
-  });
-
   it("fails closed when the installed package cannot scope presentation instructions to a session", async () => {
-    const session = primeSession("/tmp/unscoped.jsonl", { reload: vi.fn(async () => undefined) });
+    const session = primeSession("/tmp/unscoped.jsonl");
     const harness = await PrimeAgentHarness.create({
       threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: unknown) => handler,
       // No resource loader: a neutral session still works, pinned instructions cannot be delivered.
       createAgentSessionServices: vi.fn(async () => ({})),
@@ -451,11 +365,12 @@ describe("PrimeAgentHarness", () => {
     }) as never });
 
     await expect(harness.complete(presentationRunContext(11, "root", 90)))
-      .rejects.toThrow("cannot refresh interaction-scoped presentation instructions");
+      .rejects.toThrow("cannot scope presentation instructions to a session");
     await expect(harness.complete(invokedRunContext(presentationRunContext(12, "child", 90), 7)))
       .rejects.toThrow("cannot scope presentation instructions to a session");
-    expect(session.reload).not.toHaveBeenCalled();
     expect(session.promptAndWait).not.toHaveBeenCalled();
+    await harness.complete(runContext(13, "neutral"));
+    expect(session.promptAndWait).toHaveBeenCalledOnce();
   });
 
   it("guards native disposal before an asynchronous abort continuation can dispose again", async () => {
@@ -476,7 +391,7 @@ describe("PrimeAgentHarness", () => {
       }),
       dispose: nativeSyncDispose,
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     harness.forceShutdown();
     releaseAbort();
@@ -496,7 +411,7 @@ describe("PrimeAgentHarness", () => {
       abort: vi.fn(async () => { throw new Error("abort failed"); }),
       dispose: nativeSyncDispose,
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     expect(() => harness.forceShutdown()).not.toThrow();
     await Promise.resolve();
@@ -515,7 +430,7 @@ describe("PrimeAgentHarness", () => {
       abort: vi.fn(() => { throw new Error("abort failed synchronously"); }),
       dispose: nativeSyncDispose,
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     expect(() => harness.forceShutdown()).not.toThrow();
 
@@ -538,7 +453,7 @@ describe("PrimeAgentHarness", () => {
       dispose: nativeSyncDispose,
       disposeAsync: vi.fn(async () => { session.dispose(); }),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     expect(() => harness.forceShutdown()).toThrow("forced native disposal failed");
     await expect(harness.dispose()).resolves.toBeUndefined();
@@ -561,7 +476,7 @@ describe("PrimeAgentHarness", () => {
       dispose: nativeSyncDispose,
       disposeAsync: vi.fn(async () => { nativeSyncDispose(); }),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     await harness.dispose();
     harness.forceShutdown();
@@ -581,7 +496,7 @@ describe("PrimeAgentHarness", () => {
       abort: vi.fn(async () => undefined),
       dispose: nativeSyncDispose,
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     await harness.dispose();
     harness.forceShutdown();
@@ -601,7 +516,7 @@ describe("PrimeAgentHarness", () => {
       dispose: nativeSyncDispose,
       disposeAsync: vi.fn(async () => { throw new Error("graceful disposal failed"); }),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     await expect(harness.dispose()).rejects.toThrow("graceful disposal failed");
     await expect(harness.dispose()).rejects.toThrow("graceful disposal failed");
@@ -621,7 +536,7 @@ describe("PrimeAgentHarness", () => {
       dispose: nativeSyncDispose,
       disposeAsync: vi.fn(async () => undefined),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     const graceful = harness.dispose();
     expect(harness.dispose()).toBe(graceful);
@@ -653,7 +568,7 @@ describe("PrimeAgentHarness", () => {
         throw new Error("stale graceful cleanup failure");
       }),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     const graceful = harness.dispose();
     await gracefulStarted;
@@ -686,7 +601,7 @@ describe("PrimeAgentHarness", () => {
         session.dispose();
       }),
     };
-    const harness = await createHarness(session);
+    const harness = await createHarnessWithLiveSession(session);
 
     const graceful = harness.dispose();
     await gracefulStarted;
@@ -699,7 +614,7 @@ describe("PrimeAgentHarness", () => {
     expect(nativeSyncDispose).toHaveBeenCalledOnce();
   });
 
-  it("keeps one Prime Agent session while passing a distinct context to each run", async () => {
+  it("creates a session for each run and passes each run its own context", async () => {
     const prompts: { text: string; runContext: unknown; modelScope: unknown }[] = [];
     const session = {
       sessionFile: "/tmp/prime-session.jsonl",
@@ -722,7 +637,7 @@ describe("PrimeAgentHarness", () => {
     }, { loadModule: async () => ({
       AGENT_RUN_MODEL_SCOPE_VERSION: 1,
       createAgentRunModelScope,
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: (payload: Record<string, unknown>, context: any) => Promise<Record<string, unknown>>) => {
         hostHandlers.push(handler);
         return handler;
@@ -742,7 +657,7 @@ describe("PrimeAgentHarness", () => {
     await harness.complete(first);
     await harness.complete(second);
 
-    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(1);
+    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
     expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.objectContaining({ prewarmIpythonKernel: true }));
     expect(services.modelRegistry.find).not.toHaveBeenCalled();
     expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.not.objectContaining({ model: expect.anything() }));
@@ -839,22 +754,17 @@ describe("PrimeAgentHarness", () => {
     await expect(hostHandlers[3]?.(layer, { ...invocation(first), isCurrent: () => false })).rejects.toThrow("no longer active");
     await expect(hostHandlers[3]?.(layer, { ...invocation(first), signal: AbortSignal.abort() })).rejects.toThrow("no longer active");
 
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/prime-session.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
+    expect(harness.state()).toEqual({});
   });
 
-  it("runs concurrent invoked completions in fresh sessions without changing root continuity", async () => {
+  it("runs concurrent invoked completions in their own fresh sessions", async () => {
     const scopes: ControlledRunScope[] = [];
-    const root = primeSession("/tmp/root-prime-session.jsonl");
     const firstChild = primeSession("/tmp/invoked-a.jsonl");
     const secondChild = primeSession("/tmp/invoked-b.jsonl");
-    const sessions = [root, firstChild, secondChild];
+    const sessions = [firstChild, secondChild];
     const create = vi.fn()
       .mockReturnValueOnce("fresh-a")
       .mockReturnValueOnce("fresh-b");
-    const open = vi.fn(() => "saved-root");
     const createAgentSessionServices = vi.fn(async () => nativeServices());
     const createAgentSessionFromServices = vi.fn(async () => {
       const session = sessions.shift();
@@ -866,13 +776,9 @@ describe("PrimeAgentHarness", () => {
       workingDirectory: "/tmp/project",
       ...fullPermission,
       configuration,
-      savedState: {
-        primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
-        primeAgentSessionPersonalPresentationVersionId: null,
-      },
     }, { loadModule: async () => ({
       ...controlledRunScopeApi(scopes),
-      SessionManager: { create, open },
+      SessionManager: { create },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices,
       createAgentSessionFromServices,
@@ -895,11 +801,9 @@ describe("PrimeAgentHarness", () => {
       },
     ]);
 
-    expect(open).toHaveBeenCalledWith("/tmp/root-prime-session.jsonl");
     expect(create.mock.calls).toEqual([["/tmp/project"], ["/tmp/project"]]);
     expect(createAgentSessionServices).toHaveBeenCalledOnce();
-    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(3);
-    expect(root.promptAndWait).not.toHaveBeenCalled();
+    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
     expect(firstChild.promptAndWait).toHaveBeenCalledOnce();
     expect(secondChild.promptAndWait).toHaveBeenCalledOnce();
     expect(scopes.map(({ input }) => input.root.id)).toEqual(["gpt-shared", "claude-root"]);
@@ -908,66 +812,7 @@ describe("PrimeAgentHarness", () => {
     expect(secondChild.waitForRlmQuiescence).toHaveBeenCalledOnce();
     expect(firstChild.disposeAsync).toHaveBeenCalledOnce();
     expect(secondChild.disposeAsync).toHaveBeenCalledOnce();
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
-
-    await harness.complete(runContext(43, "root-token"));
-    expect(root.promptAndWait).toHaveBeenCalledOnce();
-    expect(root.disposeAsync).not.toHaveBeenCalled();
-  });
-
-  it("runs a fresh root run in its own session and shows it the thread's history", async () => {
-    const scopes: ControlledRunScope[] = [];
-    const root = primeSession("/tmp/root-prime-session.jsonl");
-    const fresh = primeSession("/tmp/fresh-root.jsonl");
-    const sessions = [root, fresh];
-    const create = vi.fn(() => "fresh-root");
-    const open = vi.fn(() => "saved-root");
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7,
-      workingDirectory: "/tmp/project",
-      ...fullPermission,
-      configuration,
-      savedState: {
-        primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
-        primeAgentSessionPersonalPresentationVersionId: null,
-      },
-    }, { loadModule: async () => ({
-      ...controlledRunScopeApi(scopes),
-      SessionManager: { create, open },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => {
-        const session = sessions.shift();
-        if (session === undefined) throw new Error("unexpected Prime session creation");
-        return { session };
-      }),
-    }) as never });
-
-    await harness.complete({
-      ...familyRunContext(41, "fresh-token", 0),
-      nativeSession: "fresh",
-      threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
-    });
-    expect(root.promptAndWait).not.toHaveBeenCalled();
-    expect(fresh.promptAndWait).toHaveBeenCalledOnce();
-    const prompt = String(vi.mocked(fresh.promptAndWait).mock.calls[0]?.[0]);
-    expect(prompt).toContain('"interactionNodeId": 1');
-    expect(prompt).toContain("await graph.get_node(interaction_node_id)");
-    // Pointers only: the turn's message stays in the graph.
-    expect(prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
-    expect(prompt).toContain("await graph.get_layer(response_layer_id)");
-    expect(fresh.disposeAsync).toHaveBeenCalledOnce();
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/root-prime-session.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
-
-    await harness.complete(runContext(43, "root-token"));
-    expect(root.promptAndWait).toHaveBeenCalledOnce();
-    expect(String(vi.mocked(root.promptAndWait).mock.calls[0]?.[0])).not.toContain("This run starts a fresh session");
+    expect(harness.state()).toEqual({});
   });
 
   it("cancels and quiesces only the exact invoked Prime session before disposing it", async () => {
@@ -975,7 +820,6 @@ describe("PrimeAgentHarness", () => {
     const promptGate = new Promise<void>((resolve) => { releasePrompt = resolve; });
     let releaseQuiescence!: () => void;
     const quiescenceGate = new Promise<void>((resolve) => { releaseQuiescence = resolve; });
-    const root = primeSession("/tmp/root.jsonl");
     const cancelledChild = primeSession("/tmp/cancelled.jsonl", {
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
@@ -984,7 +828,7 @@ describe("PrimeAgentHarness", () => {
       abort: vi.fn(async () => { releasePrompt(); }),
     });
     const sibling = primeSession("/tmp/sibling.jsonl");
-    const sessions = [root, cancelledChild, sibling];
+    const sessions = [cancelledChild, sibling];
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
       workingDirectory: "/tmp/project",
@@ -992,7 +836,7 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "fresh") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
       createAgentSessionFromServices: vi.fn(async () => {
@@ -1013,7 +857,6 @@ describe("PrimeAgentHarness", () => {
     await new Promise((resolve) => setImmediate(resolve));
 
     expect(cancelledChild.abort).toHaveBeenCalledOnce();
-    expect(root.abort).not.toHaveBeenCalled();
     expect(sibling.abort).not.toHaveBeenCalled();
     expect(cancelledSettled).toBe(false);
     expect(cancelledChild.disposeAsync).not.toHaveBeenCalled();
@@ -1023,17 +866,15 @@ describe("PrimeAgentHarness", () => {
     expect(cancelledSettled).toBe(true);
     expect(cancelledChild.disposeAsync).toHaveBeenCalledOnce();
     expect(sibling.disposeAsync).toHaveBeenCalledOnce();
-    expect(root.disposeAsync).not.toHaveBeenCalled();
   });
 
-  it("force-disposes active and late-created invoked sessions without leaking into root", async () => {
+  it("force-disposes active and late-created invoked sessions", async () => {
     let markActiveStarted!: () => void;
     const activeStarted = new Promise<void>((resolve) => { markActiveStarted = resolve; });
     let releaseActive!: () => void;
     const activeGate = new Promise<void>((resolve) => { releaseActive = resolve; });
     let releaseCreation!: () => void;
     const creationGate = new Promise<void>((resolve) => { releaseCreation = resolve; });
-    const root = primeSession("/tmp/root.jsonl");
     const activeChild = primeSession("/tmp/active-child.jsonl", {
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
@@ -1044,7 +885,6 @@ describe("PrimeAgentHarness", () => {
       abort: vi.fn(async () => { releaseActive(); }),
     });
     const lateChild = primeSession("/tmp/late-child.jsonl");
-    const rootNativeDispose = root.dispose;
     const activeChildNativeDispose = activeChild.dispose;
     const lateChildNativeDispose = lateChild.dispose;
     let creations = 0;
@@ -1055,13 +895,12 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "fresh") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
       createAgentSessionFromServices: vi.fn(async () => {
         creations += 1;
-        if (creations === 1) return { session: root };
-        if (creations === 2) return { session: activeChild };
+        if (creations === 1) return { session: activeChild };
         await creationGate;
         return { session: lateChild };
       }),
@@ -1081,8 +920,6 @@ describe("PrimeAgentHarness", () => {
     expect(lateChild.promptAndWait).not.toHaveBeenCalled();
     expect(lateChild.abort).toHaveBeenCalledOnce();
     expect(lateChildNativeDispose).toHaveBeenCalledOnce();
-    expect(root.abort).toHaveBeenCalledOnce();
-    expect(rootNativeDispose).toHaveBeenCalledOnce();
   });
 
   it("force-stops only a stuck invoked child's own session, never the root turn or a sibling child", async () => {
@@ -1108,7 +945,7 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "fresh") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
       createAgentSessionFromServices: vi.fn(async () => {
@@ -1148,18 +985,15 @@ describe("PrimeAgentHarness", () => {
     await siblingTurn;
     releaseRoot();
     await rootTurn;
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/root.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
+    expect(harness.state()).toEqual({});
     expect(harness.supportsForceStop).toBe(true);
   });
 
-  it("replaces the root session after force-stopping a stuck root turn, leaving a running child alone", async () => {
+  it("force-stops only a stuck root run's own session, leaving a running child alone, and the next root run starts fresh", async () => {
     let releaseChild!: () => void;
     const childGate = new Promise<void>((resolve) => { releaseChild = resolve; });
-    // A wedged root turn on the restored session: neither its prompt nor its abort settles.
-    const stuckRoot = primeSession("/tmp/saved.jsonl", {
+    // A wedged root run: neither its prompt nor its abort settles.
+    const stuckRoot = primeSession("/tmp/stuck-root.jsonl", {
       promptAndWait: vi.fn(() => new Promise<void>(() => undefined)),
       abort: vi.fn(() => new Promise<void>(() => undefined)),
     });
@@ -1169,7 +1003,6 @@ describe("PrimeAgentHarness", () => {
     const childNativeDispose = child.dispose;
     const sessions = [stuckRoot, child, replacement];
     const create = vi.fn(() => "fresh-manager");
-    const open = vi.fn(() => "saved-manager");
     const createAgentSessionFromServices = vi.fn(async () => {
       const session = sessions.shift();
       if (session === undefined) throw new Error("unexpected Prime session creation");
@@ -1180,13 +1013,9 @@ describe("PrimeAgentHarness", () => {
       workingDirectory: "/tmp/project",
       ...fullPermission,
       configuration,
-      savedState: {
-        primeAgentSessionFile: "/tmp/saved.jsonl",
-        primeAgentSessionPersonalPresentationVersionId: null,
-      },
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create, open },
+      SessionManager: { create },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
       createAgentSessionFromServices,
@@ -1210,17 +1039,12 @@ describe("PrimeAgentHarness", () => {
     expect(stuckRootNativeDispose).toHaveBeenCalledOnce();
     expect(child.abort).not.toHaveBeenCalled();
     expect(childNativeDispose).not.toHaveBeenCalled();
-    // The stopped session may still write its file, so it is neither saved nor resumed.
-    expect(harness.state()).toEqual({ primeRootResetReason: "force_stopped" });
+    expect(harness.state()).toEqual({});
 
     await harness.complete({ ...runContext(63, "root"), forceSignal: new AbortController().signal });
-    expect(open).toHaveBeenCalledOnce();
     expect(createAgentSessionFromServices).toHaveBeenLastCalledWith(expect.objectContaining({ sessionManager: "fresh-manager" }));
     expect(replacement.promptAndWait).toHaveBeenCalledOnce();
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/replacement.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
+    expect(harness.state()).toEqual({});
 
     releaseChild();
     await childTurn;
@@ -1229,7 +1053,6 @@ describe("PrimeAgentHarness", () => {
   it("force-disposes an invoked child session created after its turn was force-stopped", async () => {
     let releaseCreation!: () => void;
     const creationGate = new Promise<void>((resolve) => { releaseCreation = resolve; });
-    const root = primeSession("/tmp/root.jsonl");
     // Graceful disposal of the late child would stall forever.
     const lateChild = primeSession("/tmp/late-child.jsonl", { disposeAsync: vi.fn(() => new Promise<void>(() => undefined)) });
     const lateChildNativeDispose = lateChild.dispose;
@@ -1241,12 +1064,11 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "fresh") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
       createAgentSessionFromServices: vi.fn(async () => {
         creations += 1;
-        if (creations === 1) return { session: root };
         await creationGate;
         return { session: lateChild };
       }),
@@ -1254,7 +1076,7 @@ describe("PrimeAgentHarness", () => {
     const force = new AbortController();
 
     const child = harness.complete({ ...invokedRunContext(runContext(81, "late"), 181), forceSignal: force.signal });
-    await vi.waitFor(() => expect(creations).toBe(2));
+    await vi.waitFor(() => expect(creations).toBe(1));
     force.abort(new Error("force-stopped after two minutes"));
     await expect(child).rejects.toThrow("force-stopped after two minutes");
 
@@ -1263,283 +1085,11 @@ describe("PrimeAgentHarness", () => {
     expect(lateChild.abort).toHaveBeenCalledOnce();
     expect(lateChild.promptAndWait).not.toHaveBeenCalled();
     expect(lateChild.disposeAsync).not.toHaveBeenCalled();
-    expect(root.abort).not.toHaveBeenCalled();
     // Nothing is retained: disposing the harness does not wait on the stalled child.
     await harness.dispose();
-    expect(root.disposeAsync).toHaveBeenCalledOnce();
   });
 
-  it("lets the next root turn start a fresh session while a force-stopped root turn's reload never settles", async () => {
-    // The stuck root turn's reload of its presentation instructions never settles.
-    const stuckRoot = primeSession("/tmp/stuck-root.jsonl", { reload: vi.fn(() => new Promise<void>(() => undefined)) });
-    const fresh = primeSession("/tmp/fresh-root.jsonl");
-    const stuckRootNativeDispose = stuckRoot.dispose;
-    const sessions = [stuckRoot, fresh];
-    const create = vi.fn(() => "fresh-manager");
-    const createAgentSessionFromServices = vi.fn(async () => {
-      const session = sessions.shift();
-      if (session === undefined) throw new Error("unexpected Prime session creation");
-      return { session };
-    });
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create, open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices,
-    }) as never });
-    const rootForce = new AbortController();
-
-    const stuck = harness.complete({ ...presentationRunContext(70, "stuck", 90), forceSignal: rootForce.signal });
-    await vi.waitFor(() => expect(stuckRoot.reload).toHaveBeenCalledOnce());
-    rootForce.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-
-    // The half-reloaded session is force-disposed, and the next root turn neither waits for
-    // the reload nor reuses that session.
-    await harness.complete({ ...runContext(71, "next"), forceSignal: new AbortController().signal });
-    expect(stuckRootNativeDispose).toHaveBeenCalledOnce();
-    expect(stuckRoot.promptAndWait).not.toHaveBeenCalled();
-    expect(fresh.promptAndWait).toHaveBeenCalledOnce();
-    expect(createAgentSessionFromServices).toHaveBeenLastCalledWith(expect.objectContaining({ sessionManager: "fresh-manager" }));
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/fresh-root.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
-  });
-
-  it("discards a root session a force-stopped turn created too late, after the next turn started fresh", async () => {
-    let releaseStaleCreation!: () => void;
-    const staleCreationGate = new Promise<void>((resolve) => { releaseStaleCreation = resolve; });
-    const pinned = primeSession("/tmp/pinned.jsonl", { reload: vi.fn(async () => undefined) });
-    const stale = primeSession("/tmp/stale.jsonl");
-    const successor = primeSession("/tmp/successor.jsonl");
-    const staleNativeDispose = stale.dispose;
-    let creations = 0;
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh-manager"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => {
-        creations += 1;
-        if (creations === 1) return { session: pinned };
-        if (creations === 2) {
-          await staleCreationGate;
-          return { session: stale };
-        }
-        return { session: successor };
-      }),
-    }) as never });
-    await harness.complete({ ...presentationRunContext(80, "pinned", 90), forceSignal: new AbortController().signal });
-    const rootForce = new AbortController();
-
-    // A different presentation pin rotates the session; its creation stalls.
-    const stuck = harness.complete({ ...runContext(81, "stuck"), forceSignal: rootForce.signal });
-    await vi.waitFor(() => expect(creations).toBe(2));
-    rootForce.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-
-    await harness.complete({ ...runContext(82, "next"), forceSignal: new AbortController().signal });
-    expect(successor.promptAndWait).toHaveBeenCalledOnce();
-
-    releaseStaleCreation();
-    await vi.waitFor(() => expect(staleNativeDispose).toHaveBeenCalledOnce());
-    expect(stale.promptAndWait).not.toHaveBeenCalled();
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/successor.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
-  });
-
-  it("does not resume a saved conversation a force-stopped root turn was reopening", async () => {
-    const restored = primeSession("/tmp/saved.jsonl");
-    const fresh = primeSession("/tmp/fresh.jsonl");
-    const create = vi.fn(() => "fresh-manager");
-    const open = vi.fn(() => "saved-manager");
-    let creations = 0;
-    const createAgentSessionFromServices = vi.fn(async () => {
-      creations += 1;
-      if (creations === 1) return { session: restored };
-      if (creations === 2) throw new Error("native session creation failed");
-      // Reopening the saved conversation never finishes.
-      if (creations === 3) return new Promise<never>(() => undefined);
-      return { session: fresh };
-    });
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-      savedState: {
-        primeAgentSessionFile: "/tmp/saved.jsonl",
-        primeAgentSessionPersonalPresentationVersionId: 90,
-      },
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create, open },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices,
-    }) as never });
-    expect(open).toHaveBeenCalledOnce();
-
-    // An unpinned turn rotates away from the restored session, but its new session fails,
-    // so no root session is left installed while the saved file stays resumable.
-    await expect(harness.complete({ ...runContext(100, "unpinned"), forceSignal: new AbortController().signal }))
-      .rejects.toThrow("native session creation failed");
-    expect(restored.disposeAsync).toHaveBeenCalledOnce();
-
-    // A turn pinned to 90 again reopens the saved conversation, which hangs.
-    const cancel = new AbortController();
-    const rootForce = new AbortController();
-    const stuck = harness.complete({ ...presentationRunContext(101, "stuck", 90), forceSignal: rootForce.signal }, cancel.signal);
-    await vi.waitFor(() => expect(creations).toBe(3));
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(open).toHaveBeenLastCalledWith("/tmp/saved.jsonl");
-    cancel.abort(new Error("cancelled"));
-    rootForce.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-    expect(harness.state()).toEqual({ primeRootResetReason: "force_stopped" });
-
-    // The next pinned root turn starts a fresh conversation instead of resuming that file.
-    await harness.complete({ ...presentationRunContext(102, "next", 90), forceSignal: new AbortController().signal });
-    expect(open).toHaveBeenCalledTimes(2);
-    expect(create).toHaveBeenCalledTimes(2);
-    expect(createAgentSessionFromServices).toHaveBeenLastCalledWith(expect.objectContaining({ sessionManager: "fresh-manager" }));
-    expect(fresh.promptAndWait).toHaveBeenCalledOnce();
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/fresh.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: 90,
-    });
-  });
-
-  it("keeps the successor's presentation instructions when an abandoned reload later fails", async () => {
-    const loaders = sessionLoaders();
-    const staleReload = deferred<void>();
-    const stuckRoot = primeSession("/tmp/stuck-root.jsonl", { reload: vi.fn(() => staleReload.promise) });
-    const successor = primeSession("/tmp/successor.jsonl", { reload: vi.fn(async () => undefined) });
-    const sessions = [stuckRoot, successor];
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh-manager"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: loaders.record(vi.fn(async () => {
-        const session = sessions.shift();
-        if (session === undefined) throw new Error("unexpected Prime session creation");
-        return { session };
-      })),
-    }) as never });
-    const rootForce = new AbortController();
-
-    // The stuck turn's reload is abandoned while it still holds the previous (empty) instructions.
-    const stuck = harness.complete({ ...presentationRunContext(110, "stuck", 90), forceSignal: rootForce.signal });
-    await vi.waitFor(() => expect(stuckRoot.reload).toHaveBeenCalledOnce());
-    rootForce.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-    await harness.complete({ ...presentationRunContext(111, "successor", 90), forceSignal: new AbortController().signal });
-    expect(successor.promptAndWait).toHaveBeenCalledOnce();
-
-    staleReload.reject(new Error("stale reload failed"));
-    await settleMicrotasks();
-
-    expect(loaders.appendedFor(successor)).toEqual(["base", expect.stringContaining("If you are the root agent")]);
-    await harness.complete({ ...presentationRunContext(112, "next", 90), forceSignal: new AbortController().signal });
-    expect(successor.reload).not.toHaveBeenCalled();
-    expect(successor.promptAndWait).toHaveBeenCalledTimes(2);
-  });
-
-  it("does not create a session when an abandoned rotation's disposal settles after the successor started", async () => {
-    const loaders = sessionLoaders();
-    const staleDisposal = deferred<void>();
-    const pinned = primeSession("/tmp/pinned.jsonl", {
-      reload: vi.fn(async () => undefined),
-      disposeAsync: vi.fn(() => staleDisposal.promise),
-    });
-    const successor = primeSession("/tmp/successor.jsonl", { reload: vi.fn(async () => undefined) });
-    const extra = primeSession("/tmp/extra.jsonl");
-    const sessions = [pinned, successor, extra];
-    const createAgentSessionFromServices = vi.fn(async () => {
-      const session = sessions.shift();
-      if (session === undefined) throw new Error("unexpected Prime session creation");
-      return { session };
-    });
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh-manager"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: loaders.record(createAgentSessionFromServices),
-    }) as never });
-    await harness.complete({ ...presentationRunContext(120, "pinned", 90), forceSignal: new AbortController().signal });
-    const rootForce = new AbortController();
-
-    // An unpinned turn rotates; graceful disposal of the pinned session stalls.
-    const stuck = harness.complete({ ...runContext(121, "stuck"), forceSignal: rootForce.signal });
-    await vi.waitFor(() => expect(pinned.disposeAsync).toHaveBeenCalledOnce());
-    rootForce.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-    await harness.complete({ ...presentationRunContext(122, "successor", 90), forceSignal: new AbortController().signal });
-    expect(successor.promptAndWait).toHaveBeenCalledOnce();
-
-    staleDisposal.resolve();
-    await settleMicrotasks();
-
-    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
-    expect(loaders.appendedFor(successor)).toEqual(["base", expect.stringContaining("If you are the root agent")]);
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/successor.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: 90,
-    });
-  });
-
-  it("keeps the successor's presentation pin when an abandoned reload later succeeds", async () => {
-    const staleReload = deferred<void>();
-    const stuckRoot = primeSession("/tmp/stuck-root.jsonl", { reload: vi.fn(() => staleReload.promise) });
-    const successor = primeSession("/tmp/successor.jsonl");
-    const sessions = [stuckRoot, successor];
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "fresh-manager"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => {
-        const session = sessions.shift();
-        if (session === undefined) throw new Error("unexpected Prime session creation");
-        return { session };
-      }),
-    }) as never });
-    const rootForce = new AbortController();
-
-    const stuck = harness.complete({ ...presentationRunContext(130, "stuck", 90), forceSignal: rootForce.signal });
-    await vi.waitFor(() => expect(stuckRoot.reload).toHaveBeenCalledOnce());
-    rootForce.abort(new Error("force-stopped after two minutes"));
-    await expect(stuck).rejects.toThrow("force-stopped after two minutes");
-    await harness.complete({ ...presentationRunContext(131, "successor", 95), forceSignal: new AbortController().signal });
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/successor.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: 95,
-    });
-
-    staleReload.resolve();
-    await settleMicrotasks();
-
-    expect(stuckRoot.promptAndWait).not.toHaveBeenCalled();
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/successor.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: 95,
-    });
-  });
-
-  it("maps an admitted family to isolated native providers and reuses the session across root changes", async () => {
+  it("maps an admitted family to isolated native providers across root changes, with a session per run", async () => {
     const scopes: ControlledRunScope[] = [];
     const providerRequests: Array<{ provider: string; modelId: string; apiKey: string | undefined }> = [];
     const modelRegistryAuth = vi.fn(() => { throw new Error("ambient Prime registry auth must not run"); });
@@ -1590,7 +1140,7 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...controlledRunScopeApi(scopes),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => ({ modelRegistry: { getApiKeyAndHeaders: modelRegistryAuth } })),
       createAgentSessionFromServices,
@@ -1604,7 +1154,7 @@ describe("PrimeAgentHarness", () => {
     await harness.complete(second);
     expect(() => scopes[1]!.resolve(scopes[1]!.input.root)).toThrow("revoked");
 
-    expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
+    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
     expect(session.promptAndWait).toHaveBeenCalledTimes(2);
     expect(modelRegistryAuth).not.toHaveBeenCalled();
     expect(scopes[0]!.input.models.map(({ id }) => id)).toEqual([
@@ -1656,10 +1206,7 @@ describe("PrimeAgentHarness", () => {
       "secret-openai-personal", "secret-openai-work", "secret-anthropic-work",
       "secret-openrouter-work", "secret-vercel-work",
     ]);
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/family-session.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
+    expect(harness.state()).toEqual({});
 
     const trace = JSON.stringify(firstTrace.events);
     expect(trace).toContain('"providerDefinitionId":"anthropic-work"');
@@ -1714,6 +1261,7 @@ describe("PrimeAgentHarness", () => {
   it("uses discovered per-model token capabilities with a conservative fallback", async () => {
     const scopes: ControlledRunScope[] = [];
     const session = {
+      sessionFile: "/tmp/capabilities-session.jsonl",
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
       promptAndWait: vi.fn(async (_text: string, options: { modelScope: ControlledRunScope }) => { options.modelScope.revoke(); }),
@@ -1728,7 +1276,7 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...controlledRunScopeApi(scopes),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
       createAgentSessionFromServices: vi.fn(async () => ({ session })),
@@ -1791,6 +1339,9 @@ describe("PrimeAgentHarness", () => {
     vi.spyOn(modelRegistry, "refreshAvailableModels").mockResolvedValue([]);
     const payloads: Record<string, unknown>[] = [];
     let session: Awaited<ReturnType<typeof native.createAgentSessionFromServices>>["session"] | undefined;
+    // Every run creates its own session (#719), so each run's history is seeded into its session.
+    let history: unknown[] = [];
+    const imageProbe = { role: "user", content: [{ type: "image", data: "aW1hZ2UtcHJvYmU=", mimeType: "image/png" }], timestamp: Date.now() };
     const harness = await PrimeAgentHarness.create({
       threadId: 7, workingDirectory: workspace, ...fullPermission,
       configuration: { ...configuration, settings: { thinkingLevel: "medium", prewarmIpythonKernel: false } },
@@ -1810,23 +1361,24 @@ describe("PrimeAgentHarness", () => {
           payloads.push(payload as Record<string, unknown>);
           throw new Error("deterministic payload capture: no network request");
         };
+        session.agent.state.messages = [...session.agent.state.messages, ...history] as never;
         return result;
       },
     }) as never });
     try {
-      expect(session!.thinkingLevel).toBe("medium");
-      expect(session!.sessionManager.buildSessionContext().thinkingLevel).toBe("medium");
       for (const nodeId of [51, 52]) {
-        session!.agent.state.messages = [...session!.agent.state.messages, { role: "user", content: [{ type: "image", data: "aW1hZ2UtcHJvYmU=", mimeType: "image/png" }], timestamp: Date.now() }];
+        history = [imageProbe];
         await harness.complete(singleAdapterRunContext(nodeId, "openrouter", {
           contextWindow: 196_608, maxOutputTokens: 131_072, reasoning, reasoningEffort, ...(imageInput === undefined ? {} : { imageInput }),
         })).catch(() => undefined);
+        expect(session!.thinkingLevel).toBe("medium");
+        expect(session!.sessionManager.buildSessionContext().thinkingLevel).toBe("medium");
       }
       // attach_image returns a draft preview as an image block in the ipython tool result.
-      session!.agent.state.messages = [...session!.agent.state.messages,
+      history = [imageProbe,
         { role: "assistant", content: [{ type: "toolCall", id: "attach-1", name: "ipython", arguments: { code: "print(await attach_image(layer.preview.path))" } }], api: "openai-completions", provider: "openrouter", model: "probe", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } }, stopReason: "toolUse", timestamp: Date.now() },
         { role: "toolResult", toolCallId: "attach-1", toolName: "ipython", content: [{ type: "text", text: "Loaded 1 image(s) into context" }, { type: "image", data: "cHJldmlldy1wcm9iZQ==", mimeType: "image/png" }], isError: false, timestamp: Date.now() },
-      ] as never;
+      ];
       await harness.complete(singleAdapterRunContext(53, "openrouter", {
         contextWindow: 196_608, maxOutputTokens: 131_072, reasoning, reasoningEffort, ...(imageInput === undefined ? {} : { imageInput }),
       })).catch(() => undefined);
@@ -1861,7 +1413,7 @@ describe("PrimeAgentHarness", () => {
     expect(session.promptAndWait).not.toHaveBeenCalled();
   });
 
-  it("opens saved Prime Agent state and forwards cancellation", async () => {
+  it("ignores saved Prime Agent state and forwards cancellation", async () => {
     let release!: () => void;
     const waiting = new Promise<void>((resolve) => { release = resolve; });
     const session = {
@@ -1874,6 +1426,7 @@ describe("PrimeAgentHarness", () => {
       dispose: vi.fn(),
     };
     const open = vi.fn(() => "opened-session");
+    const create = vi.fn(() => "new-session");
     const services = { modelRegistry: { find: vi.fn() } };
     const createAgentSessionFromServices = vi.fn(async () => ({ session }));
     const harness = await PrimeAgentHarness.create({
@@ -1887,7 +1440,7 @@ describe("PrimeAgentHarness", () => {
       },
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(), open },
+      SessionManager: { create, open },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => services),
       createAgentSessionFromServices,
@@ -1895,11 +1448,12 @@ describe("PrimeAgentHarness", () => {
     const controller = new AbortController();
 
     const completing = harness.complete(runContext(11, "token"), controller.signal);
+    await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalledOnce());
     controller.abort();
     await completing;
 
-    expect(open).toHaveBeenCalledWith("/tmp/saved.jsonl");
-    expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.objectContaining({ sessionManager: "opened-session", services }));
+    expect(open).not.toHaveBeenCalled();
+    expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.objectContaining({ sessionManager: "new-session", services }));
     expect(session.abort).toHaveBeenCalledTimes(1);
   });
 
@@ -1908,6 +1462,7 @@ describe("PrimeAgentHarness", () => {
     let listener: ((event: unknown) => void) | undefined;
     const loaders = sessionLoaders();
     const session = {
+      sessionFile: "/tmp/layered-session.jsonl",
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
       promptAndWait: vi.fn(async (text: string) => {
@@ -1938,7 +1493,6 @@ describe("PrimeAgentHarness", () => {
       waitForRlmQuiescence: vi.fn(async () => undefined),
       abort: vi.fn(async () => undefined),
       dispose: vi.fn(),
-      reload: vi.fn(async () => undefined),
     };
     const harness = await PrimeAgentHarness.create({
       threadId: 7,
@@ -1951,7 +1505,7 @@ describe("PrimeAgentHarness", () => {
       },
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
       createAgentSessionFromServices: loaders.record(vi.fn(async () => ({ session }))),
@@ -2025,7 +1579,7 @@ describe("PrimeAgentHarness", () => {
     expect(JSON.stringify(providerEchoes)).toContain("[redacted-personal-presentation]");
     const unrelatedTool = trace.events.find((event) => event.type === "tool.call.started");
     expect(JSON.stringify(unrelatedTool?.data)).toContain("Decision-useful center");
-    expect(session.reload).toHaveBeenCalledOnce();
+    // The run's own session is built with its pin's instructions.
     const nativeInstructions = loaders.appendedFor(session);
     expect(nativeInstructions).toHaveLength(2);
     expect(nativeInstructions?.[1]).toContain("If you are the root agent");
@@ -2055,7 +1609,6 @@ describe("PrimeAgentHarness", () => {
         listener?.({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: rawDetail }] } });
       }),
     });
-    Object.assign(session, { reload: vi.fn(async () => undefined) });
     const harness = await createHarness(session, { ...configuration, settings: { ...configuration.settings, ...(promptProfile ? { promptProfile } : {}) } });
     const context = presentationRunContext(11, "token", 90);
     const node = context.personalPresentation!.graph.layers[0]!.nodes[0]!;
@@ -2229,230 +1782,18 @@ describe("PrimeAgentHarness", () => {
     ]);
   });
 
-  it("retries a presentation instruction reload after a transient failure", async () => {
-    const loaders = sessionLoaders();
-    const reload = vi.fn().mockRejectedValueOnce(new Error("reload failed")).mockResolvedValueOnce(undefined);
-    const session = {
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload,
-    };
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices: loaders.record(vi.fn(async () => ({ session }))),
-    }) as never });
-    const context = runContext(11, "token");
-    const attached: HarnessRunContext = {
-      ...context,
-      personalPresentation: {
-        attachment: { interactionNodeId: 11, versionInteractionNodeId: 90, rootLayerId: 91 },
-        graph: {
-          nodeId: 90, rootLayerId: 91,
-          rootAction: { id: 92, sourceNodeId: 90, kind: "navigate", relation: "expand", label: "Personal presentation", variant: "pill", targetLayerId: 91, state: "accepted" },
-          layers: [{
-            layer: { id: 91, nodes: [93], edges: [], state: "accepted" },
-            nodes: [{ id: 93, kind: "presentation-preference", icon: "compass", title: "Decision-useful center", detail: "Foreground the conclusion.", state: "accepted" }],
-            edges: [], actions: [],
-          }],
-        },
-      },
-    };
-
-    await expect(harness.complete(attached)).rejects.toThrow("reload failed");
-    expect(loaders.appendedFor(session)).toEqual(["base"]);
-    await expect(harness.complete(attached)).resolves.toBeUndefined();
-    expect(reload).toHaveBeenCalledTimes(2);
-    expect(loaders.appendedFor(session)?.[1]).toContain("If you are the root agent");
-    expect(loaders.appendedFor(session)?.[1]).toContain("Never include that block in an unrelated delegate's task");
-    expect(loaders.appendedFor(session)?.[1]).not.toContain("Personal graph presentation preferences:");
-    expect(loaders.appendedFor(session)?.[1]).not.toContain("Decision-useful center");
-  });
-
-  it("rotates the native Prime session when the durable presentation pin changes", async () => {
-    const firstDispose = vi.fn();
-    const firstSession = {
-      sessionFile: "/tmp/prime-v1.jsonl",
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: firstDispose, reload: vi.fn(async () => undefined),
-    };
-    const secondSession = {
-      sessionFile: "/tmp/prime-neutral.jsonl",
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
-    };
-    const createAgentSessionFromServices = vi.fn()
-      .mockResolvedValueOnce({ session: firstSession })
-      .mockResolvedValueOnce({ session: secondSession });
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(() => ({})), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices,
-    }) as never });
-    const first = presentationRunContext(11, "first-token", 90);
-
-    await harness.complete(first);
-    await harness.complete(first);
-    await harness.complete(runContext(12, "second-token"));
-
-    expect(firstSession.promptAndWait).toHaveBeenCalledTimes(2);
-    expect(firstDispose).toHaveBeenCalledOnce();
-    expect(secondSession.promptAndWait).toHaveBeenCalledOnce();
-    expect(createAgentSessionFromServices).toHaveBeenCalledTimes(2);
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/prime-neutral.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: null,
-    });
-  });
-
-  it("reloads native propagation instructions when restoring a matching presentation pin", async () => {
-    const loaders = sessionLoaders();
-    const session = {
-      sessionFile: "/tmp/saved-v1.jsonl",
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
-    };
-    const open = vi.fn(() => "saved-v1-session");
-    const createAgentSessionFromServices = vi.fn(async () => ({ session }));
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-      savedState: {
-        primeAgentSessionFile: "/tmp/saved-v1.jsonl",
-        primeAgentSessionPersonalPresentationVersionId: 90,
-      },
-    }, { loadModule: async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(), open },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices: loaders.record(createAgentSessionFromServices),
-    }) as never });
-    const attached = presentationRunContext(11, "token", 90);
-
-    await harness.complete(attached);
-    await harness.complete(attached);
-
-    expect(open).toHaveBeenCalledWith("/tmp/saved-v1.jsonl");
-    expect(createAgentSessionFromServices).toHaveBeenCalledOnce();
-    expect(session.reload).toHaveBeenCalledOnce();
-    expect(session.promptAndWait).toHaveBeenCalledTimes(2);
-    const nativeInstructions = loaders.appendedFor(session);
-    expect(nativeInstructions?.[1]).toContain("If you are the root agent");
-    expect(nativeInstructions?.[1]).toContain("relevant language-specific public API recipes");
-    expect(nativeInstructions?.[1]).not.toContain("Decision-useful center");
-    expect(harness.state()).toEqual({
-      primeAgentSessionFile: "/tmp/saved-v1.jsonl",
-      primeAgentSessionPersonalPresentationVersionId: 90,
-    });
-  });
-
-  it("does not prompt a restored session when force shutdown wins its instruction reload", async () => {
-    let markReloadStarted!: () => void;
-    let releaseReload!: () => void;
-    const reloadStarted = new Promise<void>((resolve) => { markReloadStarted = resolve; });
-    const reloadGate = new Promise<void>((resolve) => { releaseReload = resolve; });
-    const nativeDispose = vi.fn();
-    const session = {
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: nativeDispose,
-      reload: vi.fn(async () => {
-        markReloadStarted();
-        await reloadGate;
-      }),
-    };
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-      savedState: {
-        primeAgentSessionFile: "/tmp/saved-v1.jsonl",
-        primeAgentSessionPersonalPresentationVersionId: 90,
-      },
-    }, { loadModule: async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(), open: vi.fn(() => ({})) },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices: vi.fn(async () => ({ session })),
-    }) as never });
-
-    const completing = harness.complete(presentationRunContext(11, "token", 90));
-    await reloadStarted;
-    harness.forceShutdown();
-    releaseReload();
-
-    await expect(completing).rejects.toThrow("Prime Agent harness is shutting down");
-    expect(session.promptAndWait).not.toHaveBeenCalled();
-    expect(nativeDispose).toHaveBeenCalledOnce();
-  });
-
-  it("disposes a replacement session created after force shutdown wins a rotation", async () => {
-    let markReplacementStarted!: () => void;
-    let releaseReplacement!: () => void;
-    const replacementStarted = new Promise<void>((resolve) => { markReplacementStarted = resolve; });
-    const replacementGate = new Promise<void>((resolve) => { releaseReplacement = resolve; });
-    const firstSession = {
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
-    };
-    const replacementDispose = vi.fn();
-    const replacementSession = {
-      agent: { state: { thinkingLevel: "off" } },
-      sessionManager: { appendThinkingLevelChange: vi.fn() },
-      promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: replacementDispose,
-    };
-    const createAgentSessionFromServices = vi.fn()
-      .mockResolvedValueOnce({ session: firstSession })
-      .mockImplementationOnce(async () => {
-        markReplacementStarted();
-        await replacementGate;
-        return { session: replacementSession };
-      });
-    const harness = await PrimeAgentHarness.create({
-      threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
-    }, { loadModule: async () => ({
-      ...runScopeApi(), SessionManager: { create: vi.fn(() => ({})), open: vi.fn() },
-      createHostRequestHandler: (handler: unknown) => handler,
-      createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
-      createAgentSessionFromServices,
-    }) as never });
-    await harness.complete(presentationRunContext(11, "first-token", 90));
-
-    const rotating = harness.complete(runContext(12, "second-token"));
-    await replacementStarted;
-    harness.forceShutdown();
-    releaseReplacement();
-
-    await expect(rotating).rejects.toThrow("Prime Agent harness is shutting down");
-    expect(replacementSession.promptAndWait).not.toHaveBeenCalled();
-    expect(replacementDispose).toHaveBeenCalledOnce();
-  });
-
-  it("does not resume legacy Prime state whose presentation pin is unknown", async () => {
+  it("ignores legacy Prime state whose presentation pin is unknown", async () => {
     const session = {
       sessionFile: "/tmp/fresh.jsonl",
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
       promptAndWait: vi.fn(async () => undefined), waitForRlmQuiescence: vi.fn(async () => undefined),
-      abort: vi.fn(async () => undefined), dispose: vi.fn(), reload: vi.fn(async () => undefined),
+      abort: vi.fn(async () => undefined), dispose: vi.fn(),
     };
     const create = vi.fn(() => "fresh-session");
     const open = vi.fn(() => "legacy-session");
-    await expect(PrimeAgentHarness.create({
+    // An earlier release refused to register this state; it now registers and is ignored.
+    const harness = await PrimeAgentHarness.create({
       threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
       savedState: { primeAgentSessionFile: "/tmp/legacy.jsonl" },
     }, { loadModule: async () => ({
@@ -2460,12 +1801,15 @@ describe("PrimeAgentHarness", () => {
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
       createAgentSessionFromServices: vi.fn(async () => ({ session })),
-    }) as never })).rejects.toThrow("saved state was preserved");
+    }) as never });
+    expect(harness.state()).toEqual({});
 
+    await harness.complete(runContext(11, "token"));
 
     expect(open).not.toHaveBeenCalled();
-    expect(create).not.toHaveBeenCalled();
-    expect(session.promptAndWait).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
+    expect(session.promptAndWait).toHaveBeenCalledOnce();
+    expect(harness.state()).toEqual({});
   });
 
   it("delivers the same ordered normalized context to Prime and its native children", async () => {
@@ -2525,7 +1869,7 @@ describe("PrimeAgentHarness", () => {
       configuration,
     }, { loadModule: async () => ({
       ...runScopeApi(),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
       createAgentSessionFromServices: vi.fn(async () => ({ session })),
@@ -2538,7 +1882,7 @@ describe("PrimeAgentHarness", () => {
     expect(session.abort).not.toHaveBeenCalled();
   });
 
-  it("aborts without prompting when cancellation races listener registration", async () => {
+  it("creates no session when cancellation races listener registration", async () => {
     const session = {
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
@@ -2557,7 +1901,8 @@ describe("PrimeAgentHarness", () => {
     });
 
     await expect(harness.complete(runContext(11, "token"), signal)).rejects.toThrow("cancelled during registration");
-    expect(session.abort).toHaveBeenCalledOnce();
+    // The run is cancelled before it creates its own session, so there is none to abort.
+    expect(session.abort).not.toHaveBeenCalled();
     expect(session.promptAndWait).not.toHaveBeenCalled();
     expect(session.waitForRlmQuiescence).not.toHaveBeenCalled();
   });
@@ -2586,6 +1931,7 @@ describe("PrimeAgentHarness", () => {
 
     const completing = harness.complete(runContext(11, "token"), controller.signal);
     void completing.then(() => { settled = true; }, () => { settled = true; });
+    await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalledOnce());
     controller.abort();
     await new Promise((resolve) => setImmediate(resolve));
 
@@ -2659,6 +2005,7 @@ describe("PrimeAgentHarness", () => {
     const controller = new AbortController();
 
     const completing = harness.complete(runContext(11, "token"), controller.signal);
+    await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalledOnce());
     controller.abort();
 
     await expect(completing).rejects.toThrow("abort failed");
@@ -2690,6 +2037,7 @@ describe("PrimeAgentHarness", () => {
   it("disables base kernel prewarming for bounded sessions", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "relayer-prime-no-prewarm-"));
     const session = {
+      sessionFile: "/tmp/bounded-session.jsonl",
       agent: { state: { thinkingLevel: "off" } },
       sessionManager: { appendThinkingLevelChange: vi.fn() },
       promptAndWait: vi.fn(async () => undefined),
@@ -2699,7 +2047,7 @@ describe("PrimeAgentHarness", () => {
     };
     const createAgentSessionFromServices = vi.fn(async () => ({ session }));
     try {
-      await PrimeAgentHarness.create({
+      const harness = await PrimeAgentHarness.create({
         threadId: 7,
         workingDirectory: workspace,
         permissionProfileId: "auto",
@@ -2717,13 +2065,14 @@ describe("PrimeAgentHarness", () => {
           AGENT_RUN_KERNEL_BOUNDARY_SCOPE_VERSION: 1,
           createAgentRunToolAuthorityScope: vi.fn((input: unknown) => ({ input })),
           createAgentRunKernelBoundaryScope: vi.fn((input: unknown) => ({ input })),
-          SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+          SessionManager: { create: vi.fn(() => "new-session") },
           createHostRequestHandler: (handler: unknown) => handler,
           createAgentSessionServices: vi.fn(async () => nativeServices()),
           createAgentSessionFromServices,
         }) as never,
         createKernelBoundary: () => async () => ({ launch: vi.fn(), dispose: vi.fn(async () => undefined) }),
       });
+      await harness.complete(runContext(11, "token"));
       expect(createAgentSessionFromServices).toHaveBeenCalledWith(expect.objectContaining({ prewarmIpythonKernel: false }));
     } finally {
       await rm(workspace, { recursive: true, force: true });
@@ -2742,7 +2091,7 @@ describe("PrimeAgentHarness", () => {
         configuration,
       }, { loadModule: async () => ({
         ...runScopeApi(),
-        SessionManager: { create: vi.fn(), open: vi.fn() },
+        SessionManager: { create: vi.fn() },
         createHostRequestHandler: (handler: unknown) => handler,
         createAgentSessionServices,
         createAgentSessionFromServices: vi.fn(),
@@ -3218,11 +2567,35 @@ async function createHarness(
     configuration: harnessConfiguration,
   }, { loadModule: async () => ({
     ...runScopeApi(),
-    SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+    SessionManager: { create: vi.fn(() => "new-session") },
     createHostRequestHandler: (handler: unknown) => handler,
     createAgentSessionServices: vi.fn(async () => nativeServices({ modelRegistry: { find: vi.fn() } })),
+    // Every run creates its own session (#719): each is a view of the fixture with the same mocks.
+    createAgentSessionFromServices: vi.fn(async () => ({ session: { sessionFile: "new-session", ...session } })),
+  }) as never });
+}
+
+/**
+ * Starts one root run whose native prompt never settles, so that run's own session stays live
+ * for shutdown to act on. The harness gets the fixture object itself, as Prime returns it.
+ */
+async function createHarnessWithLiveSession(session: PrimeAgentSessionFixture & { readonly sessionFile?: string }): Promise<PrimeAgentHarness> {
+  Object.assign(session, {
+    sessionFile: session.sessionFile ?? "/tmp/live-session.jsonl",
+    promptAndWait: vi.fn(() => new Promise<void>(() => {})),
+  });
+  const harness = await PrimeAgentHarness.create({
+    threadId: 7, workingDirectory: "/tmp/project", ...fullPermission, configuration,
+  }, { loadModule: async () => ({
+    ...runScopeApi(),
+    SessionManager: { create: vi.fn(() => "new-session") },
+    createHostRequestHandler: (handler: unknown) => handler,
+    createAgentSessionServices: vi.fn(async () => nativeServices()),
     createAgentSessionFromServices: vi.fn(async () => ({ session })),
   }) as never });
+  void harness.complete(runContext(11, "token")).catch(() => undefined);
+  await vi.waitFor(() => expect(session.promptAndWait).toHaveBeenCalledOnce());
+  return harness;
 }
 
 async function createBoundedHarness(
@@ -3249,10 +2622,10 @@ async function createBoundedHarness(
       AGENT_RUN_KERNEL_BOUNDARY_SCOPE_VERSION: 1,
       createAgentRunToolAuthorityScope: vi.fn((input: unknown) => ({ input })),
       createAgentRunKernelBoundaryScope: vi.fn((input: unknown) => ({ input })),
-      SessionManager: { create: vi.fn(() => "new-session"), open: vi.fn() },
+      SessionManager: { create: vi.fn(() => "new-session") },
       createHostRequestHandler: (handler: unknown) => handler,
       createAgentSessionServices: vi.fn(async () => nativeServices()),
-      createAgentSessionFromServices: vi.fn(async () => ({ session })),
+      createAgentSessionFromServices: vi.fn(async () => ({ session: { sessionFile: "new-session", ...session } })),
     }) as never,
     createKernelBoundary: () => async () => ({ launch: vi.fn(), dispose: vi.fn(async () => undefined) }),
   });
@@ -3282,7 +2655,6 @@ interface PrimeAgentSessionFixture {
   readonly dispose: ReturnType<typeof vi.fn>;
   readonly disposeAsync?: ReturnType<typeof vi.fn>;
   readonly subscribe?: ReturnType<typeof vi.fn>;
-  readonly reload?: ReturnType<typeof vi.fn>;
 }
 
 function invocation(runContext: HarnessRunContext) {

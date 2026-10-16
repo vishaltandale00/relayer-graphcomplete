@@ -34,6 +34,8 @@ function captureExportHandler({ mode = "interactive", getThread, onExportConvers
   };
   const button = element();
   const archiveButton = element();
+  const stopAllButton = element(["hidden"]);
+  const stopAllAndArchiveButton = element(["hidden"]);
   const archivedLabel = element();
   const settingsButton = element();
   const settingsMenu = element(["hidden"]);
@@ -60,6 +62,8 @@ function captureExportHandler({ mode = "interactive", getThread, onExportConvers
       if (selector === "#conversationSettingsMenu") return settingsMenu;
       if (selector === "#exportConversation") return button;
       if (selector === "#archiveConversation") return archiveButton;
+      if (selector === "#stopAllRuns") return stopAllButton;
+      if (selector === "#stopAllAndArchive") return stopAllAndArchiveButton;
       if (selector === "#threadArchivedLabel") return archivedLabel;
       if (selector === "#graphStage") return graphStage;
       return null;

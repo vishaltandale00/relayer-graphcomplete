@@ -9,8 +9,6 @@ use sqlx::{Row, SqliteConnection};
 #[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConversationCompatibility {
-    #[serde(skip)]
-    pub(crate) native_history_anchor: Option<serde_json::Value>,
     pub(crate) thread_id: i64,
     pub(crate) status: &'static str,
     pub(crate) harness_id: String,
@@ -46,7 +44,6 @@ pub(super) async fn compatibility_on(
             .fetch_one(&mut *connection)
             .await?;
     let mut result = ConversationCompatibility {
-        native_history_anchor: None,
         thread_id,
         status: "unrestricted",
         harness_id,
@@ -55,7 +52,7 @@ pub(super) async fn compatibility_on(
     };
     // Successful root receipts are authoritative. A failed foreign attempt cannot become
     // the owner. Semantic children have independent native attachments and are excluded.
-    let rows = sqlx::query("SELECT i.id,i.graph_node_id,i.text,i.completion_status,i.model_provider_id,i.harness_configuration_name,a.provider_id,a.adapter_id,a.access_contract,a.harness_configuration_name AS attempt_harness,p.adapter_id AS current_adapter,p.access_contract AS current_contract,EXISTS(SELECT 1 FROM interaction_attempts any_attempt WHERE any_attempt.interaction_id=i.id) AS has_attempts FROM interactions i LEFT JOIN interaction_attempts a ON a.interaction_id=i.id AND a.outcome='accepted' LEFT JOIN model_providers p ON p.id=COALESCE(a.provider_id,i.model_provider_id) WHERE i.thread_id=?1 AND (?2 IS NULL OR i.id!=?2) AND NOT EXISTS(SELECT 1 FROM action_invocations v WHERE v.result_interaction_id=i.id) ORDER BY i.sequence")
+    let rows = sqlx::query("SELECT i.id,i.graph_node_id,i.text,i.completion_status,i.completion_error,i.model_provider_id,i.harness_configuration_name,a.provider_id,a.adapter_id,a.access_contract,a.harness_configuration_name AS attempt_harness,p.adapter_id AS current_adapter,p.access_contract AS current_contract,EXISTS(SELECT 1 FROM interaction_attempts any_attempt WHERE any_attempt.interaction_id=i.id) AS has_attempts FROM interactions i LEFT JOIN interaction_attempts a ON a.interaction_id=i.id AND a.outcome='accepted' LEFT JOIN model_providers p ON p.id=COALESCE(a.provider_id,i.model_provider_id) WHERE i.thread_id=?1 AND (?2 IS NULL OR i.id!=?2) AND NOT EXISTS(SELECT 1 FROM action_invocations v WHERE v.result_interaction_id=i.id) ORDER BY i.sequence")
         .bind(thread_id).bind(exclude).fetch_all(&mut *connection).await?;
     let mut uncertain = false;
     let mut saw_execution = false;
@@ -68,6 +65,41 @@ pub(super) async fn compatibility_on(
             if matches!(status.as_str(), "accepted" | "failed" | "stopped") {
                 uncertain = true;
             }
+            continue;
+        }
+        // A run removed or interrupted while it waited in a queue (#718, #720), or a message
+        // returned before any attempt and then made stale (#719), never executed: it has no
+        // attempt, no graph interaction, and its row says so. It neither owns nor obscures the
+        // conversation's route.
+        let error: Option<String> = row.try_get("completion_error")?;
+        let bound = row.try_get::<Option<i64>, _>("graph_node_id")?.is_some();
+        let stale_returned = status == "failed"
+            && error
+                .as_deref()
+                .is_some_and(|error| error.starts_with(super::STALE_RETURNED_MESSAGE));
+        // A message a model failure returned to unsent, then made stale by a later message
+        // (#719), failed like a draft: it never accepted, so it neither owns nor obscures the
+        // route, whatever attempts it recorded.
+        if stale_returned && attempted_provider.is_none() {
+            continue;
+        }
+        if !has_attempts
+            // A stale returned message may already have a bound graph interaction; with no
+            // attempt it still never executed.
+            && (!bound || stale_returned)
+            // Input restoration may append to the marker, so it is matched as a prefix.
+            && ((status == "stopped"
+                && error
+                    .as_deref()
+                    .is_some_and(|error| error.starts_with(super::QUEUED_RUN_STOPPED)))
+                || (status == "failed"
+                    && error.as_deref().is_some_and(|error| {
+                        error.starts_with(super::CAPACITY_WAIT_INTERRUPTED)
+                            // A message returned before any attempt and then made stale by a
+                            // later message (#719) never executed either.
+                            || error.starts_with(super::STALE_RETURNED_MESSAGE)
+                    })))
+        {
             continue;
         }
         if !matches!(status.as_str(), "not_started" | "submitted" | "running") {
@@ -102,11 +134,6 @@ pub(super) async fn compatibility_on(
             uncertain = true;
         }
         result.provider_id = provider;
-        if let Some(node_id) = row.try_get::<Option<i64>, _>("graph_node_id")? {
-            result.native_history_anchor = Some(
-                serde_json::json!({"interactionNodeId": node_id, "message": row.try_get::<String, _>("text")?}),
-            );
-        }
     }
     if uncertain || (saw_execution && result.provider_id.is_none()) {
         result.status = "blocked";

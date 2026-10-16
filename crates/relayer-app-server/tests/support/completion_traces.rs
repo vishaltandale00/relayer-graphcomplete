@@ -853,6 +853,7 @@ impl World {
             completion_brokers: CompletionBrokerRegistry::new(Some("http://broker".into())),
             completion_observations: CompletionObservations::default(),
             node_runs: Default::default(),
+            run_capacity: Default::default(),
         };
         let seeded = if bound {
             // Prepared and bound exactly as complete_prepared_child prepares it.
@@ -868,9 +869,7 @@ impl World {
                 .prepare_bound(
                     &CompleteInteraction {
                         thread_icon_selection_eligible: false,
-                        require_native_continuity: false,
-                        native_history_anchor: None,
-                        fresh_native_session: None,
+                        thread_history: None,
                         project_id: None,
                         product_interaction_id: child.id.value(),
                         thread_id: thread.id.value(),
@@ -2832,9 +2831,7 @@ async fn v4_import_reexport_preserves_call_only_own_draft_history() {
     let working_directory = world.root.path().to_string_lossy().into_owned();
     let mut command = CompleteInteraction {
         thread_icon_selection_eligible: false,
-        require_native_continuity: false,
-        native_history_anchor: None,
-        fresh_native_session: None,
+        thread_history: None,
         project_id: None,
         product_interaction_id: world.child.id.value(),
         thread_id: world.thread.id.value(),

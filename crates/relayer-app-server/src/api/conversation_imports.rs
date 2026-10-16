@@ -682,6 +682,7 @@ pub(crate) mod tests {
             crate::api::ApiRuntime {
                 execution_lease_reconciler: None,
                 completion_broker_origin: None,
+                run_capacity: Default::default(),
                 runtime: Some(runtime),
                 permission_catalog,
                 default_harness_configuration: "codex-basic".into(),

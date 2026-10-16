@@ -30,11 +30,12 @@ export const SUBCOMPLETION_INTEGRATION_GUIDANCE = `For a sealed invocation, insp
 export const INVOCATION_PUBLICATION_GUIDANCE = `Before executing or waiting for a prepared child's Current or Return, publish the enclosing source Node and its Layer through your own Advance (or Return). You may prepare the Invocation from your owned draft first, but that preparation does not publish it. A child cannot publish its required parent integration while that source remains unpublished. Do not launch a child and wait for its progress before publishing the parent: this would make each wait for the other. Use the normal response root and prospective Return requirements when advancing, then launch and watch the child through the provider's existing native execution.`;
 
 /**
- * A fresh root run has no native memory of its thread. It receives the thread's accepted
- * interactions in order and reads anything else through the graph. Empty for every other run.
+ * Every root run starts a fresh native session, so it has no native memory of its thread (#719).
+ * It receives the thread's latest accepted interactions in order and reads anything else through
+ * the graph. Empty for an invoked child, which reads its own contract instead.
  */
 export function renderThreadHistory(context: HarnessRunContext | undefined, language: "javascript" | "python"): string {
-  if (context?.nativeSession !== "fresh") return "";
+  if (context?.origin.kind !== "root") return "";
   const readNode = language === "javascript" ? "await graph.getNode(interactionNodeId)" : "await graph.get_node(interaction_node_id)";
   const readLayer = language === "javascript" ? "await graph.getLayer(responseLayerId)" : "await graph.get_layer(response_layer_id)";
   return `

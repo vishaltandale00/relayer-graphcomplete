@@ -16,7 +16,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe("native session preview compatibility", () => {
   it.each([
     ["codex", "live"], ["codex", "saved"], ["prime", "live"], ["prime", "saved"],
-  ] as const)("keeps the %s %s conversation while enabling previews and reopening", async (provider, mode) => {
+  ] as const)("enables previews on a %s %s pinned thread and reopens it, with a fresh native session per run", async (provider, mode) => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-native-preview-session-"));
     const stateFile = join(directory, "sessions.json");
     const implementation = provider === "codex" ? "codex.basic" : "prime.agent";
@@ -63,10 +63,9 @@ describe("native session preview compatibility", () => {
     };
     const factory = provider === "codex" ? createCodexBasicFactory({
       runAppServerTurn: async (options) => {
-        await record({ prompt: options.prompt, previewDirectory: options.environment.RELAYER_GRAPH_PREVIEW_DIR, nativeIdentity: options.savedThreadId });
-        const threadId = options.savedThreadId ?? "existing-codex-thread";
-        await options.onThreadId(threadId);
-        options.onTurnStarting?.(threadId);
+        const threadId = `codex-thread-${calls.length + 1}`;
+        await record({ prompt: options.prompt, previewDirectory: options.environment.RELAYER_GRAPH_PREVIEW_DIR, nativeIdentity: threadId });
+        await options.onThreadId?.(threadId);
         await options.onTurnId?.(threadId, `turn-${calls.length}`);
         return { threadId, turnId: `turn-${calls.length}`, status: "completed" };
       },
@@ -90,7 +89,7 @@ describe("native session preview compatibility", () => {
             scopes.push(graph);
             await record({ prompt, previewDirectory: graph.acquireCapability().previewDirectory, nativeIdentity: sessionManager });
           },
-          waitForRlmQuiescence: async () => {}, reload: async () => {}, abort: async () => {}, dispose: () => {}, disposeAsync: async () => {},
+          waitForRlmQuiescence: async () => {}, abort: async () => {}, dispose: () => {}, disposeAsync: async () => {},
         } }),
       }) as never,
     });
@@ -105,14 +104,14 @@ describe("native session preview compatibility", () => {
       return host;
     };
     const register = (host: HarnessHost, configuration: HarnessConfiguration) => host.createSession({ threadId: 1, permissionProfileId: "full", workingDirectory: directory, configuration });
-    const complete = async (host: HarnessHost, configuration: HarnessConfiguration, requireNativeContinuity = false) => {
+    const complete = async (host: HarnessHost, configuration: HarnessConfiguration) => {
       accepted = false;
       const id = calls.length + 1;
       const policy = { configurationRevision: configuration.revision!, configurationDigest: digestHarnessConfiguration(configuration), executionAccessContracts: configuration.executionAccessContracts! };
       const admissionId = `attempt-preview-${id}`;
       const admission = provider === "prime" ? await host.admitModelPlanExecution(1, id, admissionId, plan, new AbortController().signal, policy) : undefined;
       await host.complete(1, id, { url: "http://127.0.0.1:43123", token: "token", nodeId: 1 }, model, undefined,
-        { productInteractionId: id, requireNativeContinuity }, admission?.executionLeaseId, provider === "prime" ? policy : undefined,
+        { productInteractionId: id }, admission?.executionLeaseId, provider === "prime" ? policy : undefined,
         provider === "prime" ? plan : undefined, admission === undefined ? undefined : admissionId);
       if (admission) await host.releaseProviderExecution(admission.executionLeaseId);
     };
@@ -120,14 +119,11 @@ describe("native session preview compatibility", () => {
     try {
       await register(host, oldConfiguration);
       await complete(host, oldConfiguration);
+      // No run leaves a native session to resume (#719).
       const originalState = JSON.parse(await readFile(stateFile, "utf8")).sessions[0].state;
-      const nativeIdentity = provider === "codex" ? originalState.codexThreadId : originalState.primeAgentSessionFile;
-      expect(nativeIdentity).toBeTruthy();
-      const nativeFile = provider === "prime" ? await readFile(nativeIdentity, "utf8") : undefined;
-      const freshManagers = createdManagers;
+      expect(originalState).toEqual({});
       expect(calls[0]!.previewDirectory).toBeUndefined();
       expect(calls[0]!.prompt).not.toContain("Draft previews are on");
-      if (provider === "codex") expect(calls[0]!.nativeIdentity).toBeUndefined();
       if (mode === "saved") { await host.close(); host = await openHost(); }
       const beforeUpgrade = await readFile(stateFile, "utf8");
       for (const changed of [
@@ -142,16 +138,16 @@ describe("native session preview compatibility", () => {
       await register(host, previewConfiguration);
       expect(factoryCalls).toBe(mode === "live" ? 1 : 2);
       expect(JSON.parse(await readFile(stateFile, "utf8")).sessions[0]).toMatchObject({ configuration: previewConfiguration, state: originalState });
-      await complete(host, previewConfiguration, true);
+      await complete(host, previewConfiguration);
       const enabledState = await readFile(stateFile, "utf8");
       await expect(register(host, oldConfiguration)).rejects.toThrow("already pinned");
       expect(await readFile(stateFile, "utf8")).toBe(enabledState);
       await host.close(); host = await openHost();
       await register(host, previewConfiguration);
-      await complete(host, previewConfiguration, true);
+      await complete(host, previewConfiguration);
       expect(calls).toHaveLength(3);
+      expect(new Set(calls.map((call) => call.nativeIdentity)).size).toBe(3);
       for (const call of calls.slice(1)) {
-        expect(call.nativeIdentity).toBe(nativeIdentity);
         expect(call.prompt).toContain("Draft previews are on");
         expect(call.prompt).toContain(provider === "codex" ? "image viewing tool" : "attach_image");
         expect(call.previewDirectory).toBeTruthy();
@@ -160,9 +156,8 @@ describe("native session preview compatibility", () => {
       expect(new Set(calls.slice(1).map((call) => call.previewDirectory)).size).toBe(2);
       expect(JSON.parse(await readFile(stateFile, "utf8")).sessions[0].state).toEqual(originalState);
       if (provider === "prime") {
-        expect(createdManagers).toBe(freshManagers);
-        expect(openedFiles).toEqual(Array(mode === "saved" ? 2 : 1).fill(nativeIdentity));
-        expect(await readFile(nativeIdentity, "utf8")).toBe(nativeFile);
+        expect(createdManagers).toBe(3);
+        expect(openedFiles).toEqual([]);
         for (const scope of scopes) expect(() => scope.acquireCapability()).toThrow();
       }
     } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }

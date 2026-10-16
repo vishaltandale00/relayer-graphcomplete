@@ -22,7 +22,6 @@ import {
   composerFocusRestoration,
   composerKeydownIntent,
   composerSubmissionReady,
-  composerStatusForThread,
   contextDraftHasAnnotation,
   contextDraftSendWarningPresentation,
   contextConfirmationIds,
@@ -54,13 +53,11 @@ import {
   resolveInteractionContextNode,
   sendIntentIsCurrentThread,
   sendAttemptBlocksThread,
-  releaseInFlightSend,
   settleNodeInputCommit,
   selectInteractionSendIntentAfterInputReconciliation,
   settleConfirmationSendReplay,
   compactSubmittedText,
   submittedInputHistoryPresentation,
-  threadHasInFlightSend,
   settledComposerContextsWithConfirmations,
   transitionComposerDraftScope,
 } from "../desktop/renderer/src/product-workspace/workspace.js";
@@ -733,15 +730,14 @@ describe("product workspace keyboard behavior", () => {
       "../desktop/renderer/src/product-workspace/workspace.js",
       import.meta.url,
     ), "utf8");
-    const stagingStart = workspaceSource.indexOf("const contextStagingDisabled = () => {");
+    const stagingStart = workspaceSource.indexOf("const contextStagingDisabled = () =>");
     const stagingEnd = workspaceSource.indexOf("const closeDurableEditor", stagingStart);
     const stagingSeam = workspaceSource.slice(stagingStart, stagingEnd);
     expect(stagingSeam).toContain(
       "sendAttemptBlocksThread(sendAttempt?.threadId, getThread()?.id)",
     );
-    expect(stagingSeam).toContain(
-      "threadHasInFlightSend(inFlightSendThreads, getThread()?.id)",
-    );
+    // A send that is posting still holds the inputs and contexts it carries (#719).
+    expect(stagingSeam).toContain("postingSendsFor(getThread()?.id).size > 0");
     expect(stagingSeam).not.toContain("Boolean(sendAttempt)");
 
     const composerStart = workspaceSource.indexOf("const syncComposer = () => {");
@@ -751,32 +747,6 @@ describe("product workspace keyboard behavior", () => {
       "threadHasPendingInputMutation(pendingInputDetaches, thread.id)",
     );
     expect(composerSeam).not.toContain("inputPending.size > 0");
-  });
-
-  it("retains the owning thread's in-flight lock across navigation", () => {
-    const attemptA1 = { threadId: "thread-a" };
-    const inFlightThreadIds = new Map([["thread-a", attemptA1]]);
-    expect(threadHasInFlightSend(inFlightThreadIds, "thread-a")).toBe(true);
-    expect(threadHasInFlightSend(inFlightThreadIds, "thread-b")).toBe(false);
-
-    // Returning to A cannot start A2 until A1 settles, even when the visible
-    // send-attempt pointer was released while B was rendered.
-    expect(sendAttemptBlocksThread(null, "thread-a")).toBe(false);
-    expect(threadHasInFlightSend(inFlightThreadIds, "thread-a")).toBe(true);
-    expect(releaseInFlightSend(inFlightThreadIds, attemptA1)).toBe(true);
-    expect(threadHasInFlightSend(inFlightThreadIds, "thread-a")).toBe(false);
-  });
-
-  it("does not let cancelled preflight cleanup release its replacement's lock", () => {
-    const attemptA1 = { threadId: "thread-a" };
-    const attemptA2 = { threadId: "thread-a" };
-    const inFlightSends = new Map([["thread-a", attemptA1]]);
-
-    expect(releaseInFlightSend(inFlightSends, attemptA1)).toBe(true);
-    inFlightSends.set("thread-a", attemptA2);
-    expect(releaseInFlightSend(inFlightSends, attemptA1)).toBe(false);
-    expect(inFlightSends.get("thread-a")).toBe(attemptA2);
-    expect(threadHasInFlightSend(inFlightSends, "thread-a")).toBe(true);
   });
 
   it("snapshots the submitted composer payload before asynchronous draft restoration", () => {
@@ -1163,11 +1133,9 @@ describe("product workspace keyboard behavior", () => {
       target: { nodeId: 3, sourceInteractionNodeId: 2, sourceLayerId: 1 },
       annotations: ["note"],
     }]);
-    expect(composerDisabledForState("running")).toBe(true);
-    expect(composerDisabledForState("not_started", true, true)).toBe(false);
-    expect(composerDisabledForState("waiting_for_approval")).toBe(true);
-    expect(composerDisabledForState("accepted")).toBe(false);
-    expect(composerDisabledForState("accepted", false)).toBe(true);
+    // The message box never locks while runs are active (#719).
+    expect(composerDisabledForState(true)).toBe(false);
+    expect(composerDisabledForState(false)).toBe(true);
   });
 
   it("attaches an unannotated node only after confirmation and preserves annotation order", () => {
@@ -1336,9 +1304,11 @@ describe("product workspace keyboard behavior", () => {
   });
 
   it("keeps context editing enabled only for an available composer", () => {
-    expect(contextStagingDisabledFor("running", true, false)).toBe(true);
-    expect(contextStagingDisabledFor("accepted", true, true)).toBe(true);
-    expect(contextStagingDisabledFor("failed", true, false)).toBe(false);
+    // Runs never lock context editing (#719): only a composer that cannot compose, or whose
+    // request is disabled, does.
+    expect(contextStagingDisabledFor(true, false)).toBe(false);
+    expect(contextStagingDisabledFor(true, true)).toBe(true);
+    expect(contextStagingDisabledFor(false, false)).toBe(true);
     expect(contextEditorPresentation({ attaching: true, value: "" }, true)).toEqual({
       textareaDisabled: true,
       controlsDisabled: true,
@@ -1354,31 +1324,6 @@ describe("product workspace keyboard behavior", () => {
       controlsDisabled: true,
       confirmDisabled: true,
     });
-    expect(composerStatusForThread({
-      status: "accepted",
-      interactions: [
-        { id: 1, threadId: 10, sequence: 1, completionStatus: "accepted" },
-        { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
-      ],
-    }, { id: 10 })).toBe("running");
-    // A running child an agent launched does not hold the composer.
-    expect(composerStatusForThread({
-      status: "running",
-      interactions: [
-        { id: 1, threadId: 10, sequence: 1, completionStatus: "accepted" },
-        { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
-      ],
-      actionInvocations: [{ resultInteractionId: 2, agentInvoked: true }],
-    }, { id: 10 })).toBe("accepted");
-    // Nor does a run the user started from an invoke action: it runs in a fresh session.
-    expect(composerStatusForThread({
-      status: "running",
-      interactions: [
-        { id: 1, threadId: 10, sequence: 1, completionStatus: "accepted" },
-        { id: 2, threadId: 10, sequence: 2, completionStatus: "running" },
-      ],
-      actionInvocations: [{ resultInteractionId: 2, agentInvoked: false }],
-    }, { id: 10 })).toBe("accepted");
   });
 
   it("scopes restored and user-authored drafts across A to B to A switches", () => {

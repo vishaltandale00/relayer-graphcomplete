@@ -689,6 +689,27 @@ describe("workspace navigation integration", () => {
     expect(controller.viewState).toMatchObject({ currentThreadId: 20, currentInteractionId: 2 });
   });
 
+  it("refreshes the thread after removing a queued message that ends at once (#720)", async () => {
+    const turn = { ...interaction(1, 10, rootLayer(101, 11)), completionStatus: "queued", queueReason: "capacity" };
+    const busy = productState([{ id: 10, title: "Waiting", activity: "running", archiveBlocked: true }], [turn]);
+    let reads = 0;
+    requestImplementation = vi.fn(async (path) => {
+      if (path.endsWith("/interactions/1/stop")) return { ...turn, completionStatus: "stopped", queueReason: undefined };
+      if (path.startsWith("/api/state?threadId=10")) {
+        reads++;
+        return reads === 1
+          ? structuredClone(busy)
+          : productState([{ id: 10, title: "Waiting", activity: null, archiveBlocked: false }], [{ ...turn, completionStatus: "stopped" }]);
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    expect(controller.appState.threads[0].archiveBlocked).toBe(true);
+    await controller.stopInteraction(10, 1);
+    expect(controller.appState.threads[0]).toMatchObject({ activity: null, archiveBlocked: false });
+  });
+
   it("keeps Stop pending when a pre-Stop poll arrives late and continues terminal polling", async () => {
     vi.useFakeTimers();
     try {
@@ -1164,7 +1185,7 @@ describe("workspace navigation integration", () => {
     root.actions = [action];
     const source = interaction(1, 10, root);
     const state = productState([{ id: 10, title: "Acknowledged activation" }], [source]);
-    const acknowledgment = { created: true, interaction: { id: 2, threadId: 10, completionStatus: "running" },
+    const acknowledgment = { created: true, interaction: { id: 2, threadId: 10, completionStatus: "queued", queueReason: "capacity" },
       invocation: { durable: true, reusable: false, invocationKey, sourceInteractionId: 1, actionId: 6, sourceNodeId: 22,
         presentingLayerId: 7, resultInteractionId: 2, resultCompletionStatus: "running" },
       inputDraft: { threadId: 10, revision: 5, attachments: [{ occurrence: { actionId: 14 }, value: { text: "Unrelated notes" } }] } };
@@ -1197,6 +1218,9 @@ describe("workspace navigation integration", () => {
     expect(response).toBe(acknowledgment);
     expect(response.inputDraft).toBe(acknowledgment.inputDraft);
     expect(controller.appState.actionInvocations).toEqual([acknowledgment.invocation]);
+    // The returned run is in state at once, with why it waits if it does (#720).
+    expect(controller.appState.interactions.find((interaction) => interaction.id === 2))
+      .toMatchObject(acknowledgment.interaction);
     expect(controller.appState.pendingActionInvocations).toEqual([]);
     expect(controller.appState.pendingTurn).toMatchObject({ interactionId: 2, invocationSource: { origin: {
       invocationKey, sourceNodeId: 22, presentingLayerId: 7, sourceEntry: { turnId: "1", selectedNodeId: 22 },
