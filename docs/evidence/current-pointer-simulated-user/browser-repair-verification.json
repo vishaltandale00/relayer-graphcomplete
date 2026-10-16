@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "kind": "browser-control-lifetime-verification",
+  "baseCommit": "ef61e6693513a53cf85b95cad323d2c6dc1c0de7",
+  "testedWorkspaceDigest": "3e6fc8d627cd9392e00a586f5b52327bc56cf287c074aa8c8f1c7678ed0c58f4",
+  "outcomes": {
+    "build": "pass",
+    "fullCheck": "pass",
+    "nativeWorkspaceAndDoc": 770,
+    "nativeCrashAndDoc": 361,
+    "vitestPassed": 4256,
+    "vitestSkipped": 3,
+    "secretBoundaryPassed": 2,
+    "pythonSdkPassed": 97,
+    "fullEvalWeb": "pass",
+    "compiledRuntimeScenariosPassed": 12,
+    "desktopInput": "pass",
+    "desktopInputPaidCalls": 0,
+    "desktopStop": "pass",
+    "socialAndAnnotationReceiptTestsPassed": 2,
+    "captureVisualInspection": "pass"
+  },
+  "logs": {
+    "browser-repair-graph-red.txt": {
+      "sha256": "27456f9061622239f059773e85e4ab22b89fb082d968c350a0db4de1de4f84cf",
+      "byteLength": 1185
+    },
+    "browser-repair-dashboard-red-v3.txt": {
+      "sha256": "a05987943ffb8484cfb0f4cb112129a36b765916ed3f382df4fb91e1b6f9bae6",
+      "byteLength": 1305
+    },
+    "browser-repair-icon-retry-red.txt": {
+      "sha256": "19790765c6d639d22f9c56a89dea97445da8e3682120c695c138dffcd08cc765",
+      "byteLength": 1530
+    },
+    "browser-repair-icon-retry.txt": {
+      "sha256": "cd60a2ed95b13202927cf944e77b56604f4ebf02e729117a24613c9e0ddd4db3",
+      "byteLength": 255
+    },
+    "browser-repair-secondary.txt": {
+      "sha256": "2c4d1079a8c8f37ed2341393950d4a22d686227fd3af8a83b39e9ac7093a3024",
+      "byteLength": 259
+    },
+    "browser-repair-build.txt": {
+      "sha256": "d3d9f5d2108b97264c43e9fdfa10b074ef518d92194116ffdfbd7baf12382989",
+      "byteLength": 2040
+    },
+    "browser-repair-check.txt": {
+      "sha256": "f737614e9099f4858057507e3c655bc52912b72e66b36e6c7c21e08e41ddb3a1",
+      "byteLength": 138181
+    },
+    "browser-repair-web-red-v2.txt": {
+      "sha256": "2971baece6a74c125ef6fb3333a200abb8dc1a52b8dac26a5e96a7faaeac9a7b",
+      "byteLength": 2450
+    },
+    "browser-repair-web-red-v3.txt": {
+      "sha256": "bfa794cae11d72ef4661ce3629c7402fa09b0d717443ea5d507991096cb63c8b",
+      "byteLength": 6024
+    },
+    "browser-repair-web-final.txt": {
+      "sha256": "22dd025a62874535c4ef435d2f9bd13e37fb58de9804c070e023e34d092ed1e8",
+      "byteLength": 5212
+    },
+    "browser-repair-web-v2.txt": {
+      "sha256": "22dd025a62874535c4ef435d2f9bd13e37fb58de9804c070e023e34d092ed1e8",
+      "byteLength": 5212
+    },
+    "browser-repair-compiled-v2.txt": {
+      "sha256": "05036b193b5a7713d501d8cc0c7a87e75697fd38515171db290a983ec6d86a03",
+      "byteLength": 380
+    },
+    "browser-repair-input.txt": {
+      "sha256": "91153767a38e55ec5bcfb9833845e2bd84b7fa766aad0d8ea4908d10997e3542",
+      "byteLength": 72706
+    },
+    "browser-repair-stop.txt": {
+      "sha256": "d6cc1cef75d8b63d495e43b677d54b11c46807d8e0ebd22c3d1286b646ea145b",
+      "byteLength": 338
+    },
+    "browser-repair-social.txt": {
+      "sha256": "93df7b7683dd764b19b72f50622e753e5c0e6012196525374623275750793f9f",
+      "byteLength": 14188
+    },
+    "browser-repair-annotations.txt": {
+      "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+      "byteLength": 1017
+    },
+    "browser-repair-receipts.txt": {
+      "sha256": "d135398e7a8245b92af88605faa4ed5ca2da779b90d3d84ef394c1ed09a7ed87",
+      "byteLength": 252
+    }
+  },
+  "limits": [
+    "Logs are retained privately; hashes bind recorded runs.",
+    "Evidence summaries were added after the tested executable source.",
+    "The earlier individual-session interruption cause remains unknown.",
+    "A passing live browser run does not establish model answer delivery, incorporation or task attainment."
+  ]
+}

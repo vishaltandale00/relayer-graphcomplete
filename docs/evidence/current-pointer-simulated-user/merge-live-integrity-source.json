@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "baseCommit": "b328a51deab85ca4838a5f46d2a91a4bc313ffb3",
+  "baseSourceManifest": "merge-actor-source.json",
+  "baseSourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+  "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+  "sourcePaths": 82,
+  "changes": [
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "beforeSha256": "981f6f780081753282e7f50537db3b281dcdb4795b9381862a052169bd2c9642",
+      "afterSha256": "9a343d6fdc7da97ad55ed1396e5233e6c04b5b1d1366be14aa2d7000c95a1666"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "beforeSha256": "38196cd3fa667c5f200eb591528e919dd485b807cc0bcde61b38637a367a6f88",
+      "afterSha256": "c3a7b5213fa7b0cb5697f0bb15293f4b8522158155a728e700efa771bf78f20d"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/live_answers.rs",
+      "beforeSha256": "26f0ce04e17e6861fa7780b07a1fd5c88c20528c4ed0a11e9edc44e4663abc58",
+      "afterSha256": "6efd34f2daead15414548b1158747a447eb92325b3cc9697c40127727c070bdc"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+      "beforeSha256": "a74cb6d0d07ec5332fbf8779d156724e8530da5a606e4ce64ab709bc70ec7003",
+      "afterSha256": "c28805f0a60b814ad0f9a61031bd407da1c2adde342cfa82bb997e1f5bbe7678"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0041_completion_scoped_live_answers.sql",
+      "beforeSha256": null,
+      "afterSha256": "7850758790b685be2f6fe273c197520abde394eee7bf7f08468f12f7accd23bf"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/live_answers.rs",
+      "beforeSha256": "f0736e773e16fd6a87333b3e26e0cdbd5c4861d7c20ee8d232ca65e320820839",
+      "afterSha256": "185e7c7aba74a82d8bcfcec1132e76ac96bdc9d506063498355789b285b54715"
+    },
+    {
+      "path": "crates/relayer-graph-core/tests/support/live_answer_question.rs",
+      "beforeSha256": "550dcb663998729e68f315e4b6989d02c2bccfae7889764622d5999b5ea5e234",
+      "afterSha256": "d5366051fd6ae0f59bde12553ce61e7c72c890dbeae601d37d3070f572b28a85"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-service.mjs",
+      "beforeSha256": "73c55d0530e9ce8e6ef8dd42e7548a99eff255244ca2a6e087340691201a705c",
+      "afterSha256": "c633954b317c7f66140db20e55bbc4f30c1650955ba225a18023dcd9a1430be2"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+      "beforeSha256": "72d6c6a59dea41f7c0e69fc12bf9209cbeaf8b5bef7f08b5a5aa5175e217609b",
+      "afterSha256": "c34390ec3c49cdf935e90f08b7808e94accf5df4ad58fa7a2388efeb30c866f8"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "beforeSha256": "c2f0697af85c83e6e6c03d2934e8bbcdf2b7268af2c0b3b448988813ddd5d0d6",
+      "afterSha256": "2da075c669ab7d3c8462abf362303283ad9d38bca45c5e2f8ad496e755a2b6fe"
+    },
+    {
+      "path": "scripts/eval-current-actor-proof.mjs",
+      "beforeSha256": "cf5d44a405cd5fc2ac10002964c8fe3df118b7e827ffbfb79a4b04e224b941c9",
+      "afterSha256": "c82abcae25dd92cfa09b361028d6ead477ae4d4d0261e7a6dafb6cbcda87aa0c"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "beforeSha256": "ec39eed221ad8e3d505cfbbc1651359090a41f680ad21dd87517d5b9c8a0b4a5",
+      "afterSha256": "23f98473b1c531f51a27f743287d28b94315e00d1d5b80ce8a0526f7f8c66323"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "beforeSha256": "265c88614c4ca89948859f127c58981f4268269bf56a1e1973437c980ec0f197",
+      "afterSha256": "e00974395b56dca9aedf99a6c9095e534dc065bab26f9a05e0a088874f47729c"
+    }
+  ],
+  "scope": "Completion-local live-answer sequences and additive v41 immutable migration; strict terminal provider read authority; delivered occurrence exclusion from ordinary commit/Send; private native/authored input channel identity, receipt locking and unknown-lookup retention; fresh null-decision actor recovery. Production-real fixture checkpoints preserve ordinary unanswered inputs and existing default setup behavior."
+}

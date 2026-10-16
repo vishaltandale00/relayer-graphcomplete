@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "sourceOverlay": "merge-live-integrity-source.json",
+  "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+  "sourceEvidenceDigest": "a7ad12c68ea335af292111135c4bfc13e24331b2031e600e0cad082f5d0166d2",
+  "sourceEvidencePaths": 94,
+  "additionalEvidence": [
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/README.md",
+      "sha256": "496a45dbc12c77d5716f0be156b4e77f4d58acac1e6b2ad72f4a379154bbb39d"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-live-integrity-source.json",
+      "sha256": "e43e785a748f40e43a688f27e2c50e2c2f5e0ee8cf08c26c76ef3ff5e43dc3c3"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-live-integrity-verification.json",
+      "sha256": "fb31703982b828abbd7dca606694aa580ab507f89061adaa7e28184c57f07309"
+    },
+    {
+      "path": "docs/evidence/current-pointer-simulated-user/merge-live-integrity-20261014.md",
+      "sha256": "9cac370dd61c97ddb7a4e065aebffd3f46079be8fd36baae521434b72d95a704"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "b4fd2ae298ebe4964c2757307b7ae9b7e20a85200876a6179d486d9a777a8e2e"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "fdde65dc4a972fba59faab847add6f38411bd5cca137687b9976e809ccd75af2"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "a7fef2a83858371a4ea6c8c3042d421eba2e2ccfbf0ce097d803da75839f915b"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "3eedbd97b9e13a35b32fc5e537f6582f163eb93128041e06fd06764e1408130c"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "3af394eca370bad6f518245ef4df19d6ce3e2fd3df7b8bf7ed40750ba588bc98"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979"
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "5be41128561d049c3f5103732f9a94776f87dee0271d004ff5b0a50c52610eb7"
+    }
+  ],
+  "reviews": [
+    {
+      "reviewer": "actor_renderer_review",
+      "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+      "sourceEvidenceDigest": "a7ad12c68ea335af292111135c4bfc13e24331b2031e600e0cad082f5d0166d2",
+      "reviewedScope": "Native/authored private Input channel, unknown authority retention, receipt locking, mounted cache reset; fresh-null actor recovery; actual browser, compiled, Electron and capture evidence.",
+      "verdict": "PASS within reviewed scope",
+      "unresolvedFindings": [],
+      "qualifications": [
+        "Full local check and isolated deep-reader time budget remain FAILED. Fresh exact-head hosted check and merge-freshness-status must pass; a hosted depth failure requires investigation, not waiver.",
+        "No model-quality/incorporation, performance or signed-release certification. Actual Send/retry execution and complete historical descendant-PID inventory are not claimed."
+      ],
+      "verificationSha256": "fb31703982b828abbd7dca606694aa580ab507f89061adaa7e28184c57f07309"
+    },
+    {
+      "reviewer": "design_authority_review",
+      "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+      "sourceEvidenceDigest": "a7ad12c68ea335af292111135c4bfc13e24331b2031e600e0cad082f5d0166d2",
+      "reviewedScope": "Completion-local cursor semantics, additive migration and exact immutable receipt preservation; terminal provider authority, trusted history/retry and Delivered ordinary-consumer exclusion; PRD checkpoint mapping and qualified heavy evidence.",
+      "verdict": "PASS within reviewed scope",
+      "unresolvedFindings": [],
+      "qualifications": [
+        "Full local check and isolated deep-reader time budget remain FAILED. Fresh exact-head hosted check and merge-freshness-status must pass; a hosted depth failure requires investigation, not waiver.",
+        "No model-quality/incorporation, performance or signed-release certification. Actual Send/retry execution and complete historical descendant-PID inventory are not claimed."
+      ],
+      "verificationSha256": "fb31703982b828abbd7dca606694aa580ab507f89061adaa7e28184c57f07309"
+    },
+    {
+      "reviewer": "transport_prompt_review",
+      "sourceDigest": "6a02e0f06d6ef1b3cc31bd86a84505cd8fc480af6e85025965b4dc66f95bfab9",
+      "sourceEvidenceDigest": "a7ad12c68ea335af292111135c4bfc13e24331b2031e600e0cad082f5d0166d2",
+      "reviewedScope": "Provider terminal-read authority and Product Delivered admission; browser post-Return assertion propagation and negative control; transport/prompt scope and immutable historical recipe/configuration pins.",
+      "verdict": "PASS within reviewed scope",
+      "unresolvedFindings": [],
+      "qualifications": [
+        "Full local check and isolated deep-reader time budget remain FAILED. Fresh exact-head hosted check and merge-freshness-status must pass; a hosted depth failure requires investigation, not waiver.",
+        "No model-quality/incorporation, performance or signed-release certification. Actual Send/retry execution and complete historical descendant-PID inventory are not claimed."
+      ],
+      "verificationSha256": "fb31703982b828abbd7dca606694aa580ab507f89061adaa7e28184c57f07309"
+    }
+  ],
+  "qualification": "Local whole check and isolated deep-reader time budget remain FAILED; exact baseline/semantic comparison and independent gates are separate. Fresh exact-head hosted CI/freshness is required after push and must execute the unchanged failing case normally. No paid/model-quality/performance/release claim."
+}

@@ -1,0 +1,52 @@
+{
+  "baseCommit": "5156d906579625f1eda41bbcf0de7cc71827458d",
+  "sourceManifest": {
+    "files": {
+      "desktop/renderer/src/product-workspace/workspace.js": "c96af9592c420fac9124517dff9771a5eb5c51e5f561f6153c5090c04b11d3fd",
+      "scripts/capture-interaction-graph-scroll-video.mjs": "85194da38ba3168832f5538ca61603940459a8c7073123d5254aa9e0575108bf",
+      "scripts/test-interaction-graph-layout.mjs": "d49761ee0c80899aa60589be0041b059bcc99f491f0ac1537cbb28447ceeb2a9",
+      "test/interaction-graph-workspace.test.mjs": "eb6bd6d92fa98a357d1017e2845ad6fed019f292cdb9605933d834e88cbfcd1d"
+    },
+    "sha256": "46d116c40a8486d8665b371d419039eeae815f083f2462911458702463d0efd6"
+  },
+  "reviewers": [
+    {
+      "reviewer": "/root/scroll_standards",
+      "scope": "implementation, standards, test boundaries and recorder",
+      "verdict": "PASS",
+      "blockingFindings": [],
+      "optionalFinding": "Document macOS/Homebrew FFmpeg prerequisite; resolved in README"
+    },
+    {
+      "reviewer": "/root/scroll_review",
+      "scope": "PRD AN-006, navigation/authority, regression realism and exact-source evidence",
+      "verdict": "PASS",
+      "blockingFindings": [],
+      "additionalEvidenceReview": {
+        "scope": "Regenerated annotation evidence: source, baseline, capture script, PNG identities, exact confirmation occurrence and reload",
+        "verdict": "PASS",
+        "blockingFindings": [],
+        "qualification": "Runtime hashes identify executed capture binaries; shared Cargo target outputs subsequently changed during verification"
+      }
+    }
+  ],
+  "videoSha256": "a000d6636e4c66ca740fa17d4d856a36dbaaa19ead86e9965d5529dc1c8f3df3",
+  "videoReceiptSha256": "42685b0991e669a7f8b55b0dd1c2ec7e068c16416c0d5869e23f5a78a935b936",
+  "socialReceiptSha256": "fc439ca0be60900fc82c25d4ded77cec276eaa0baa99a7a7879ea1d70c1aa9b8",
+  "certification": "Non-certifying until recorded in a PR; source changes invalidate the assertions",
+  "annotationReceiptSha256": "954528e933b450336582060c56311830da7e7c1a8efafcf4289cdc03d393206b",
+  "verification": {
+    "node": "22.23.2",
+    "fullCheck": {
+      "exitCode": 0,
+      "vitestPassed": 4325,
+      "vitestSkipped": 3,
+      "secretBoundaryPassed": 2,
+      "pythonPassed": 99
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "priorAttempt": "Ambient Node 26 failed annotation stale-receipt identity and exact-port egress test. Regenerated evidence and complete pinned-Node rerun passed; no security code/test changes."
+  }
+}

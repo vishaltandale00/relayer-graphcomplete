@@ -128,6 +128,39 @@ export class RelayerGraphClient {
     return this.request<InteractionInput>("/api/graph/input");
   }
 
+  /** Accepted supplemental user answers; the sealed initial contract is unchanged. */
+  async getLiveAnswers(afterSequence = 0, signal?: AbortSignal): Promise<import("./types.js").LiveAnswerPage> {
+    if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new TypeError("Invalid live-answer cursor");
+    return this.request(`/api/graph/live-answers?afterSequence=${afterSequence}`, signal ? { signal } : {});
+  }
+
+  /** Provider-authored waiting, bounded independently of graph execution. */
+  async waitForLiveAnswers(afterSequence = 0, timeoutMs = 30000, signal?: AbortSignal): Promise<import("./types.js").LiveAnswerPage> {
+    if (!Number.isFinite(timeoutMs) || timeoutMs < 0 || timeoutMs > 300000) throw new TypeError("Invalid live-answer timeout");
+    const deadline = Date.now() + timeoutMs;
+    let lastPage: import("./types.js").LiveAnswerPage | undefined;
+    while (true) {
+      signal?.throwIfAborted();
+      const deadlineSignal = AbortSignal.timeout(Math.max(1, Math.ceil(deadline - Date.now())));
+      let page: import("./types.js").LiveAnswerPage;
+      try { page = await this.getLiveAnswers(afterSequence, signal ? AbortSignal.any([signal, deadlineSignal]) : deadlineSignal); }
+      catch (error) {
+        signal?.throwIfAborted();
+        if (deadlineSignal.aborted && lastPage) return lastPage;
+        throw error;
+      }
+      lastPage = page;
+      if (page.answers.length || page.current.lifecycle !== "active" || Date.now() >= deadline) return page;
+      await new Promise<void>((resolve, reject) => {
+        const done = () => { signal?.removeEventListener("abort", abort); resolve(); };
+        const timer = setTimeout(done, Math.min(250, deadline - Date.now()));
+        const abort = () => { clearTimeout(timer); signal?.removeEventListener("abort", abort); reject(signal?.reason); };
+        signal?.addEventListener("abort", abort, { once: true });
+        if (signal?.aborted) abort();
+      });
+    }
+  }
+
   /** Read the exact sealed contract; legacy preparations have no synthesized contract. */
   async getContract(): Promise<import("./types.js").CompletionContract | undefined> {
     return (await this.getInteractionInput()).completionContract;

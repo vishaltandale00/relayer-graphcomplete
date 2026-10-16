@@ -18,6 +18,74 @@ mod tests {
     use std::borrow::Cow;
 
     #[tokio::test]
+    async fn schema_47_attempts_remain_unpaired_after_upgrade_and_reopen() {
+        let temporary = tempfile::tempdir().unwrap();
+        let path = temporary.path().join("product.sqlite3");
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(
+                sqlx::sqlite::SqliteConnectOptions::new()
+                    .filename(&path)
+                    .create_if_missing(true),
+            )
+            .await
+            .unwrap();
+        Migrator {
+            migrations: Cow::Owned(
+                MIGRATOR
+                    .iter()
+                    .filter(|migration| migration.version < 48)
+                    .cloned()
+                    .collect(),
+            ),
+            ..Migrator::DEFAULT
+        }
+        .run(&pool)
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO threads(id,title,created_at,updated_at,harness_configuration_name,permission_profile_id) VALUES (1,'Legacy','1','1','codex-basic','auto')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO interactions(id,thread_id,sequence,text,created_at,graph_node_id,completion_status) VALUES (1,1,1,'Legacy','1',41,'accepted')").execute(&pool).await.unwrap();
+        sqlx::query("INSERT INTO interaction_attempts(id,interaction_id,attempt_number,started_at,finished_at,family_id,family_revision,harness_configuration_name,harness_configuration_revision,harness_configuration_digest,provider_id,adapter_id,adapter_implementation_version,model_id,access_contract,outcome,effect_boundary) VALUES (7,1,1,'1','2',1,1,'codex-basic',1,'sha256:legacy','codex','test',1,'test-model','managed-runtime@1','accepted','graph_write')").execute(&pool).await.unwrap();
+        let before: (i64, String, String) = sqlx::query_as(
+            "SELECT id,outcome,harness_configuration_digest FROM interaction_attempts WHERE id=7",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        pool.close().await;
+        let store = SqliteProductStore::open(&path).await.unwrap();
+        assert_eq!(
+            store
+                .live_answer_attempt_epoch(crate::product::InteractionId::from_database(1), 7)
+                .await
+                .unwrap(),
+            None
+        );
+        let after: (i64, String, String) = sqlx::query_as(
+            "SELECT id,outcome,harness_configuration_digest FROM interaction_attempts WHERE id=7",
+        )
+        .fetch_one(&store.pool)
+        .await
+        .unwrap();
+        assert_eq!(before, after);
+        assert!(
+            sqlx::query("UPDATE interaction_attempts SET live_answer_authority_epoch=1 WHERE id=7")
+                .execute(&store.pool)
+                .await
+                .is_err()
+        );
+        store.pool.close().await;
+        let reopened = SqliteProductStore::open(&path).await.unwrap();
+        assert_eq!(
+            reopened
+                .live_answer_attempt_epoch(crate::product::InteractionId::from_database(1), 7)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
     async fn schema_46_adds_v6_without_changing_published_preferences_or_pins() {
         let temporary = tempfile::tempdir().unwrap();
         let file = tempfile::NamedTempFile::new_in(temporary.path()).unwrap();
@@ -136,7 +204,7 @@ mod tests {
         .fetch_all(&store.pool)
         .await
         .unwrap();
-        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
+        assert_eq!(versions, [40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50]);
         assert!(
             store
                 .recover_interaction_accepted(

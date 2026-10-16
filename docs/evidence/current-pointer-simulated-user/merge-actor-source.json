@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "algorithm": "sha256 of compact JSON sorted path/sha256 entries",
+  "baseCommit": "26e5fc7a4d590f5064c328ab489ce6f2732b164c",
+  "baseSourceManifest": "merge-typecheck-source.json",
+  "baseSourceDigest": "383056b9891f8082836b66222e8041c0d46bf81848d18e5ae7646f456958e617",
+  "sourceDigest": "89010de1df3fd0c63e5ced1bca2d8b8bf564270715a8cc88412426332fe1758d",
+  "sourcePaths": 79,
+  "changes": [
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "beforeSha256": "06fb20ae713a101c2868f5644a2d85dd0913ac678d38163aa653e138de58ad93",
+      "afterSha256": "426b83b82283fa3c91a6be08538c7079e8e8d1f2b20dd5d95d9eb721a42235ab"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-browser.mjs",
+      "beforeSha256": "721de6dc3a8828cc01ba8de7b7880ad6f47eae4be9d22581495600f42f6ef02a",
+      "afterSha256": "4007af11fa29ef3ecb7759d563850ea868ca1f5cd40e9ffcaa8e8a459dbad56e"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-service.mjs",
+      "beforeSha256": "90af7c6af18db84f200f31a0a6fcf1475d6e595028f4ada7adee5f9d645bb8c4",
+      "afterSha256": "73c55d0530e9ce8e6ef8dd42e7548a99eff255244ca2a6e087340691201a705c"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "beforeSha256": "a02799cec08e7283bf6132091b02f290ce40055f2ac04d197dfb3204eba4c12b",
+      "afterSha256": "da88a75cb42f0e657bba5c56f1533d2c4ac59765ba20f93338b6272a3e140f02"
+    },
+    {
+      "path": "scripts/eval-current-actor-proof.mjs",
+      "beforeSha256": "ed43e985025bb6ebe8ae138440c17148ae138ec9bd84888f28533ac423e1800b",
+      "afterSha256": "cf5d44a405cd5fc2ac10002964c8fe3df118b7e827ffbfb79a4b04e224b941c9"
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "beforeSha256": "addb4cd7d7fa0dd40cbaade1aa04c1326205004722ba9489457b8f325013fe10",
+      "afterSha256": "d1e95ddef312ee94d4d1e826573dea5acb929091a3c8382cd814bc2a99212021"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "beforeSha256": "e794a3e459804a404dd5e6bf334d82198d4ff1dfc77dc06cb69c80e45e5e0a98",
+      "afterSha256": "ec39eed221ad8e3d505cfbbc1651359090a41f680ad21dd87517d5b9c8a0b4a5"
+    }
+  ],
+  "scope": "Four late actor review fixes: trusted authored navigation; rendered delivery-state observation; one working recovery; read-only graph receipt reconciliation into append-only Eval evidence. Production graph semantics, configured prompts, SDKs and provider pins are unchanged. Browser proof adds gated reconciliation and a connected remount-marker fixture.",
+  "reuseQualification": "Prior26e native/SDK/packaging and unchanged Product renderer proofs remain historical and reusable only for unchanged closures. Changed Eval service/browser/gateway and proof helper require fresh focused and assembled execution; exact-head hosted CI/freshness required after push."
+}
