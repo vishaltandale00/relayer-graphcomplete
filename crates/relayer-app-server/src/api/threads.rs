@@ -5980,6 +5980,27 @@ async fn prepare_interaction(
                 if matches_existing_binding {
                     break prepared;
                 }
+                // A message bound to this same node, resumed after a restart (#722), runs under
+                // the thread's current harness: its receipts are recorded anew on that node.
+                if invocation.is_none()
+                    && (durable_input.is_some() || reused_graph_node.is_some())
+                    && current.completion_status == "submitted"
+                    && current.graph_node_id == Some(prepared.graph_node_id)
+                    && state
+                        .product
+                        .rebind_message_receipts(PreparedInteractionBinding {
+                            interaction_id: interaction.id,
+                            graph_node_id: prepared.graph_node_id,
+                            harness_configuration_name: &prepared.harness_configuration_name,
+                            harness_configuration_digest: &prepared.harness_configuration_digest,
+                            effective_execution_digest: &prepared.effective_execution_digest,
+                            effective_permission_receipt: &prepared.effective_permission_receipt,
+                            input_children: &prepared.input_children,
+                        })
+                        .await?
+                {
+                    break prepared;
+                }
                 runtime.discard_prepared(prepared).await?;
                 // Still claimed but bound differently: nothing will prepare it again.
                 if current.completion_status == "submitted" {

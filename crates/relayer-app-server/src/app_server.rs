@@ -802,6 +802,25 @@ pub(crate) async fn reconcile_interrupted_work(
                     .invocation_requires_graph_lease(interaction.id)
                     .await?;
                 let durable_input = storage.interaction_input(interaction.id).await?;
+                // A message with no input identity keeps waiting, interrupted, for the user's
+                // Resume, even when the graph could not be reached (#722). Its next start
+                // prepares it on its graph interaction again.
+                if !interaction.stop_requested
+                    && error.is_retryable()
+                    && durable_input.is_none()
+                    && storage
+                        .interrupt_unidentified_message(
+                            interaction.id,
+                            crate::storage::RESTART_INTERRUPTED,
+                        )
+                        .await?
+                {
+                    eprintln!(
+                        "keeping interrupted message {} for the user's Resume after a transient startup reconciliation failure: {error}",
+                        interaction.id
+                    );
+                    continue;
+                }
                 let has_submitted_inputs = durable_input
                     .as_ref()
                     .is_some_and(|input| !input.submitted_inputs.is_empty());

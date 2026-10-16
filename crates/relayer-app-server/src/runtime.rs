@@ -829,7 +829,21 @@ impl RuntimeClient {
                 "only an unidentified message reuses its graph interaction".into(),
             ));
         }
-        let metadata = self.interaction_metadata(interaction_node).await?;
+        let mut attempt = 0;
+        let metadata = loop {
+            attempt += 1;
+            match self.interaction_metadata(interaction_node).await {
+                Ok(metadata) => break metadata,
+                Err(
+                    RuntimeError::Http(_)
+                    | RuntimeError::ResponseDecode(_)
+                    | RuntimeError::Timeout(_),
+                ) if attempt < CONTROL_RETRY_ATTEMPTS => {
+                    tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
         if metadata.node_id != interaction_node
             || metadata.invocation.is_some()
             || metadata.durable_invocation.is_some()

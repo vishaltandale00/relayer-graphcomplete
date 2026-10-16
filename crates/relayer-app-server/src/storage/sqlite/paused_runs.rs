@@ -95,6 +95,33 @@ impl SqliteProductStore {
         Ok(result.rows_affected() == 1)
     }
 
+    /// Records a run's new execution receipts on the graph interaction it is already bound to.
+    /// A message a restart interrupted resumes under the thread's current harness, which an
+    /// upgrade or a harness retirement may have changed (#722). Only a message with no invoke
+    /// origin and no submitted answers, claimed and bound to that node, is rebound.
+    pub(crate) async fn rebind_message_receipts(
+        &self,
+        binding: crate::product::PreparedInteractionBinding<'_>,
+    ) -> Result<bool, StorageError> {
+        let receipt = serde_json::to_string(binding.effective_permission_receipt)
+            .map_err(|error| StorageError::Serialization(error.to_string()))?;
+        let result = sqlx::query(
+            "UPDATE interactions SET harness_configuration_name=?3,harness_configuration_digest=?4,effective_execution_digest=?5,effective_permission_receipt_json=?6
+             WHERE id=?1 AND graph_node_id=?2 AND completion_status='submitted'
+               AND NOT EXISTS(SELECT 1 FROM action_invocations WHERE result_interaction_id=interactions.id)
+               AND NOT EXISTS(SELECT 1 FROM interaction_submitted_input_attempts WHERE interaction_id=interactions.id)",
+        )
+        .bind(binding.interaction_id.value())
+        .bind(binding.graph_node_id)
+        .bind(binding.harness_configuration_name)
+        .bind(binding.harness_configuration_digest)
+        .bind(binding.effective_execution_digest)
+        .bind(receipt)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
+    }
+
     /// The paused and interrupted runs on run `run`'s node, in creation order, or `None` when
     /// `run` is not a node run.
     pub(crate) async fn restart_chain(

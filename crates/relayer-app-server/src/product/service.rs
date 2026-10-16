@@ -2854,6 +2854,16 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn rebind_message_receipts(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .rebind_message_receipts(binding)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn record_node_run(
         &self,
         run: InteractionId,
