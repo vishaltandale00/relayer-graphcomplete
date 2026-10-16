@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "baseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
   "scope": "Delivered JavaScript and Python communication examples shared by Codex, Claude and Prime. Published personal-presentation-v6 text and graph pin are unchanged.",
-  "sourceScopeDigest": "e0a3da708c5e74300298d3fa6fbaa2dd1411be894661ef7692ae7638e3eb753b",
+  "sourceScopeDigest": "75a81501d32b14da6a1d808c1a93c57302273f730dedf05f04986f2fd41ed470",
   "digestAlgorithm": "sha256(sorted relative path UTF-8 + NUL + exact file bytes + NUL)",
   "checkpoints": [
     {
@@ -25,6 +25,13 @@
       "productionSeam": "Current communication example publication/finalization; stable replay keys; source-linked return actions",
       "checks": [
         "existing temporal/prior/replay/later/attached plain/attached rich/all-off recipe scenarios; preservation assertions retained"
+      ]
+    },
+    {
+      "promise": "Prime asset persistence, reopen and presentation promotion preserve the updated communication example",
+      "productionSeam": "Prime basic/deep visual integration through native authoring, asset export/import and interaction layer read API",
+      "checks": [
+        "test/prime-visual-integration.test.mjs: both existing basic/deep scenarios now inspect actual supporting-layer navigation instead of expecting the old single-node fixture; original asset, pin, reopen and history assertions retained"
       ]
     }
   ],
@@ -74,16 +81,26 @@
     {
       "command": "npm run test:eval-compiled-runtime on6a04aa98",
       "result": "12passed"
+    },
+    {
+      "command": "PR #739 CI on 5c9bda10, JavaScript suite",
+      "result": "FAILED: 4292 passed, 2 failed, 34 skipped. Both failures were obsolete one-node expectations in the Prime basic/deep visual integration fixtures."
+    },
+    {
+      "command": "Updated test/prime-visual-integration.test.mjs against unchanged production guidance/runtime",
+      "result": "2 passed (33.72 seconds); actual native asset/pin/reopen scenarios. No candidate inference rerun."
     }
   ],
   "review": {
     "reviewer": "/root/pilot_fix_authority_review",
-    "scopeDigest": "e0a3da708c5e74300298d3fa6fbaa2dd1411be894661ef7692ae7638e3eb753b",
-    "scope": "All-three delivery; semantic/no-quota guidance; typed expand/target; history/replay/native authority; deterministic mapping",
+    "scopeDigest": "75a81501d32b14da6a1d808c1a93c57302273f730dedf05f04986f2fd41ed470",
+    "scope": "Five executable/test files: original all-three delivery, semantic/no-quota guidance, typed expand/target, history/replay/native authority and added Prime visual fixture coverage; original four files unchanged",
     "verdict": "passed",
     "unresolvedFindings": [],
-    "certification": "non-certifying; no PR exists",
-    "baseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041"
+    "certification": "Scoped adversarial static review recorded in PR #739; distinct from execution evidence",
+    "baseCommit": "6a04aa9842de5bb1005d4dfd51b790ad0914c041",
+    "reviewedState": "5c9bda10e1ba92d0e283c6a8df91a4dd972e4a7a plus test-only Prime visual fixture update",
+    "additionalFileSha256": "80d6255bdaa5f2666de6d606faf2db507e23ecf2f7d4654e4bc9b20e7e088d85"
   },
   "notClaimed": [
     "Measured improvement over latest-main examples",
@@ -91,7 +108,7 @@
     "Release proof",
     "Full inventory provider-readiness qualification"
   ],
-  "liveEvidence": "Nine updated-only local Mac sessions admitted: three cases across three native providers, current-main actor/completion judge and graph judge pinned. Results pending. Full135 comparison deferred; no passing pilot is rerun.",
+  "liveEvidence": "Nine updated-only local Mac sessions admitted once. All three backend cases reached the endpoint with all four actual workspace gates passed. Codex proof reached the endpoint; Codex collaboration stopped incomplete. Other sessions and separate graph judgments remain pending. The 135-session comparison is deferred; no passing pilot is rerun.",
   "unknowns": [
     "Full npm run check remains failed;remaining chapters not reached",
     "Machine load is a hypothesis for the timing failures, not an established cause"
