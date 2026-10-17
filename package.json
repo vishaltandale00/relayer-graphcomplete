@@ -88,6 +88,7 @@
     "desktop:release:publish-preview": "node desktop/release/publish-preview.mjs",
     "desktop:release:promote-stable": "node desktop/release/promote-stable.mjs",
     "test:eval-web": "node scripts/test-eval-web.mjs",
+    "test:eval-actor-inputs": "node scripts/eval-actor-inputs-proof.mjs",
     "test:eval-graph-preview": "node scripts/test-eval-graph-preview.mjs",
     "test:eval-compiled-runtime": "vitest run --config scripts/eval-compiled.vitest.config.mjs",
     "evidence:public-share-embed": "RELAYER_CAPTURE_PUBLIC_SHARE_EMBED_EVIDENCE=1 electron scripts/capture-public-share-embed-evidence.mjs",

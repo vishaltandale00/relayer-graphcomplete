@@ -17,7 +17,10 @@ import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcompl
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
 import { HumanTaskService } from "../desktop/eval-main/human-task-service.mjs";
 import { TaskActorService } from "../desktop/eval-main/task-actor-service.mjs";
+import { createDecisionTaskActor } from "../desktop/eval-main/decision-task-actor.mjs";
+import { createCompletionJudge } from "../desktop/eval-main/task-completion-judge.mjs";
 import { openTaskActorBrowser } from "../desktop/eval-main/task-actor-browser.mjs";
+import { proveActorInputs } from "./eval-actor-inputs-proof.mjs";
 import { proveCurrentActor } from "./eval-current-actor-proof.mjs";
 import { EvalService } from "../desktop/eval-main/eval-service.mjs";
 import { createEvalDashboard, createSettingsSurface, createHumanTaskSurface, openHumanReview } from "../desktop/eval-main/web-host.mjs";
@@ -145,6 +148,9 @@ try {
   assert.equal(execution.turns.length, 2);
   await observer.getByText(run.id, { exact: true }).first().waitFor(); // Polling updates an already-open dashboard.
   assert.equal((await rpc(host.url, "getRun", [run.id])).status, "passed");
+  // The observer opened before this run existed. Polling adds the sidebar entry
+  // but deliberately preserves its current selection; open this run's matrix.
+  await observer.locator(`[data-run="${run.id}"]`).click();
   await observer.locator(`[data-execution-detail="${execution.id}"]`).click();
   const reliability = observer.locator(".dossier-block").filter({ has: observer.getByRole("heading", { name: "Authoring errors per turn" }) });
   await reliability.waitFor();
@@ -318,6 +324,8 @@ try {
   const fixtureDefaults = await fetch(new URL("/api/model-settings/defaults", productSession.origin), { method: "PUT", headers: { ...controlHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ familyId: fixtureFamily.id, harnessId: "fixture-task-system", providerId: "codex" }) });
   assert.equal(fixtureDefaults.status, 200);
   const humanProof = await proveHumanTask({ browser, service, productSession, data });
+  await proveDecisionTaskActor({ browser, service, productSession, data });
+  await proveActorInputs({ browser, service, productSession, data });
   await proveTaskActor({ browser, service, productSession, data });
   await proveTaskActorInputs({ browser, service, productSession, data });
   await proveCurrentActor({ browser, directory });
@@ -536,6 +544,212 @@ async function proveProductionSettings({ browser, product, productSession, runti
   }
 }
 
+async function proveDecisionTaskActor({ browser, service, productSession, data }) {
+  let tasks;
+  const completionJudgeConfigDirectory = join(data, "decision-completion-configs");
+  await mkdir(completionJudgeConfigDirectory, { recursive: true });
+  for (const file of await readdir(resolve("eval-configs/completion-judges"))) {
+    if (file.endsWith(".yaml")) await writeFile(join(completionJudgeConfigDirectory, file),
+      (await readFile(resolve("eval-configs/completion-judges", file), "utf8")).replace("replace-with-openai-provider-id", "decision-proof"));
+  }
+  const setupRegistry = await new SetupRegistry({ stateFile: join(data, "decision-actor-setups.json"), completionJudgeConfigDirectory, feedbackLoader: ref => tasks.feedbackReference(ref) }).open();
+  const taskOptions = { stateFile: join(data, "decision-actor-tasks.json"), evalService: service, productSession, setupRegistry };
+  tasks = await new HumanTaskService(taskOptions).open();
+  const actors = new TaskActorService({ tasks, setupRegistry, resolveRuntime: async () => ({}),
+    resolveCompletionJudgeRuntime: async () => ({}),
+    createCompletionJudge: async () => ({ close: async () => {}, evaluate: async () => ({ verdict: "complete", evidenceExplanation: "Fixture stopping review", continuationHint: "", usage: null }) }),
+    openBrowser: (sessionId, signal, observationContract) => openTaskActorBrowser({ tasks, sessionId, signal, observationContract, browser, productSession }),
+    createActor: async () => ({ close: async () => {}, observe: async () => ({ comment: "I see progress", action: null, usage: null }),
+      decide: async () => ({ action: { kind: "finish", ref: "", value: "", reason: "satisfied", satisfaction: 3,
+        comment: "Enough for now", endpointStatus: "incomplete", remainingWork: "Further choices remain" }, usage: null }),
+    }),
+  });
+  resources.push(actors);
+  const selection = { mode: "simulated", testCaseId: "empty-project.task-system.two-turn", harnessConfigurationName: "fixture-task-system", maxCompletions: 1, endpoint: "Understand the task system" };
+  const baseline = setupRegistry.selected("actor");
+  const started = await actors.create(selection);
+  await actors.running.get(started.id)?.done;
+  const baselineTask = tasks.get(started.id);
+  assert.equal(baselineTask.status, "completed");
+  await tasks.grade(baselineTask.id, { satisfaction: 2, comment: "Fixture human feedback motivates comparing action selection" });
+  const calibration = await new CalibrationService({ stateFile: join(data, "decision-actor-calibration.json"), setups: setupRegistry, tasks, evalService: service, author: tasks.annotator }).open();
+  const surface = await createEvalDashboard({ service, humanTasks: tasks, taskActors: actors, setupRegistry, calibration, rendererDirectory: resolve("desktop/eval-renderer"),
+    actorDecisionProviders: async () => [{ id: "decision-proof", label: "Fixture OpenAI API" }] });
+  resources.push(surface);
+  const page = await browser.newPage();
+  try {
+    await page.goto(surface.url);
+    await page.locator("#humanGrader").click();
+    await page.locator("#humanAllCases").check();
+    await page.locator("#humanAdvanced > summary").click();
+    await page.locator("#taskMode").selectOption("simulated");
+    await page.locator("#humanCase").selectOption(selection.testCaseId);
+    await page.locator("#humanHarness").selectOption(selection.harnessConfigurationName);
+    await page.locator('[name="maxCompletions"]').fill("1");
+    await page.locator("#humanEndpoint").fill(selection.endpoint);
+    await page.locator("#humanTools > summary").click();
+    // Publish and select an optional execution implementation through the same
+    // UI. Only inference is injected; selection, browser navigation, admission,
+    // revision lineage and exported evidence use production code.
+    await page.locator("#setupPredecessor").selectOption(baseline.id);
+    await page.locator('#setupPublish [name="actorDecisionEngine"]').waitFor();
+    await page.locator('#setupPublish [name="name"]').fill("Decisions browser experiment");
+    await page.locator('#setupPublish [name="actorDecisionEngine"]').selectOption("decisions");
+    await page.locator('#setupPublish [name="actorDecisionProvider"]').selectOption("decision-proof");
+    await page.locator("#setupFeedbackSession").selectOption(baselineTask.id);
+    await page.locator("#setupFeedbackRecords input").first().check();
+    await page.locator("#setupPublish button").click();
+    const decisionRevision = await until(() => setupRegistry.catalog().revisions.find(item => item.name === "Decisions browser experiment"), "Decisions revision published");
+    await until(async () => (await page.locator("#setupPublished").textContent()).includes(decisionRevision.id), "Decisions revision displayed");
+    assert.equal(setupRegistry.selected("actor").id, baseline.id, "experiment is not implicitly promoted");
+    let selectedOperations = 0;
+    actors.resolveRuntime = async config => {
+      assert.equal(config.decision.providerId, "decision-proof");
+      return { textRuntime: {}, decide: async body => {
+        const choices = body.questions[0].choices;
+        const working = JSON.parse(body.input[0].content[0].text).phase === "working";
+        const chosen = working ? choices.find(item => item.description.startsWith("Keep watching")) : choices.find(item => {
+          const operation = JSON.parse(item.description);
+          return selectedOperations === 0 ? operation.kind === "click" && operation.control?.name.includes("Two-worker") : operation.kind === "finish";
+        });
+        assert.ok(chosen, "requested fixture operation is offered from real visible controls");
+        if (!working) selectedOperations++;
+        return { answer: { type: "choice", name: "action", choice: chosen.value }, usage: { input_tokens: 10 } };
+      } };
+    };
+    actors.createActor = options => createDecisionTaskActor({ ...options, createTextActor: async () => ({ close: async () => {},
+      observe: async () => ({ comment: "I see progress", usage: null }),
+      decide: async observation => ({ action: { ...observation.selectedOperation, reason: "satisfied", satisfaction: 3,
+        comment: "Enough for now", endpointStatus: "incomplete", remainingWork: "Further choices remain" }, usage: null }),
+    }) });
+    await page.locator("#actorSetupRevision").selectOption(decisionRevision.id);
+    assert.match(await page.locator("#actorSetupRevision option:checked").textContent(), /OpenAI Decisions/);
+    const beforeDecisionTask = new Set(tasks.list().map(item => item.id));
+    await page.locator("#humanCreate button").click();
+    const decisionTask = await until(() => {
+      const created = tasks.list().find(item => !beforeDecisionTask.has(item.id));
+      return created && ["completed", "interrupted", "failed"].includes(created.status) ? tasks.get(created.id) : null;
+    }, "Decisions actor completed through real browser controls", 120_000);
+    assert.equal(decisionTask.status, "completed", JSON.stringify(decisionTask.events.filter(event => event.kind === "actor_error")));
+    assert.equal(decisionTask.actorSetup.id, decisionRevision.id);
+    assert.equal(selectedOperations, 2);
+    const clicked = decisionTask.events.find(event => event.kind === "actor_action" && event.action.kind === "click");
+    assert.ok(clicked.decisionEvidence.requestDigest);
+    assert.ok(decisionTask.events.some(event => event.kind === "actor_action_completed" && event.actionEventId === clicked.id));
+    const reopenedDecisionTasks = await new HumanTaskService({ stateFile: join(data, "decision-actor-tasks.json"), evalService: service, productSession, setupRegistry }).open();
+    assert.equal((await reopenedDecisionTasks.export(decisionTask.id)).bundle.session.actorSetup.settings.decision.providerId, "decision-proof");
+    assert.equal(tasks.get(baselineTask.id).actorSetup.id, baseline.id);
+    console.log("PASS Decisions actor revision: dashboard publication/selection without promotion, real graph navigation, constrained text stopping, reopen/export and original revision preserved (fixture inference)");
+    await page.locator("#setupPredecessor").selectOption(decisionRevision.id);
+    await page.locator("#setupUseInputActor").click();
+    assert.equal(await page.locator('#setupPublish [name="promptVersion"]').inputValue(), "task-actor-v10");
+    await page.locator('#setupPublish [name="name"]').fill("Input delivery browser experiment");
+    await page.locator("#setupFeedbackSession").selectOption(baselineTask.id);
+    await page.locator("#setupFeedbackRecords input").first().check();
+    await page.locator("#setupPublish button").click();
+    const inputRevision = await until(() => setupRegistry.catalog().revisions.find(item => item.name === "Input delivery browser experiment"), "input revision published");
+    assert.equal(inputRevision.behaviorContract.id, "task-actor-v7");
+    assert.equal(inputRevision.behaviorContract.observationContract.id, "task-actor-observation-v4");
+    assert.equal(inputRevision.settings.decision.contractId, "openai-decisions-codex-text-v2");
+    assert.equal(setupRegistry.selected("actor").id, baseline.id);
+    assert.deepEqual(setupRegistry.get(decisionRevision.id, "actor"), decisionRevision);
+    await until(async () => (await page.locator("#setupPublished").textContent()).includes(inputRevision.id), "input revision displayed");
+    await page.locator("#humanNewTask > summary").click();
+    await page.locator("#actorSetupRevision").selectOption(inputRevision.id);
+    console.log("PASS input revision UI: explicit v10/v7/v4/v2 staging, feedback publication, picker selection, predecessor preserved, no promotion");
+    await page.locator("#setupUseEndpointActor").click();
+    assert.equal(await page.locator('#setupPublish [name="promptVersion"]').inputValue(), "task-actor-v11");
+    assert.match(await page.locator("#setupCompletionReviewer").textContent(), /requires judge approval/);
+    await page.locator('#setupPublish [name="name"]').fill("Endpoint benchmark browser experiment");
+    await page.locator("#setupFeedbackSession").selectOption(baselineTask.id);
+    await page.locator("#setupFeedbackRecords input").first().check();
+    await page.locator("#setupPublish button").click();
+    const benchmarkRevision = await until(() => setupRegistry.catalog().revisions.find(item => item.name === "Endpoint benchmark browser experiment"), "endpoint benchmark published");
+    assert.equal(benchmarkRevision.behaviorContract.id, "task-actor-v8");
+    assert.equal(benchmarkRevision.behaviorContract.participantMayStopIncomplete, false);
+    assert.equal(benchmarkRevision.settings.decision.contractId, "openai-decisions-codex-text-v2");
+    assert.equal(setupRegistry.selected("actor").id, baseline.id);
+    assert.deepEqual(setupRegistry.get(inputRevision.id, "actor"), inputRevision);
+    await until(async () => (await page.locator("#setupPublished").textContent()).includes(benchmarkRevision.id), "endpoint benchmark displayed");
+    await page.locator("#actorSetupRevision").selectOption(benchmarkRevision.id);
+    console.log("PASS endpoint benchmark UI: explicit v11/v8 staging, feedback publication, picker selection, previous revisions preserved and no promotion");
+    await proveDecisionCompletionJudge({ page, actors, tasks, taskOptions, setupRegistry, baseline, baselineTask });
+  } finally { await actors.close(); await page.close(); }
+}
+
+async function proveDecisionCompletionJudge({ page, actors, tasks, taskOptions, setupRegistry, baseline, baselineTask }) {
+  const nativeJudge = setupRegistry.selected("completion-judge");
+  await page.locator("#setupPredecessor").selectOption(nativeJudge.id);
+  await page.locator("#judgeConfigFile").selectOption("completion-judge-v3-decisions.yaml");
+  await page.locator("#completionDecisionRoute").waitFor();
+  assert.match(await page.locator("#completionDecisionRoute").textContent(), /decision-proof.*Written feedback: Codex/);
+  await page.locator("#setupFeedbackSession").selectOption(baselineTask.id);
+  await page.locator("#setupFeedbackRecords input").first().check();
+  await page.locator("#setupPublish button").click();
+  const judge = await until(() => setupRegistry.catalog().revisions.find(item => item.kind === "completion-judge" && item.spec.decision), "Decisions completion judge published");
+  await until(async () => (await page.locator("#setupPublished").textContent()).includes(judge.id), "Decisions completion judge displayed");
+  assert.equal(setupRegistry.selected("completion-judge").id, nativeJudge.id);
+  assert.deepEqual(setupRegistry.get(nativeJudge.id), nativeJudge);
+  await page.locator("#actorSetupRevision").selectOption(baseline.id);
+  await page.locator("#completionJudgeRevision").selectOption(judge.id);
+  assert.match(await page.locator("#humanActorNotice").textContent(), /completion-reviewer.*OpenAI API/);
+  const selectorRequests = [];
+  actors.resolveRuntime = async () => ({});
+  actors.resolveCompletionJudgeRuntime = async spec => {
+    assert.equal(spec.decision.providerId, "decision-proof");
+    return { textRuntime: {}, decide: async body => {
+      selectorRequests.push(body); return { answer: { type: "choice", name: "completion_verdict", choice: "complete" }, usage: { input_tokens: 25 } };
+    } };
+  };
+  actors.createActor = async () => ({ close: async () => {}, observe: async () => ({ comment: "I see the response", action: null }),
+    decide: async () => ({ action: { kind: "finish", ref: "", value: "", reason: "endpoint_reached", satisfaction: 3, comment: "I understand the displayed task system.", endpointStatus: "reached", remainingWork: "" } }),
+  });
+  actors.createCompletionJudge = options => createCompletionJudge({ ...options, createActor: async () => ({ close: async () => {},
+    decide: async (_input, _signal, { outputSchema }) => {
+      assert.deepEqual(outputSchema.properties.verdict.enum, ["complete"]);
+      return { action: { verdict: "complete", evidenceExplanation: "Fixture reviewer assessed the displayed task-system response.", continuationHint: "" }, usage: { input_tokens: 55 } };
+    },
+  }) });
+  const before = new Set(tasks.list().map(item => item.id));
+  await page.locator("#humanCreate button").click();
+  const completed = await until(() => {
+    const task = tasks.list().find(item => !before.has(item.id));
+    return task && ["completed", "failed", "interrupted"].includes(task.status) ? tasks.get(task.id) : null;
+  }, "Decisions completion judge task", 120_000);
+  assert.equal(completed.status, "completed", JSON.stringify(completed.events.filter(event => event.kind === "actor_error")));
+  assert.equal(completed.completionJudgeSetup.id, judge.id);
+  assert.equal(completed.termination.endpointAttainment, "judge_reported");
+  const stages = completed.events.filter(event => event.kind === "actor_completion_stage");
+  assert.equal(stages.length, 4);
+  assert.deepEqual(await tasks.completionJudgeStageInput(completed.id, stages[0].id), selectorRequests[0]);
+  await until(async () => /OpenAI Decisions.*Codex feedback/.test(await page.locator("#humanTaskDetail").textContent()), "judge route in task detail");
+  const reopened = await new HumanTaskService(taskOptions).open();
+  assert.deepEqual((await reopened.export(completed.id)).bundle.session.events.filter(event => event.kind === "actor_completion_stage"), stages);
+  assert.equal(tasks.get(baselineTask.id).completionJudgeSetup, undefined);
+  if (!(await page.locator("#humanNewTask").evaluate(element => element.open))) await page.locator("#humanNewTask > summary").click();
+  await page.locator("#humanAllCases").check();
+  await page.locator("#humanCase").selectOption("fixture.external-human");
+  await page.locator('[name="subscriptionConfirmed"]').check();
+  const count = tasks.list().length;
+  await page.locator("#humanCreate button").click();
+  await page.getByText(/External tasks authorize subscription use only/).waitFor();
+  assert.equal(tasks.list().length, count);
+  // The release switch must recompute billing from its completion judge too.
+  await page.locator('#evaluatorReleasePublish [name="name"]').fill("Decisions completion browser release");
+  await page.locator('#evaluatorReleasePublish [name="actorRevisionId"]').selectOption(baseline.id);
+  await page.locator('#evaluatorReleasePublish [name="completionJudgeRevisionId"]').selectOption(judge.id);
+  await page.locator('#evaluatorReleasePublish [name="judgeRevisionId"]').selectOption(setupRegistry.selected("judge").id);
+  await page.locator("#evaluatorReleasePublish button").click();
+  const release = await until(() => setupRegistry.catalog().evaluatorReleases.find(item => item.name === "Decisions completion browser release"), "Decisions evaluator release published");
+  await page.locator("#evaluatorRelease").selectOption(release.id);
+  assert.equal(await page.locator("#completionJudgeRevision").inputValue(), judge.id);
+  await page.locator("#humanCreate button").click();
+  await page.getByText(/External tasks authorize subscription use only/).waitFor();
+  assert.equal(tasks.list().length, count); assert.equal(selectorRequests.length, 1);
+  assert.equal(setupRegistry.selected("actor").id, baseline.id); assert.equal(setupRegistry.selected("completion-judge").id, nativeJudge.id);
+  console.log("PASS Decisions completion judge UI: exact YAML publication/selection, API and Codex disclosure, production judge stages and reconstruction, reopen/export, native defaults/history preserved, independent/release subscription-only guard (fixture inference)");
+}
+
 async function proveTaskActor({ browser, service, productSession, data }) {
   let tasks;
   const setupRegistry = await new SetupRegistry({ stateFile: join(data, "actor-setups.json"), feedbackLoader: (ref) => tasks.feedbackReference(ref) }).open();
@@ -562,6 +776,21 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       const actorPage = browser.contexts().flatMap((context) => context.pages()).find((page) => new URL(page.url()).searchParams.get("taskActor") === "1");
       controlPage = actorPage;
       actorCapability = new URL(actorPage.url()).hash.slice(1);
+      const withPresentation = async (patch, check) => {
+        const restore = await actorPage.evaluateHandle(patch => {
+          const descriptor = Object.getOwnPropertyDescriptor(window, "__taskActorPresentation");
+          let latest = window.__taskActorPresentation;
+          Object.defineProperty(window, "__taskActorPresentation", { configurable: true,
+            get: () => ({ ...latest, ...patch }), set: value => { latest = value; } });
+          return () => Object.defineProperty(window, "__taskActorPresentation", { ...descriptor, value: latest });
+        }, patch);
+        try {
+          // Keep the adversarial scope through a real observer paint. A direct
+          // assignment can be overwritten before the rejection is exercised.
+          await actorPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+          await check();
+        } finally { await restore.evaluate(restore => restore()); await restore.dispose(); }
+      };
       await actorPage.locator(".graph-node").first().waitFor({ state: "visible" });
       try { await proveActorScroll({ controller, page: actorPage }); }
       catch (error) { console.error("Actor scroll browser proof failed:", error); throw error; }
@@ -720,11 +949,10 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       menu = await controller.observe(); budget = menu.controls.find(control => control.name === "Budget proof");
       await controller.act({ kind: "click", ref: budget.ref });
       menu = await controller.observe(); budget = menu.controls.find(control => control.name === "Budget proof");
-      const menuTurn = await actorPage.evaluate(() => window.__taskActorPresentation.turnId);
-      await actorPage.evaluate(() => { window.__taskActorPresentation.turnId = "changed-menu-turn"; });
-      await assert.rejects(controller.act({ kind: "select", ref: budget.ref, value: "Small" }), { code: "actor_control_unavailable", actionDispatched: false });
-      assert.equal((await controller.observe()).controls.find(control => control.name === "Budget proof").options, undefined);
-      await actorPage.evaluate(turnId => { window.__taskActorPresentation.turnId = turnId; }, menuTurn);
+      await withPresentation({ turnId: "changed-menu-turn" }, async () => {
+        await assert.rejects(controller.act({ kind: "select", ref: budget.ref, value: "Small" }), { code: "actor_control_unavailable", actionDispatched: false });
+        assert.equal((await controller.observe()).controls.find(control => control.name === "Budget proof").options, undefined);
+      });
       await actorPage.keyboard.press("Escape");
       menu = await controller.observe(); budget = menu.controls.find(control => control.name === "Budget proof");
       await controller.act({ kind: "click", ref: budget.ref });
@@ -761,10 +989,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       await replacementNode.evaluate(element => { const duplicate = element.cloneNode(true); duplicate.id = "actor-duplicate-node"; element.after(duplicate); });
       await assert.rejects(controller.act({ kind: "click", ref: nodeChoice.ref }), /no longer visible/);
       await actorPage.locator("#actor-duplicate-node").evaluate(element => element.remove());
-      const originalTurn = await actorPage.evaluate(() => window.__taskActorPresentation.turnId);
-      await actorPage.evaluate(() => { window.__taskActorPresentation.turnId = "other-turn"; });
-      await assert.rejects(controller.act({ kind: "click", ref: nodeChoice.ref }), /no longer visible/);
-      await actorPage.evaluate(turnId => { window.__taskActorPresentation.turnId = turnId; }, originalTurn);
+      await withPresentation({ turnId: "other-turn" }, () => assert.rejects(controller.act({ kind: "click", ref: nodeChoice.ref }), /no longer visible/));
       await replacementNode.evaluate(element => { element.hidden = true; });
       await assert.rejects(controller.act({ kind: "click", ref: nodeChoice.ref }), /no longer visible/);
       await replacementNode.evaluate(element => { element.hidden = false; });
@@ -799,10 +1024,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
         const html = await replacement.innerHTML();
         await replacement.evaluate(element => { element.textContent = "Different control"; }); await rejectsReplacement();
         await replacement.evaluate((element, html) => { element.innerHTML = html; }, html);
-        const path = await actorPage.evaluate(() => window.__taskActorPresentation.navigationPath);
-        await actorPage.evaluate(() => { window.__taskActorPresentation.navigationPath = [{ layerId: "changed" }]; });
-        await rejectsReplacement();
-        await actorPage.evaluate(path => { window.__taskActorPresentation.navigationPath = path; }, path);
+        await withPresentation({ navigationPath: [{ layerId: "changed" }] }, rejectsReplacement);
         await replacement.evaluate(element => { element.hidden = true; }); await rejectsReplacement();
         await replacement.evaluate(element => { element.hidden = false; });
         await controller.act({ kind: "click", ref: choice.ref });
@@ -844,21 +1066,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       if (first.controls[0]) await assert.rejects(controller.act({ kind: "click", ref: first.controls[0].ref }), /stale/);
       await assert.rejects(controller.act({ kind: "click", ref: "forged" }), { code: "actor_control_stale", actionDispatched: false, message: /stale/ });
       await actorPage.locator("#actor-hidden-test").evaluate((element) => element.remove());
-      return { ...controller, async observe(expected) {
-        if (!expected?.invokeSource) return controller.observe(expected);
-        const resultControl = actorPage.locator(`[data-invocation-result-interaction-id="${expected.turnId}"]`).first();
-        await resultControl.waitFor({ state: "visible" });
-        await until(() => resultControl.isEnabled(), "settled invoke result is enabled from its source");
-        // The source is already settled and idle: duplicate after-paint snapshots
-        // need not publish a new observedAt. Actual fresh pixels still qualify.
-        await actorPage.evaluate(() => {
-          window.__idleSourceDescriptor = Object.getOwnPropertyDescriptor(window, "__taskActorPresentation");
-          const stable = { ...window.__taskActorPresentation, observedAt: 0 };
-          Object.defineProperty(window, "__taskActorPresentation", { configurable: true, get: () => stable, set() {} });
-        });
-        try { return await controller.observe(expected); }
-        finally { await actorPage.evaluate(() => { Object.defineProperty(window, "__taskActorPresentation", window.__idleSourceDescriptor); delete window.__idleSourceDescriptor; }); }
-      } };
+      return controller;
     },
     createActor: async () => ({ close: async () => {},
       observe: async (observation) => {
@@ -906,7 +1114,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       assert.ok(Buffer.from(observation.screenshot, "base64").readUInt32BE(16) > 0);
       assert.ok(!JSON.stringify(observation.controls).includes("Review & grade"));
       const action = { kind: "finish", ref: "", value: "", reason: "satisfied", satisfaction: 3, comment: "The follow-up is good enough.", endpointStatus: "incomplete", remainingWork: "Further choices remain." };
-      if ([5, 7].includes(decision)) Object.assign(action, { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "" });
+      if ([6, 8].includes(decision)) Object.assign(action, { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "" });
       const find = (predicate) => { const control = observation.controls.find(predicate); assert.ok(control, JSON.stringify(observation.controls)); return control.ref; };
       if (decision === 0) Object.assign(action, { kind: "click", ref: find((control) => control.name.includes("Two-worker")) });
       if (decision === 1) Object.assign(action, { kind: "fill", ref: find((control) => control.role === "textarea"), value: "Explain how the workers coordinate." });
@@ -919,7 +1127,24 @@ async function proveTaskActor({ browser, service, productSession, data }) {
         await until(() => oldInvoke.evaluate(element => !element.isConnected), "invoke button replaced by production refresh");
         await oldInvoke.dispose();
       }
+      if (decision === 5) {
+        const invocation = tasks.get(tasks.list()[0].id).events.findLast(event => event.kind === "submission");
+        const sourceTurnId = Number(invocation.path.match(/\/interactions\/(\d+)\/actions\//)[1]);
+        const presentation = await controlPage.evaluate(() => window.__taskActorPresentation);
+        assert.equal(String(presentation.turnId), String(sourceTurnId), "Invoke leaves the reader on its source response");
+        assert.notEqual(String(presentation.turnId), String(invocation.interactionId));
+        assert.ok(presentation.observedAt >= Date.parse(invocation.at), "the source observation is freshly painted after Invoke");
+        Object.assign(action, { kind: "click", ref: find(control => control.name === "Updated task-system analysis") });
+      }
       if (decision === 6) {
+        const invocation = tasks.get(tasks.list()[0].id).events.findLast(event => event.kind === "submission");
+        const presentation = await controlPage.evaluate(() => window.__taskActorPresentation);
+        const child = (await tasks.detail(invocation.threadId)).interactions.find(turn => String(turn.id) === String(invocation.interactionId));
+        assert.equal(String(presentation.layerId), String(child.completionOutput.rootLayer.layer.id), "explicit result navigation opens the exact child's returned layer");
+        assert.match(await controlPage.locator("#workspaceBreadcrumb").innerText(), /Results store/);
+        assert.equal(tasks.get(tasks.list()[0].id).completions, 3, "opening a result starts no extra completion");
+      }
+      if (decision === 7) {
         assert.equal(observation.completionJudgeFeedback, "Could I check one more part of the plan?");
         assert.ok(!observation.availableActions.includes("finish"), "judge rejection requires an ordinary interaction first");
         const label = await controlPage.locator(".graph-node").first().getAttribute("aria-label");
@@ -950,7 +1175,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     await page.locator("#humanEndpoint").fill("An understandable task system");
     await page.locator("#humanCreate button").click();
     await until(() => tasks.list().length > 0, "actor session created through dashboard");
-    // This journey includes adversarial browser preflight and eight actor
+    // This journey includes adversarial browser preflight and nine actor
     // decisions; it is an aggregate proof budget, not an actor/action deadline.
     const task = await until(() => { const task = tasks.get(tasks.list()[0].id); return ["completed", "interrupted", "failed"].includes(task.status) ? task : null; }, "actor session terminal", 120_000).catch(async error => {
       const active = tasks.get(tasks.list()[0].id);
@@ -992,7 +1217,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
 
     await until(async () => (await page.locator("#humanTaskDetail").textContent()).includes("Completion reviewer: gpt-5.6-sol"), "pinned completion reviewer visible in task details");
     assert.ok((await page.locator("#humanTaskDetail").textContent()).includes("high reasoning"));
-    assert.equal(decision, 8);
+    assert.equal(decision, 9);
     assert.equal(completionAssessments, 2);
     const judgments = task.events.filter(event => event.kind === "actor_completion_judgment");
     assert.deepEqual(judgments.map(event => event.verdict), ["incomplete", "complete"]);
@@ -1006,23 +1231,23 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(task.termination.reason, "endpoint_reached");
     assert.ok(task.events.some((event) => event.kind === "submission" && event.path?.endsWith("/invoke")));
     const lastTurn = (await tasks.detail(task.currentThreadId)).interactions.at(-1);
-    assert.equal(lastTurn.completionStatus, "accepted", "invoked completion settled before actor finishes");
-    const invoked = task.events.findLast(event => event.kind === "submission" && event.path?.endsWith("/invoke"));
-    const sourceTurnId = /^\/api\/threads\/\d+\/interactions\/(\d+)\//.exec(invoked.path)[1];
-    assert.equal(String(task.events.findLast(event => event.kind === "presentation").snapshot.turnId), sourceTurnId,
-      "READ-001 preserves the source; opening the discoverable invoked result remains a user choice");
+    assert.equal(String(task.events.findLast(event => event.kind === "presentation").snapshot.layerId), String(lastTurn.completionOutput.rootLayer.layer.id), "the exact returned response layer is painted before actor finishes");
     for (const snapshot of snapshots) {
       assert.deepEqual(Object.keys(snapshot).sort(), [...["availableActions", "controls", "screenshot", "text"], ...(snapshot.completionJudgeFeedback ? ["completionJudgeFeedback"] : [])].sort());
-      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot === snapshots[6] ? [] : ["finish"])]);
-      for (const control of snapshot.controls) assert.deepEqual(Object.keys(control).sort(), ["name", "ref", "role"]);
+      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot === snapshots[7] ? [] : ["finish"])]);
+      for (const control of snapshot.controls) {
+        assert.deepEqual(Object.keys(control).sort(), ["canFill", "inputType", "name", "ref", "role"]);
+        assert.equal(typeof control.canFill, "boolean");
+        assert.ok(control.inputType === null || typeof control.inputType === "string");
+      }
     }
     assert.ok(task.events.filter(event => event.kind === "actor_observation").every(event => !event.observation.screenshot && event.observation.screenshotArtifact));
     assert.equal(task.events.filter((event) => event.kind === "actor_satisfaction").length, 2);
     assert.equal(task.satisfaction.value, 1, "human grade saved during the active actor session stays separate from actor satisfaction");
     const exported = await tasks.export(task.id);
-    assert.equal(exported.bundle.session.events.filter((event) => event.kind === "actor_observation").length, 8);
+    assert.equal(exported.bundle.session.events.filter((event) => event.kind === "actor_observation").length, 9);
     assert.equal(exported.bundle.session.satisfaction.value, 1);
-    assert.equal(exported.bundle.actorScreenshots.length, 8);
+    assert.equal(exported.bundle.actorScreenshots.length, 9);
     assert.ok(!JSON.stringify(exported.bundle).includes(diagnosticDirectory), "diagnostics excluded from ordinary evidence exports");
     assert.equal(exported.bundle.session.termination.completionJudgeEventId, judgments[1].id);
     assert.equal(await page.locator("#actorSettings [name=actorModel]").inputValue(), "gpt-5.6-luna");
@@ -1200,7 +1425,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     const tasksBeforeCalibration = new Set(tasks.list().map(item => item.id));
     page.once("dialog", (dialog) => dialog.accept());
     await page.locator("#calibrationRunArm").click();
-    // This is the same eight-decision/preflight workload as the first actor
+    // This is the same nine-decision/preflight workload as the first actor
     // journey. Bind to the task this click creates, not list update order.
     const revised = await until(() => {
       const created = tasks.list().find(item => !tasksBeforeCalibration.has(item.id));
@@ -1229,6 +1454,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.deepEqual(reopenedCalibration.report(comparison.id), report);
     if (process.env.RELAYER_EVAL_CALIBRATION_SCREENSHOT) { await page.locator("#calibrationReport").scrollIntoViewIfNeeded(); await page.screenshot({ path: process.env.RELAYER_EVAL_CALIBRATION_SCREENSHOT }); }
     console.log("PASS calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen");
+
   } finally { await actors.close(); await page.close(); }
   console.log("PASS task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)");
 }

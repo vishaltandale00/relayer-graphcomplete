@@ -171,7 +171,7 @@ export async function createReviewSurface({ productSession, context, annotationT
   });
 }
 
-export async function createEvalDashboard({ service, rendererDirectory, refreshCatalog, openReview, loadScreenshot, humanTasks, taskActors, setupRegistry, calibration, openHumanTask, reviewHumanTask, openSettings }) {
+export async function createEvalDashboard({ service, rendererDirectory, refreshCatalog, openReview, loadScreenshot, humanTasks, taskActors, setupRegistry, calibration, openHumanTask, reviewHumanTask, openSettings, actorDecisionProviders = async () => [] }) {
   const operations = {
     calibrationCatalog: () => calibration.catalog(),
     freezeCalibrationSet: ([input]) => calibration.freeze(input),
@@ -180,7 +180,7 @@ export async function createEvalDashboard({ service, rendererDirectory, refreshC
     calibrationReport: ([id]) => calibration.report(id),
     exportCalibration: () => calibration.export(),
     calibrationSource: ([ref]) => calibration.source(ref),
-    setupRevisions: () => setupRegistry.catalog(),
+    setupRevisions: async () => ({ ...setupRegistry.catalog(), actorDecisionProviders: await actorDecisionProviders() }),
     publishEvaluatorRelease: ([input]) => setupRegistry.publishRelease(input),
     publishSetup: ([input]) => input?.kind === "completion-judge" ? setupRegistry.publishCompletionJudgeConfig(input) : input?.configFile ? setupRegistry.publishConfig(input) : input?.kind === "judge" ? Promise.reject(Object.assign(new Error("Select a judge config file."), { status: 400 })) : setupRegistry.publish(input),
     promoteSetup: ([input]) => setupRegistry.promote(input, humanTasks.annotator),

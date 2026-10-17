@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T17:40:04.633309+00:00",
+  "pullRequest": 755,
+  "reviewType": "Final bounded adversarial source, authority, test-subsumption, consumed-input reuse and completed heavy-evidence review",
+  "workspaceDigest": "fb80bc9b8cf10e815fc213b0d2923223920f682f162354cd48290218a8537178",
+  "priorPrHead": "ae3bb1825ce7a8fa7ee817c444c2650269ee2834",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-source-20261017.json",
+    "sha256": "5ef8a6ca4cc7aff029e8362b6f1aa8627ce108e3d6e1c4bdbfe7599e0945343f",
+    "files": 161,
+    "all161FileHashesAndSortedPathNulBytesAggregateIndependentlyVerified": true
+  },
+  "evaluatorSourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-evaluator-source-20261017.json",
+    "sha256": "6087fe7ff620bcc91f7c31df4bb5a2c28215799d637e9027493200d1f4476c5e",
+    "workspaceDigest": "1efd7ff8ff00b4140451328ca97e5a9ee66f84cd98b33bb911676828f3792387",
+    "files": 160,
+    "boundary": "Actual standalone/fullbrowser/compiled/focused entries retain160-source identity. Only mapping document and Windows unit fixture changed afterward; neither is a consumed input. All evaluator executable/test hashes remain identical. No old command relabeled as fresh161.",
+    "manifestHashIndependentlyVerified": true
+  },
+  "mapping": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-20261017.md",
+    "sha256": "207c364d93d493c79227955889460e237896584c055f67524ac85896ea7e4602",
+    "checkpoints": [
+      "MCI-011 / CJ-005 complete and partial audit",
+      "MCI-012 actual DOM fill capability and exact metadata privacy",
+      "MCI-013 explicit orchestrator fixture",
+      "MCI-014 signing-rejection fixture teardown"
+    ]
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-verification-20261017.json",
+    "sha256": "7de769082ba1a513a30da2423f20903c971e565c055e38788ba274a8660a47a4",
+    "all24LogHashesSizesAndOuterExitBindingsIndependentlyVerified": true,
+    "historicalHostedFiveRecordHashesAndJobConclusionsVerified": true
+  },
+  "results": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-results-20261017.md",
+    "sha256": "75059054cb7394266b0d73041a77b6251742f7eccdb84f529086041979797ee5",
+    "materialMismatchFound": false
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-final-review-20261017/outer-exits.json",
+    "sha256": "8e36043e6d687dd696a2d629c2a4762af2252750404998518ecfd0a59cac70a3",
+    "basis": "Closed parent-observed unified-exec/write_stdin outcomes; Python subprocess records each code after exit; inner scenarios independently verified."
+  },
+  "reviewedScope": [
+    "Decisions judgment export requires a chronological successful selector/reporter chain for every judgment, including an earlier incomplete judgment in a later-interrupted session; exact pinned judge, evidence/finish/observation links, selected verdict, reporter usage and non-reused chain. Completed-session termination/latest-judgment and evidence coverage reject complete audit deletion. Native historical sessions and no-judgment interrupted prefixes remain supported.",
+    "Actual serialized DOM fill capability and normalized input type, inherited disabled/readOnly rejection, explicit canFill-only Decisions enumeration, unchanged narrower working authority, supported Playwright range, checkbox/radio/role-spoof exclusion and click retention; actual browser fill dispatch and exact observation-field whitelist/types.",
+    "All original positive native/node signing, DLL copy, complete output inventory and source-byte assertions retained. Negative signing case remains a real directory matcher filtered to one native EXE, observes exact rejected destination and partial signature, then rechecks native inputs. The controlled production-library probe proves aggregate rejection can precede a sibling writer, without claiming it identifies the original ENOTEMPTY writer.",
+    "Seven evaluator executable/test deltas plus Windows fixture; no existing assertion/deadline removed or relaxed; explicit role-array standalone fixture correction; all checkpoint and required heavy mappings.",
+    "Completed inner scenario outcomes, historical failures/unreached stages, exact160 versus161 proof identities, restored canonical telemetry and historical desktop/capture consumed-input boundaries."
+  ],
+  "qualified160Reuse": {
+    "digest": "1efd7ff8ff00b4140451328ca97e5a9ee66f84cd98b33bb911676828f3792387",
+    "actualCommands": [
+      "focused-qualified.log",
+      "actor-inputs-qualified.log",
+      "web-qualified.log",
+      "compiled.log"
+    ],
+    "observed": "182 focused tests; standalone real fill capability plus existing minimum-two selection/Send second response; entire browser runner including native three-completion recovery, Decisions actor/judge publication/reconstruction/export, current input variants, scroll/dispatch authority, judging and persistence; compiled12 scenarios in18.59s.",
+    "inputIdentity": "All160 evaluator executable/test hashes still match. Only the mapping document differs, and Windows candidate test is added to the161 changed-source inventory. Fullbrowser/standalone scripts import explicit inputs and inspect their own fixture/config/diagnostic paths; compiled config includes only recursive-complete-e2e. Neither consumes the Windows unit or checkpoint prose. These passes retain160 identity, not fresh161 invocation labels."
+  },
+  "fresh161Outcomes": {
+    "build": "Completed native/TypeScript/package build, actual attested0; compatible ordinary local Cargo fingerprints, no newly adopted external artifact.",
+    "windows": "10 tests passed,1.95s, actual attested0; positive full-resource and narrowed negative authority assertions inspected.",
+    "telemetry": "Declared entry passed native panic5 plus19-file/184-test portfolio, actual attested0. Windows candidate is explicitly included, so fresh telemetry rather than old portfolio reuse was required.",
+    "defaultCheck": "336files/4437tests passed;1file/3tests skipped; native formatting/Clippy/workspace/doc/crash tests, builds/TypeScript/workspaces, separate secret2, Python99, receipt lint and PRD readability completed, actual attested0."
+  },
+  "controlledProbe": {
+    "source": ".relayer/verification/pr755-final-review-20261017/copy-race-probe.mjs",
+    "sha256": "5bb9984d5c5b7173a1d683ad5308e918407a402f5ae6a6a27167488433cae5bb",
+    "actualOuterExit": 0,
+    "aggregateRejectedBeforeSiblingWriterCompleted": true,
+    "siblingWroteAfterRejection": true,
+    "boundary": "Confirms early-rejection/late-writer mechanism; exact original ENOTEMPTY sibling remains unidentified.",
+    "sourceAndLogInspected": true,
+    "logSha256": "737c555e77577e4c4bcc20508f2d6ff6b4dfd59d1289bb074cfd14981b1d37e2"
+  },
+  "telemetryArchive": {
+    "freshArtifact": {
+      "path": ".relayer/verification/pr755-final-review-20261017/telemetry-v1.json",
+      "sha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea"
+    },
+    "canonicalPath": ".relayer/evidence/telemetry-v1.json",
+    "priorBackupPath": ".relayer/verification/pr755-final-review-20261017/telemetry-prior.json",
+    "allThreeSha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea",
+    "freshExecutionSupportedByCompletedLogAndAttestation": true,
+    "canonicalRestorationByteIdentityVerified": true,
+    "boundary": "Deterministic local loopback fixture/receiver and panic evidence; no live hosted receiver, symbolication or release claim."
+  },
+  "preservedFailuresAndLimits": [
+    "Initial regressions:3 failed/98 passed; intermediate passes remain development-only.",
+    "Two standalone family setup failures precede new capability chapters; explicit roles-array repair passes. Missing versus singular-role details are fixture history, not separately inferable from their identical error text.",
+    "Pilot e6e160 fullbrowser failed exact-field whitelist after new input/judge chapters; later chapters unreached. Corrected exact whitelist adds only canFill/inputType plus scalar checks; qualified fullbrowser passes.",
+    "Qualified160 root check failed ENOTEMPTY in Windows negative signing cleanup after4436 tests passed; secret/Python/lint/readability thereafter unreached. Controlled probe establishes possible late writer after aggregate rejection; original writer remains unidentified. The fixture was changed, then full check passed; no blind cleanup retry/deadline relaxation.",
+    "Historical hosted39051085923 ae3 attempt1 failed a10000ms Ladybug setup hook with14 assertions skipped. Once unchanged diagnostic failed-job rerun passed14 (file13.115s),338files4499tests;1file34tests skipped plus separate Linux secret2 platform skips. Cause remains unknown; original freshness window and synthetic merge retained. This is historical evidence, not current-head qualification.",
+    "Prior no-blocker reviews missed full-chain deletion and role-only fill cases. Their exact source receipts remain historical and do not certify these corrected boundaries.",
+    "Previous desktop and image capture results retain original source identities; unchanged main/renderer/native/capture consumers exclude modified Eval host/actor modules and Windows unit. No fresh desktop/image invocation is claimed."
+  ],
+  "verdict": "No blocking source, authority, mapping, test-subsumption or evidence mismatch found for final161 digest and its explicitly qualified160 evaluator proofs. Required local portfolio is supported by inspected inner outcomes and completed outer attestations.",
+  "unresolvedBoundaries": [
+    "Commit/push, fresh published-head hosted CI/freshness and resolution of the two review threads remain publication gates. This receipt does not assert merge readiness, approve a merge or perform one.",
+    "Digest and sequence consistency do not authenticate a log against coordinated rewriting of all local evidence/configuration.",
+    "No paid application inference, live Decisions calibration, general quality/performance/cost advantage, signed release or deployment proof is claimed."
+  ]
+}

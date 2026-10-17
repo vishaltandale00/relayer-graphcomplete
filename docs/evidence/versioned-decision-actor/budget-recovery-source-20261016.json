@@ -1,0 +1,72 @@
+{
+  "baseCommit": "77b1b296022b17c29b06aa0da24522ead3344617",
+  "predecessorWorkspaceDigest": "dedd1cc66f3d41a06250a6c9274b16f79cace9184a5df83c7b572f79f958d5d2",
+  "digestMethod": "sorted repository-relative path + NUL + file bytes",
+  "workspaceDigest": "96fa71926cb61a62e0d7f397b8ed5db0272147d161ce3385b88681f18d2a4d2b",
+  "files": [
+    {
+      "path": "desktop/eval-main/decision-task-actor.mjs",
+      "sha256": "0cc13f6ce419f2cd87006280dd10ffd69877245dc494d5979c719a539b1ccae8"
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "33808e4b743953a514fa9f955f6259f809e600ff2e17bc3c4a51f2b29110a956"
+    },
+    {
+      "path": "desktop/eval-main/index.mjs",
+      "sha256": "42d46da1a0589b6404339011b071fe7375621235701aa0f2241345035ebb9425"
+    },
+    {
+      "path": "desktop/eval-main/provider-setup.mjs",
+      "sha256": "e310693311a3ffb26b09a5d31e27b6a6133c6c4dbb40c591bafc7f721cda67e2"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-service.mjs",
+      "sha256": "29b05b0b96ef1b850aafadcea275b825fb357109161aa228ca87a5c784cfa750"
+    },
+    {
+      "path": "desktop/eval-main/task-actor.mjs",
+      "sha256": "102f8970e46d9997b2f38803976b5dbaf9c0da65d8c308694ff36d346fe68587"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "sha256": "4eaa97708439efa448121eb73efdd83bbd83f8330406f05353d2ea41dfb2145a"
+    },
+    {
+      "path": "desktop/eval-renderer/human-tasks.js",
+      "sha256": "509c02b0399e5382e474027e9ff8de6d6e1488835ae46bcafc25eccd93a44104"
+    },
+    {
+      "path": "desktop/eval-renderer/index.html",
+      "sha256": "50f33d94df8d045cb3eeabdd5dc1ec85335abeeb6ddf8f59eea82cf5e1b704dd"
+    },
+    {
+      "path": "desktop/eval-renderer/setup-editor.js",
+      "sha256": "d388dce0798469886b4d8fe45a07f662834da10ef15d659452a0eaa24eaa366f"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "de852c27efaf9e15d93d21342a9b89e5dbc9ddfa55baedb1721f3451d122628c"
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "sha256": "312e102531e7e87e7b01569f87ed916e383a9199e1241766136b650a8f8419b9"
+    },
+    {
+      "path": "test/eval-decision-task-actor.test.mjs",
+      "sha256": "c7899ab60f3a683d259f701af21dd69bbd80f2e64734855fe8001ff69c03c40d"
+    },
+    {
+      "path": "test/eval-provider-setup.test.mjs",
+      "sha256": "1424b563d1d384b01a6e249dd57ca4557a3347ebaada5c991fd53c8344fd0409"
+    },
+    {
+      "path": "test/eval-setup-registry.test.mjs",
+      "sha256": "dfd83baeaa7b7b5f9032ee020fa4830eda26adfa8d3419e270db4e753c79d33a"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "sha256": "c752bb223d45bf249908e646c3570ed18f2c0d5391cd960310fcc69279bea724"
+    }
+  ]
+}

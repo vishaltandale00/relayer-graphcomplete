@@ -4,13 +4,17 @@ import { randomUUID } from "node:crypto";
 import { createHumanTaskSurface } from "./web-host.mjs";
 
 // Self-contained because Playwright serializes this production predicate.
-export function taskActorPresentationReady({ expected, presentation = globalThis.window?.__taskActorPresentation, capturedAt }) {
-  const sameTurn = target => String(presentation?.turnId) === String(target.turnId)
-    && (target.attemptId == null || String(presentation.attemptId) === String(target.attemptId));
-  const source = expected.invokeSource;
-  return String(presentation?.threadId) === String(expected.threadId)
-    && ((sameTurn(expected) && presentation.observedAt >= expected.submittedAt)
-      || (source != null && sameTurn(source) && Number.isFinite(capturedAt) && capturedAt >= source.observedAfter))
+export function taskActorPresentationReady({ expected, presentation = globalThis.window?.__taskActorPresentation }) {
+  const { threadId, turnId, submittedAt } = expected;
+  const invocation = expected.invocation;
+  const results = invocation && (presentation?.invocationResults ?? []).filter(result =>
+    String(result.actionId) === String(invocation.actionId) && String(result.turnId) === String(invocation.turnId));
+  return String(presentation?.threadId) === String(threadId) && String(presentation?.turnId) === String(turnId)
+    && presentation.observedAt >= submittedAt
+    && (expected.attemptId == null || String(presentation.attemptId) === String(expected.attemptId))
+    && (!invocation || (results.length > 0 && results.every(result => result.completionStatus === invocation.completionStatus
+      && result.attemptOutcome === invocation.attemptOutcome
+      && (invocation.attemptId == null || String(result.attemptId) === String(invocation.attemptId)))))
     && (["accepted", "failed", "stopped"].includes(presentation.completionStatus)
       || (presentation.completionStatus === "not_started" && presentation.attemptOutcome === "model_failed"));
 }
@@ -60,6 +64,14 @@ export function taskActorCurrentUnchanged(pointer, previous) {
 }
 
 // These functions are serialized by Playwright; keep their dependencies local.
+export function taskActorFillCapability(element) {
+  const inputType = element.matches("input") ? element.type : null;
+  const supportedInput = ["text", "email", "number", "password", "search", "tel", "url",
+    "color", "date", "time", "datetime-local", "month", "range", "week"].includes(inputType);
+  return { inputType, canFill: !element.disabled && !element.matches(":disabled") && !element.readOnly
+    && (supportedInput || element.matches("textarea") || element.isContentEditable === true) };
+}
+
 export function taskActorWorkingControlAllowed(element, kind) {
   if (kind === "scroll") return true;
   const live = element?.closest?.("[data-live-answer-scope]");
@@ -67,7 +79,7 @@ export function taskActorWorkingControlAllowed(element, kind) {
     const text = element.matches("textarea") || (element.matches("input")
       && ["text", "search", "url", "tel", "email", "password", "number"].includes(element.type));
     if (kind === "fill") return text && !element.readOnly;
-    if (kind === "select") return element.matches("select");
+    if (["select", "deselect"].includes(kind)) return element.matches("select");
     if (kind === "click") return text || element.matches("select")
       || element.matches('button[data-input-control-role="answer"],button[data-input-control-role="option"]');
     return false;
@@ -145,25 +157,50 @@ export async function taskActorAuthoredNavigation(target) {
 
 // Native popup pixels are absent from headless screenshots. This is an explicit
 // opened-menu accessibility observation, never a closed DOM inventory.
-export function taskActorOpenedSelect(element) {
-  if (!element.isConnected || element.tagName !== "SELECT" || !element.matches(":open")
-    || element.disabled || element.multiple || element.size > 1) return null;
+export function taskActorOpenedSelect(element, { visibleList = false } = {}) {
+  const list = visibleList && (element.multiple || element.size > 1);
+  if (!element.isConnected || element.tagName !== "SELECT" || element.disabled
+    || (!list && (!element.matches(":open") || element.multiple || element.size > 1))) return null;
+  const view = element.ownerDocument.defaultView;
+  const box = element.getBoundingClientRect();
+  const style = view.getComputedStyle(element);
+  if (list && (style.display === "none" || style.visibility === "hidden" || Number(style.opacity || 1) === 0)) return null;
   const options = [...element.options];
   if (options.length > 32 || options.some(option => option.label.length > 500)) return null;
   const labels = options.map(option => option.label);
   const offered = options.filter(option => {
     for (let node = option; node && node !== element; node = node.parentElement) {
       if (node.disabled || node.hidden || node.getAttribute("aria-hidden") === "true"
-        || node.getAttribute("aria-disabled") === "true" || getComputedStyle(node).display === "none"
-        || getComputedStyle(node).visibility === "hidden") return false;
+        || node.getAttribute("aria-disabled") === "true" || view.getComputedStyle(node).display === "none"
+        || view.getComputedStyle(node).visibility === "hidden"
+        || (list && Number(view.getComputedStyle(node).opacity || 1) === 0)) return false;
+    }
+    if (list) {
+      const r = option.getBoundingClientRect();
+      if (!r.width || !r.height || r.left < Math.max(0, box.left + element.clientLeft)
+        || r.right > Math.min(view.innerWidth, box.right - (parseFloat(style.borderRightWidth) || 0))
+        || r.top < Math.max(0, box.top + element.clientTop)
+        || r.bottom > Math.min(view.innerHeight, box.bottom - (parseFloat(style.borderBottomWidth) || 0))) return false;
+      const root = element.getRootNode();
+      // Chromium rounds native option hit tests to device pixels. A half-pixel
+      // bottom probe can hit the next row even when this row is fully painted.
+      const insetX = Math.min(1, r.width / 4), insetY = Math.min(1, r.height / 4);
+      for (const x of [r.left + insetX, (r.left + r.right) / 2, r.right - insetX]) {
+        for (const y of [r.top + insetY, (r.top + r.bottom) / 2, r.bottom - insetY]) {
+          const hit = root.elementFromPoint?.(x, y);
+          if (hit !== element && hit !== option && !option.contains(hit)) return false;
+        }
+      }
     }
     return option.label.length > 0 && labels.filter(label => label === option.label).length === 1;
   });
   const p = element.ownerDocument.defaultView.__taskActorPresentation;
   if (!p?.threadId || !p?.turnId || !p?.layerId) return null;
   return { labels: offered.map(option => option.label),
+    ...(list ? { list: true, multiple: element.multiple, selected: offered.filter(option => option.selected).map(option => option.label),
+      indices: offered.map(option => option.index), selectedIndices: options.filter(option => option.selected).map(option => option.index) } : {}),
     signature: JSON.stringify([p?.threadId, p?.turnId, p?.layerId, p?.attemptId, p?.selectedNodeId, p?.navigationPath,
-      options.map(option => [option.label, option.value, option.disabled, option.hidden, option.parentElement?.disabled]), offered.map(option => option.index)]) };
+      options.map(option => [option.label, option.value, option.disabled, option.hidden, option.parentElement?.disabled, ...(list ? [option.selected] : [])]), offered.map(option => option.index), ...(list ? [element.multiple, element.size] : [])]) };
 }
 
 export async function openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract, diagnosticDirectory }) {
@@ -222,7 +259,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
     page.on("popup", (popup) => { void popup.close(); });
     await page.goto(surface.url);
     await page.locator(".workspace-layout").waitFor({ state: "visible" });
-    const nativeMenuObservation = ["task-actor-observation-v2", "task-actor-observation-v3"].includes(observationContract?.id)
+    const listObservation = observationContract?.id === "task-actor-observation-v4";
+    const nativeMenuObservation = ["task-actor-observation-v2", "task-actor-observation-v3", "task-actor-observation-v4"].includes(observationContract?.id)
       && observationContract.optionObservation === "opened-native-select-accessibility";
     let openedSelect = null;
     let openedMenuSignature = null;
@@ -231,23 +269,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
     let controlIdentities = new Map();
     async function observe(expected, working = false) {
       signal?.throwIfAborted();
-      let capture;
-      const scope = p => JSON.stringify([p?.threadId, p?.turnId, p?.layerId, p?.attemptId, p?.selectedNodeId, p?.navigationPath]);
-      if (expected?.invokeSource) {
-        const deadline = Date.now() + 30000;
-        do {
-          signal?.throwIfAborted();
-          // A source can remain visually identical after an invoke settles.
-          // Capture its real after-paint state; never forge renderer observedAt.
-          capture = await page.evaluate(async () => {
-            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-            return { presentation: window.__taskActorPresentation, capturedAt: Date.now() };
-          });
-          if (taskActorPresentationReady({ expected, ...capture })) break;
-          if (Date.now() >= deadline) throw Object.assign(new Error("Actor presentation did not become ready."), { name: "TimeoutError" });
-          await new Promise(resolve => setTimeout(resolve, 50));
-        } while (true);
-      } else if (expected) await page.waitForFunction(taskActorPresentationReady, { expected }, { timeout: 30000 });
+      if (expected) await page.waitForFunction(taskActorPresentationReady, { expected }, { timeout: 30000 });
       for (const handle of handles.values()) await handle.dispose();
       handles = new Map();
       controlIdentities = new Map();
@@ -309,6 +331,16 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           const identity = await handle.evaluate(taskActorAuthoredNavigation) ?? await handle.evaluate(taskActorControlIdentity);
           if (identity) controlIdentities.set(ref, identity);
           controls[index].ref = ref;
+          const fill = await handle.evaluate(taskActorFillCapability);
+          if (working && fill.canFill) fill.canFill = await handle.evaluate(taskActorWorkingControlAllowed, "fill");
+          Object.assign(controls[index], fill);
+          if (listObservation) {
+            const list = await handle.evaluate(taskActorOpenedSelect, { visibleList: true });
+            if (list?.list) {
+              Object.assign(controls[index], { options: list.labels, selectedOptions: list.selected, multiple: list.multiple, optionObservation: "visible-native-list-accessibility" });
+              menuAuthorities.set(ref, list);
+            }
+          }
           if (nativeMenuObservation && openedSelect && await handle.evaluate((element, opened) => element === opened, openedSelect)) {
             const menu = await handle.evaluate(taskActorOpenedSelect);
             if (menu && menu.signature === openedMenuSignature) {
@@ -320,11 +352,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         }
         await elements.dispose();
         const screenshot = (await page.screenshot({ type: "png" })).toString("base64");
-        if (capture && scope(await page.evaluate(() => window.__taskActorPresentation)) !== scope(capture.presentation)) {
-          throw Object.assign(new Error("Actor presentation changed during capture."), { code: "actor_control_unavailable", actionDispatched: false });
-        }
         const canScroll = await (await snapshot.getProperty("canScroll")).jsonValue();
-        return { text, controls, screenshot, availableActions: ["click", "fill", "select", ...(canScroll ? ["scroll"] : []), "next_step", "finish"] };
+        return { text, controls, screenshot, availableActions: ["click", "fill", "select", ...(listObservation ? ["deselect"] : []), ...(canScroll ? ["scroll"] : []), "next_step", "finish"] };
       } finally { await snapshot.dispose(); }
     }
     return {
@@ -343,7 +372,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           return { kind: "observation", pointer, observation: { ...observation,
             text: "Current working update. You may answer visible questions using the explicit Answer control. Send starts a later interaction after settlement.",
             currentUpdate: { revision: pointer.revision, observedAt: pointer.observedAt, completionStatus: pointer.completionStatus },
-            availableActions: observation.availableActions.filter(kind => ["click", "fill", "select", "scroll"].includes(kind)) } };
+            availableActions: observation.availableActions.filter(kind => ["click", "fill", "select", ...(listObservation ? ["deselect"] : []), "scroll"].includes(kind)) } };
         });
       },
       async observe(expected) { try { return await observe(expected); } catch (error) { await diagnostics?.operationError("observe", error); throw error; } },
@@ -360,7 +389,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           }
         }
         signal?.throwIfAborted();
-        if (!["click", "select"].includes(action.kind) && openedSelect) {
+        if (!["click", "select", "deselect"].includes(action.kind) && openedSelect) {
           await openedSelect.dispose(); openedSelect = null; menuAuthorities.clear();
         }
         if (action.kind === "scroll") {
@@ -453,18 +482,30 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
             }
           }
           else if (action.kind === "fill") { stage = "dispatch_fill"; await handle.fill(action.value, { timeout: 5000 }); }
-          else if (action.kind === "select") {
+          else if (["select", "deselect"].includes(action.kind)) {
+            let selection = { label: action.value };
             if (nativeMenuObservation) {
               const authority = menuAuthorities.get(action.ref);
-              const current = authority ? await handle.evaluate(taskActorOpenedSelect) : null;
-              if (!authority || !current || !openedSelect
-                || !await handle.evaluate((element, opened) => element === opened, openedSelect)
+              const current = authority ? await handle.evaluate(taskActorOpenedSelect, { visibleList: listObservation }) : null;
+              if (!authority || !current || (!current.list && (!openedSelect
+                || !await handle.evaluate((element, opened) => element === opened, openedSelect)))
                 || current.signature !== authority.signature || !authority.labels.includes(action.value)) {
                 throw Object.assign(new Error("Actor option is not authorized by the currently observed open menu."), { code: "actor_control_unavailable", actionDispatched: false });
               }
+              if (action.kind === "deselect" && (!current.list || !current.multiple || !current.selected.includes(action.value))) {
+                throw Object.assign(new Error("Actor option is not an observed selected list item."), { code: "actor_control_unavailable", actionDispatched: false });
+              }
+              if (current.list && current.multiple) {
+                const index = current.indices[current.labels.indexOf(action.value)];
+                const selected = new Set(current.selectedIndices);
+                if (action.kind === "deselect") selected.delete(index); else selected.add(index);
+                selection = [...selected].map(index => ({ index }));
+              }
+            } else if (action.kind === "deselect") {
+              throw Object.assign(new Error("This actor has no list selection authority."), { code: "actor_control_unavailable", actionDispatched: false });
             }
             stage = "dispatch_select";
-            await handle.selectOption({ label: action.value }, { timeout: 5000 });
+            await handle.selectOption(selection, { timeout: 5000 });
             // Playwright dispatches normal input/change but does not dismiss the
             // native popup. Close only this still-open menu before another action.
             if (nativeMenuObservation && await handle.evaluate(element => element.isConnected && element.matches(":open"))) {

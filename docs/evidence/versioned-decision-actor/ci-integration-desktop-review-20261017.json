@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T16:07:19.764418+00:00",
+  "pullRequest": 755,
+  "reviewType": "Qualified desktop fixture, assertion subsumption and unchanged-consumer reuse static review",
+  "workspaceDigest": "74c67233704dfd80f2be3c21f18c4f4ed55e1911c77098a78642183d81917d3d",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "integratedMain": "6bc1e76c83ddbc165a5f2cdf2b63152c9ba2f5ed",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-desktop-source-20261017.json",
+    "sha256": "d420d9ff9804383bdc49177f104840a1048cb706e1b466c6257ccdd8c87c0b80",
+    "files": 157,
+    "allFileHashesAndAggregateIndependentlyVerified": true
+  },
+  "predecessorSource": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-source-20261017.json",
+    "sha256": "240cf74f80f039bcff9cb77651745adcf53dde7fa3c6aa31673518aa0169ad81",
+    "workspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e",
+    "all152FileHashesUnchanged": true
+  },
+  "priorStaticReview": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-review-20261017.json",
+    "sha256": "b1f2fc8e4b1cdbc1ba091b3676c349d98d3ebf89d6eab5d3ecc96ed43e8d3bb0"
+  },
+  "checkpointAddendum": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-desktop-fixtures-20261017.md",
+    "sha256": "d951f386c8d9da4fa27428674b22e67bbc8d939d44369bf5795b23fc404a2ce5"
+  },
+  "addedScope": [
+    "scripts/test-desktop-node-input-actions.mjs",
+    "scripts/test-interaction-context-lifecycle.mjs",
+    "scripts/test-desktop-project-new-thread.mjs",
+    "scripts/test-desktop-artifact-viewer.mjs",
+    "docs/evidence/versioned-decision-actor/ci-integration-desktop-fixtures-20261017.md"
+  ],
+  "reviewedChanges": [
+    "Each standalone custom-family fixture explicitly designates its sole member orchestrator; Rust family admission is not weakened or bypassed.",
+    "Node/context thread requests contain only familyId, matching current product family-selection contract; no obsolete per-model override remains.",
+    "Node response-loss assertion requires exact selected-family JSON and later-generation replay requires exact equality to original request; input generation, context text, confirmation provenance and response-loss/replay assertions remain.",
+    "Context picker requires exact selected family value plus the fixture model/orchestrator card, activates current member card and preserves popover close and trigger focus.",
+    "Singleton fixture membership makes current member-card activation unambiguous; this changes request-level family selection checks, not admitted-plan model audit authority.",
+    "No production/native source, in-process test, worker policy, browser/current proof, capture or telemetry module changed after d480; all original152 hashes independently match."
+  ],
+  "consumerAudit": {
+    "verdict": "Eligible for scoped reuse of pre-fixture check/browser/compiled/telemetry/capture outcomes only for verified identical consumed inputs. No exact-qualified fresh invocation is claimed.",
+    "checkedConsumers": [
+      {
+        "scope": "Default discovery/build",
+        "evidence": "Vitest matches test/spec files, not these four root-script drivers; root TypeScript configuration includes src/**/*.ts and test/**/*.ts, build only src/**/*.ts. Cargo and package source inputs unchanged."
+      },
+      {
+        "scope": "CI source ownership",
+        "evidence": "affected-modules.v1.json explicitly assigns three drivers no chapter. The generic exempt-path guard checks file existence and absence of corpus references; filenames/existence unchanged. No content consumer of fourth artifact driver found."
+      },
+      {
+        "scope": "Browser/compiled runners",
+        "evidence": "test-eval-web and its explicit helpers import no changed driver. eval-compiled.vitest.config includes recursive-complete-e2e only. Their source inputs remain identical."
+      },
+      {
+        "scope": "Telemetry and packaging inventories",
+        "evidence": "run-telemetry-evidence uses an explicit portfolio and production modules. Dynamic inventory walks desktop renderer/main, harness dist and Rustsrc. Packaging appDir is desktop; none walks root scripts for shipped module contents."
+      },
+      {
+        "scope": "Dynamic historical source checks",
+        "evidence": "browser-harness-evidence resolves committed historical snapshot in normal default mode; its source guard does not consume these current standalone driver bytes. Provider architecture glob is limited to desktop. No universal script-content scan was found."
+      },
+      {
+        "scope": "Direct consumers",
+        "evidence": "Consumers found are declared package entrypoints and dedicated Electron wrappers; project-sidebar-demo-video additionally hashes/records project driver and is outside reused gates. All five declared desktop entries must execute after repair."
+      }
+    ],
+    "reuseConditions": [
+      "Keep original tested d480 identity for root/browser/compiled/telemetry/captures; do not relabel them as new157-file invocations.",
+      "Actual four changed-driver runs plus unchanged visual-node-details entry and post-fixture nested builds must pass; pending results remain pending.",
+      "Final heavy receipt must verify actual completed outcomes, source identities, log/artifact hashes and retained failures."
+    ]
+  },
+  "testSubsumptionVerdict": "Approved for obsolete per-model request/radio expectations: current product meaning is selected-family resolution with explicit orchestrator. Exact family JSON preserves and strengthens the request replay identity check; close/focus and other source/input/context authority assertions remain. No test is removed and no budget/deadline is relaxed.",
+  "availableCompletedDesktopEvidence": [
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-node-inputs-fixed.log",
+      "sha256": "4b4c63c69744b6c25ee8792fc5434ddb0ebdd1b7df4c7f11b821c9e10752ce12",
+      "observed": "Positive inference-free full node-input marker after initial family-admission fixture failure; source consumed by this runner unchanged through current context-only selector correction."
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-interaction-context-fixed.log",
+      "sha256": "f98d21d068a47a4ba9950429eba4b334d9ce7e50558c9ce6766c51d92c863541",
+      "observed": "Positive inference-free lifecycle marker with selected-family/orchestrator-card proof."
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-project-thread.log",
+      "sha256": "3b5ec44d0e2081dee5b68702bd240c10b28b461be412370975acb8f52f946fa9",
+      "observed": "Positive JSON passed/projectCollapse/restartPersistence/layerSelectionRestartPersistence."
+    }
+  ],
+  "preservedFailures": [
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-node-inputs.log",
+      "sha256": "c5a499b75ea712133ae77e38e5d6e25ce41b99867d742231c938b5e57bb55d21"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-interaction-context.log",
+      "sha256": "e36c8f9b1165601c3f0f537a2ccdeb85d3e3aee0f3db1225baf4fbd302c147c0"
+    }
+  ],
+  "verdict": "No static correctness, authority, test-subsumption or consumer-mapping blocker. Scoped reuse is justified by unchanged consumed inputs rather than an assumption from missing literal references. Remaining required desktop/heavy evidence must be reviewed separately.",
+  "findings": [],
+  "unresolvedProofLimits": [
+    "Artifact-viewer and visual-node-details current run outcomes remain pending this review.",
+    "This receipt certifies no unfinished heavy command and does not convert earlier failed desktop runs into passes.",
+    "New merged fresh-head hosted CI/freshness remains required; no release, paid inference, judge calibration, quality or performance claim.",
+    "Any bound source/addendum change invalidates this static assertion."
+  ],
+  "reviewerActions": {
+    "sourceEdits": false,
+    "testEdits": false,
+    "docManifestEdits": false,
+    "testExecution": false,
+    "paidInference": false,
+    "historicalReceiptEdits": false,
+    "separateReviewReceiptOnly": true
+  },
+  "certification": "Bounded static and reuse-eligibility assertion for PR755 exact qualified digest74c67233704dfd80f2be3c21f18c4f4ed55e1911c77098a78642183d81917d3d. Final heavy outcome review remains separate."
+}

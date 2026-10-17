@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T16:14:28.401484+00:00",
+  "pullRequest": 755,
+  "reviewType": "Final bounded freshness-source, driver alignment and retained heavy-evidence review",
+  "workspaceDigest": "3bf35ddb0b354a9a7b992d4bdcc6ebe3fc05936a044e975d0a07ea1f5b6cdfb5",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "priorPrHead": "862125fcfc9238d6bfe1ce429cc27c746937fb9a",
+  "integratedMain": "6bc1e76c83ddbc165a5f2cdf2b63152c9ba2f5ed",
+  "observedNewMain": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-freshness-source-20261017.json",
+    "sha256": "51465165d957ba3e64d86302d3eccc260cb39f3015c5c9aeca9298319991a638",
+    "files": 158,
+    "allFileHashesAndAggregateIndependentlyVerified": true
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-freshness-verification-20261017.json",
+    "sha256": "70d776fa68fc76cba70a66605be0f15927a4bb6a00fd0b9412403fca5bd77ffe",
+    "logs": 18,
+    "artifacts": 9,
+    "allHashesByteSizesAndRecordedExitBindingsIndependentlyVerified": true
+  },
+  "resultsProse": {
+    "path": "docs/evidence/versioned-decision-actor/ci-freshness-results-20261017.md",
+    "sha256": "69ec0fdb818db7be3fb20961a3dc797cb82330228d319b155f4d917443bec729"
+  },
+  "checkpointAddendum": {
+    "path": "docs/evidence/versioned-decision-actor/ci-freshness-20261017.md",
+    "sha256": "6cfc41659b51a94cf8442626c98b3e560ed1dd2bebff9b366d3e26eaec1103cb"
+  },
+  "priorReviews": [
+    {
+      "path": "docs/evidence/versioned-decision-actor/ci-integration-review-20261017.json",
+      "sha256": "b1f2fc8e4b1cdbc1ba091b3676c349d98d3ebf89d6eab5d3ecc96ed43e8d3bb0"
+    },
+    {
+      "path": "docs/evidence/versioned-decision-actor/ci-integration-desktop-review-20261017.json",
+      "sha256": "64f8347fcceae8096ff0c828cabf9b047f8ea4d2dc61ce337bcc7717e347e31c"
+    },
+    {
+      "path": "docs/evidence/versioned-decision-actor/ci-integration-heavy-review-20261017.json",
+      "sha256": "bc87ea7d955d04881414c8dd38b6768f0d46860e67b0257220ba771abe95f6a1"
+    }
+  ],
+  "changedSince157": {
+    "modified": [
+      "scripts/test-desktop-node-input-actions.mjs",
+      "scripts/test-interaction-context-lifecycle.mjs"
+    ],
+    "added": [
+      "docs/evidence/versioned-decision-actor/ci-freshness-20261017.md"
+    ],
+    "original152FileHashesUnchanged": true,
+    "productionNativeRendererBrowserCaptureTelemetryInputsUnchanged": true
+  },
+  "reviewedScope": [
+    "MCI-008 exact request-level selected family, accepted provider/model route and later-generation resolved-selection equality in real node-input fixture",
+    "Node request shape explicitly permits familyId only; no obsolete individual-model override reintroduced; original context/input/confirmation/replay checks retained",
+    "Context selected-family value and first singleton orchestrator member align the asserted card with the clicked card; popover-close and trigger-focus assertions unchanged",
+    "Two new actual declared desktop reruns and nested builds, exact closed outer exits and positive post-cleanup markers",
+    "Prior157 consumer audit and completed heavy proof reused only for unchanged consumed inputs; actual tested snapshot identities retained",
+    "CI docs conflict-free behind-main policy, actual synthetic-merge/freshness authority and explicit exclusion of unadopted a2 history/runtime changes from local source proof",
+    "Separate expanded outer-exit attestation preserves prior sixteen-entry immutable attestation and old receipt identity"
+  ],
+  "newCompletedOutcomes": [
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-node-inputs-freshness.log",
+      "sha256": "946fe0e5d88f71a8747cdbe45d3bffa56ece654e84deb2d7c570020b130f64f1",
+      "exitCode": 0,
+      "positiveInferenceFreeMarker": true,
+      "actualAcceptedProviderModelAndReplayAssertionsRetained": true,
+      "postFixtureBuildPassed": true
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-interaction-context-freshness.log",
+      "sha256": "94717df6bc429ec2881fd479472c2f83b9d3829cc541f6fc51524d29cc66fb3a",
+      "exitCode": 0,
+      "positiveInferenceFreeMarker": true,
+      "selectedFamilyOrchestratorCloseFocusAssertionsRetained": true,
+      "postFixtureBuildPassed": true
+    }
+  ],
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-ci-20261017/outer-freshness-exits.json",
+    "sha256": "e3b65139a863a7362539bdc46615bace299c6c6a844d2c12261d72e217a932e2",
+    "basis": "Closed parent-observed unified-exec/write_stdin outcomes, independently checked against every recorded log entry; no exit inferred from filenames or inner markers alone."
+  },
+  "historicalEvidencePreservation": {
+    "originalOuterAttestation": {
+      "path": ".relayer/verification/pr755-ci-20261017/outer-exits.json",
+      "sha256": "961fd13d1c9150520cdc8f6987f391fc65bf834108b7f246919c92b4f9ff5695"
+    },
+    "originalOuterSha256RestoredAndMatchesImmutablePriorReceipt": true,
+    "resolvedFinding": "Expanded18-entry attestation initially changed the path bound by the immutable prior receipt. New expanded attestation now has a separate path, and original16-entry bytes/hash are restored. Only new freshness verification was regenerated.",
+    "priorHeavyReceiptUnchanged": true,
+    "twoEarlierFailedFixtureLogsRetained": true,
+    "priorOctober16UnknownCausesRemainUnknown": true
+  },
+  "retainedHeavyEvidenceVerdict": {
+    "approvedScopedReuse": true,
+    "sourceIdentity": "Root check/build/compiled/browser/telemetry/capture proof retains original152d480 tested identity; unchanged other desktop drivers retain their recorded identities. They are not new158 invocations.",
+    "priorPositiveResults": "336Vitest files4428tests, secret2, Python99, native/crash/lints; compiled12; fullbrowser9-action native3candidate admissions/judge recovery, bothcurrent+scroll/artifact/judge/restart; telemetry5native+184portfolio; actual5desktop entries and source-bound six canonical captures.",
+    "basis": "Only two previously audited standalone drivers changed since157. Existing discovery/import/inventory audit excludes them from reused runners; unchanged production/browser/capture/native inputs independently match. Those two drivers have new actual successful reruns.",
+    "imageBoundary": "Canonical artifacts remain hash-identical to prior review, which independently inspected all six canonical images and representative visual-detail captures. No new manual images on a2 source are claimed."
+  },
+  "testSubsumptionVerdict": "No assertion weakened, test deleted or deadline changed. Request-level family-only shape and exact replay remain; added accepted provider/model and later resolved-selection equality strengthen execution-route auditing. Context checks the same member that it activates.",
+  "freshnessAuthority": {
+    "policy": "docs/agents/ci.md permits conflict-free behind-main PRs with current-head CI evidence inside the original twelve-hour window; actual checkout merge parents and observed main are authoritative.",
+    "localPreflight": "Parent reports per-file three-way text overlap against a2 found no conflicts. This is predictive local evidence; full post-commit merge-tree and hosted synthetic-merge evidence are still required before any merge-authority claim.",
+    "noUnrelatedMainAdoption": "This checkout integrates6bc1e76c and does not execute or locally certify the unadopted a2e0ee39 history/runtime changes.",
+    "hostedBoundary": "Fresh hosted CI must validate its actual synthetic merge and freshness must bind the new PR head. That selected CI portfolio does not become fresh manual desktop/capture proof on unrelated new-main source. Merge remains manual."
+  },
+  "verdict": "No blocking source, authority, assertion-subsumption, reuse-mapping or completed-local-evidence mismatch in the reviewed158-file freshness scope. Local evidence supports committing/pushing this bounded correction for fresh hosted validation; it does not authorize merge or certify unadopted main behavior.",
+  "findings": [],
+  "unresolvedBoundaries": [
+    "Post-commit full merge-tree result and current-head hosted synthetic-merge CI/freshness remain pending this receipt.",
+    "Prior October16 failure causes remain unresolved; existing skips and native/IPC/CSP/GPU warnings remain explicit.",
+    "No paid application inference, live Decisions judge calibration/equivalence, general quality/latency/cost advantage, arbitrary cross-provider specialist routing, live telemetry receiver/symbolication, signed release or deployment proof.",
+    "Any bound-source/checkpoint-addendum change invalidates this assertion."
+  ],
+  "reviewerActions": {
+    "productionEdits": false,
+    "testEdits": false,
+    "boundEvidenceOrHistoricalReceiptEdits": false,
+    "newHeavyOrPaidExecution": false,
+    "separateReviewJsonOnly": true
+  },
+  "certification": "Bounded PR755 source/local-evidence assertion for exact digest3bf35ddb0b354a9a7b992d4bdcc6ebe3fc05936a044e975d0a07ea1f5b6cdfb5. Hosted merge authorization remains separate."
+}

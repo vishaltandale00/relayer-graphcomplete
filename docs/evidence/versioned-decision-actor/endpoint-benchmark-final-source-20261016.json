@@ -1,0 +1,123 @@
+{
+  "baseCommit": "77b1b296022b17c29b06aa0da24522ead3344617",
+  "predecessorWorkspaceDigest": "ff6c3a436b7ae43b2f61c98d5d121bbbed3f10835c81cb56b69ab1e76a121395",
+  "digestMethod": "sorted repository-relative path + NUL + file bytes",
+  "workspaceDigest": "0d1162a406f983e9d5b5e9b0a7eaa9f1971b2b35f846ab9bb0d0b9fcb151c62e",
+  "files": [
+    {
+      "path": "desktop/eval-main/decision-task-actor.mjs",
+      "sha256": "ee07cd27af5ff43e97b56b2e6e3dfeca7cbdd29634d1d7756883ac955937eeb3"
+    },
+    {
+      "path": "desktop/eval-main/evaluator-selection.mjs",
+      "sha256": "ddb8a7f9a9c87a9e8be17fb34ca5e43a4b446d3e70efbf81990f534df87bb8aa"
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "6c22c7fc91b04eb381642dceb21ad1e70ec929b0065c65ca454f5c60605f1a4c"
+    },
+    {
+      "path": "desktop/eval-main/index.mjs",
+      "sha256": "42d46da1a0589b6404339011b071fe7375621235701aa0f2241345035ebb9425"
+    },
+    {
+      "path": "desktop/eval-main/provider-setup.mjs",
+      "sha256": "e310693311a3ffb26b09a5d31e27b6a6133c6c4dbb40c591bafc7f721cda67e2"
+    },
+    {
+      "path": "desktop/eval-main/setup-registry.mjs",
+      "sha256": "600450db9bba1b2848382ba2fd261294f872019146972681299ab7a2a5186424"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-browser.mjs",
+      "sha256": "4ee4c63231a5ba4af2d2f9f73a12afede0e6038697e7729823fc350ffd02e7d3"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-service.mjs",
+      "sha256": "12052ce13ad152d5354827d2cd7f783696fc5c2f94b4d83bca8f72f46c604433"
+    },
+    {
+      "path": "desktop/eval-main/task-actor.mjs",
+      "sha256": "ae42c9de2f247f468a7557c9ba3953cec70d29c75dabbd3a21528f43723019f6"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "sha256": "4eaa97708439efa448121eb73efdd83bbd83f8330406f05353d2ea41dfb2145a"
+    },
+    {
+      "path": "desktop/eval-renderer/human-tasks.js",
+      "sha256": "509c02b0399e5382e474027e9ff8de6d6e1488835ae46bcafc25eccd93a44104"
+    },
+    {
+      "path": "desktop/eval-renderer/index.html",
+      "sha256": "50f33d94df8d045cb3eeabdd5dc1ec85335abeeb6ddf8f59eea82cf5e1b704dd"
+    },
+    {
+      "path": "desktop/eval-renderer/setup-editor.js",
+      "sha256": "a7d5d32d68dffb02fa3e361a2faaf6df7f062576c3203eaf6675ef5ec155193b"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+      "sha256": "4ea386e09e20ca0c06ed4000586c130b6fcc0dc126d752717289a4be4c6386c7"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/view.js",
+      "sha256": "02405d54c7f03c2dc199f2dc56786e3eac6214c4d0ae6839d598e9bf795b5ed2"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "6d8b2e1f28f8f466bfdf72e2c1a2f1346abcf4feda4242d9ad6f82308f4c396b"
+    },
+    {
+      "path": "package.json",
+      "sha256": "327cc770b1c75ae3e25f37856c9945589c9ff768992abe1240703d73c2a755cd"
+    },
+    {
+      "path": "scripts/eval-actor-inputs-proof.mjs",
+      "sha256": "10accafe1945629b7fea29fbe757f3a41368e23bfbe64b9608251906d3cbc959"
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "sha256": "2ca1c4609aad929e79f7819922e3d75ccf6ffbb0b66e40a2bd46dce4dd88c853"
+    },
+    {
+      "path": "test/eval-actor-inputs.test.mjs",
+      "sha256": "f0f180eee5510ed6ee5bffac128c2ee052de39a57315ccbf8c3216640e285825"
+    },
+    {
+      "path": "test/eval-decision-task-actor.test.mjs",
+      "sha256": "c7899ab60f3a683d259f701af21dd69bbd80f2e64734855fe8001ff69c03c40d"
+    },
+    {
+      "path": "test/eval-endpoint-benchmark.test.mjs",
+      "sha256": "2dd41d00ee12a8b49545341a63bf415598cb83081f35e72237b26a108add6b69"
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "sha256": "1e9abe38b1a4afa44345c0283c2e94d0191aa82d510714518eff03954f9121ee"
+    },
+    {
+      "path": "test/eval-provider-setup.test.mjs",
+      "sha256": "74455e36449a2e9d502660eacb3c120efb10fb81ee425945e125ea408f282680"
+    },
+    {
+      "path": "test/eval-setup-registry.test.mjs",
+      "sha256": "dfd83baeaa7b7b5f9032ee020fa4830eda26adfa8d3419e270db4e753c79d33a"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "sha256": "7a09aeec70a1fb86a49aaef0a39a945828085e664bedc397398dd6f9dbf51adc"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "sha256": "edd5cd59d35aeb6df41e0fa8a5dd7c46f330a22d95b22b108b95b2eb544f19a3"
+    }
+  ],
+  "liveProductionEquivalence": {
+    "liveReceipt": "endpoint-benchmark-source-20261016.json",
+    "changedFiles": [
+      "scripts/test-eval-web.mjs"
+    ],
+    "assertion": "Only deterministic browser test selection changed after live pair; all production, product meaning and other test bytes remain identical."
+  }
+}

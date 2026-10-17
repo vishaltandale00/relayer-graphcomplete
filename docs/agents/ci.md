@@ -280,8 +280,11 @@ compile and run freshly against whichever library they link; the bundle is
 acceleration, never evidence.
 
 Vitest worker policy lives in `vitest.config.js`, not in the chapter
-runner: the isolated project runs with file-level workers and the
-process-bound files run one at a time after it.
+runner: the isolated project uses at most three file-level workers and the
+process-bound files run one at a time after it. Larger hosts keep the same
+cap because native query budgets do not scale with portfolio parallelism.
+This trades additional parallelism on larger hosts for the shared runner's
+bounded resource profile; it does not extend query or test deadlines.
 Native Mach-O closure sealing and calibration Git/npm verifier journeys belong
 to that process-bound group: their existing test bounds pass when isolated but
 can expire under portfolio-wide subprocess contention. Their assertions and
