@@ -1,4 +1,4 @@
-import type { CompletionOutput, GraphCapability, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
+import type { CompletionOutput, GraphCapability, CompletionHistoryPage, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
 import type { HarnessApprovalChannel } from "./approval-coordinator.js";
 import type { NativeExecutionHandle } from "./completion-execution.js";
 
@@ -263,6 +263,9 @@ export type CompletionOrigin =
     };
 
 export interface HarnessRunContext {
+  /** Stateless bootstrap format; it never controls native session reuse or scheduling. */
+  readonly contextMode?: "graph-v1";
+  readonly graphHistory?: CompletionHistoryPage;
   readonly threadIconSelection?: { readonly eligible: true };
   /**
    * The thread's latest accepted interactions in order, as graph pointers. Every root run starts a

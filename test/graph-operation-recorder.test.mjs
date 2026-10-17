@@ -17,7 +17,7 @@ afterEach(async () => {
   for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true });
 });
 
-async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperations = false } = {}) {
+async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperations = false, failFirstSearch, failLayerRead } = {}) {
   let resolveSlowSearchStarted;
   const slowSearchStarted = new Promise((resolve) => { resolveSlowSearchStarted = resolve; });
   let resolveNodeStarted;
@@ -25,6 +25,7 @@ async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperat
   let releaseNodeResponse;
   const nodeResponseReleased = new Promise((resolve) => { releaseNodeResponse = resolve; });
   let abortedSearches = 0;
+  let searchCount = 0;
   const server = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -77,7 +78,20 @@ async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperat
       response.end(JSON.stringify({ interaction: { id: 17 } }));
       return;
     }
+    if (request.url === "/api/graph/layers/9" && failLayerRead) {
+      response.writeHead(failLayerRead === "empty" ? 204 : 200, { "content-type": "text/plain" });
+      response.end(failLayerRead === "empty" ? undefined : "malformed original content");
+      return;
+    }
     if (request.url === "/api/graph/search" && request.method === "POST") {
+      if (++searchCount === 1 && failFirstSearch) {
+        if (failFirstSearch === "reset") { request.socket.destroy(); return; }
+        response.writeHead(200, { "content-type": "application/json", ...(failFirstSearch === "truncated" ? { "content-length": "10000" } : {}) });
+        if (failFirstSearch === "truncated") { response.write('{"private":"response-secret"'); setImmediate(() => response.destroy()); return; }
+        response.end(failFirstSearch === "oversize" ? "x".repeat(4 * 1024 * 1024 + 1) : "invalid response-secret JSON");
+        return;
+      }
+
       if (body.target?.database !== undefined || body.budget?.database !== undefined
         || (body.target?.scope !== undefined && !["thread", "project"].includes(body.target.scope))) {
         response.writeHead(400, { "content-type": "application/json" });
@@ -450,7 +464,7 @@ describe("desktop graph-operation recorder", () => {
     }
   });
 
-  it("propagates downstream abort and does not record a cancelled search response", async () => {
+  it("propagates downstream abort and retains the failed search attempt", async () => {
     const upstream = await startUpstream();
     const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });
     resources.push(recorder);
@@ -470,7 +484,67 @@ describe("desktop graph-operation recorder", () => {
     expect(upstream.abortedSearches()).toBe(1);
     const target = await createCandidateTraceDirectory();
     const descriptor = await recorder.exportInteraction(17, target);
-    expect(descriptor.eventCount).toBe(0);
+    expect(descriptor).toMatchObject({ status: "complete", eventCount: 1 });
+    const events = (await readFile(join(target, "graph-operations.jsonl"), "utf8")).trim().split("\n").map(JSON.parse);
+    expect(events[0]).toMatchObject({ method: "POST", path: "/api/graph/search", status: 502, errorCodes: ["graph_operation_proxy_failed"] });
+  });
+
+  it.each(["reset", "truncated", "oversize", "malformed"])("retains %s proxy failure before a successful retry", async failFirstSearch => {
+    const upstream = await startUpstream({ failFirstSearch });
+    const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });
+    resources.push(recorder);
+    const token = "failure-token-secret";
+    await bindCapability(recorder.url, token);
+    const request = { method: "POST", token, body: { queryContractVersion: 1, query: "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $topic RETURN l AS layer", parameters: { topic: { type: "string", value: "Freshness acknowledged" } }, budget: {} } };
+    expect((await jsonRequest(`${recorder.url}/api/graph/search`, request)).status).toBe(502);
+    expect((await jsonRequest(`${recorder.url}/api/graph/search`, request)).status).toBe(200);
+    const target = await createCandidateTraceDirectory();
+    expect(await recorder.exportInteraction(17, target)).toMatchObject({ status: "complete", eventCount: 2 });
+    const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+    const events = text.trim().split("\n").map(JSON.parse);
+    expect(events[0]).toMatchObject({ path: "/api/graph/search", status: 502, errorCodes: ["graph_operation_proxy_failed"] });
+    expect(events[1]).toMatchObject({ path: "/api/graph/search", status: 200, searchLayerIds: [9] });
+    expect(text).not.toContain(token);
+    expect(text).not.toContain("response-secret");
+
+    // Feed the actual exported producer receipts to the production grader. The
+    // accepted outputs/reference/Returns are fixed graph-memory control fixtures.
+    const { gradeGraphMemoryExecution } = await import("../packages/eval-runner/src/cases/graph-memory.ts");
+    const makeOutput = (nodeId, layerId, title) => ({ nodeId,
+      rootAction: { id: 100 + nodeId, sourceNodeId: nodeId, sourceLayerId: null, kind: "navigate", relation: "expand", label: "Response", variant: "pill", targetLayerId: layerId, state: "accepted" },
+      rootLayer: { layer: { id: layerId, nodes: [1000 + nodeId], edges: [], state: "accepted", layout: { version: 1, placements: [{ nodeId: 1000 + nodeId, x: 0.5, y: 0.5 }] } },
+        nodes: [{ id: 1000 + nodeId, kind: "concept", icon: "info", title, detail: "Original explanation", state: "accepted" }], edges: [], actions: [] },
+    });
+    const first = makeOutput(16, 9, "Freshness acknowledged");
+    const second = makeOutput(17, 10, "Original explanation");
+    second.rootLayer.actions.push({ id: 300, sourceNodeId: 1017, sourceLayerId: 10, kind: "navigate", relation: "reference", label: "Read original", variant: "pill", targetLayerId: 9, state: "accepted" });
+    const gradingInput = {
+      execution: { harnessConfiguration: { implementation: "codex.basic" }, turns: [
+        { graphOperations: [{ method: "POST", path: "/api/graph/submit", status: 200, sequence: 0, completionNodeId: 16, completionRootLayerId: 9 }] },
+        { graphOperations: [...events,
+          { method: "GET", path: "/api/graph/layers/9", status: 200, sequence: 3 },
+          { method: "POST", path: "/api/graph/actions", status: 200, sequence: 4, recordId: 300, actionKind: "navigate", actionRelation: "reference", actionSourceNodeId: 1017, actionSourceLayerId: 10, actionTargetLayerId: 9 },
+          { method: "POST", path: "/api/graph/submit", status: 200, sequence: 5, completionNodeId: 17, completionRootLayerId: 10 },
+        ] },
+      ] }, interactions: [{ graphNodeId: 16, completionOutput: first }, { graphNodeId: 17, completionOutput: second }],
+    };
+    const result = await gradeGraphMemoryExecution(gradingInput);
+    expect(result.turns.flatMap(turn => turn.checks).filter(check => !check.passed)).toEqual([]);
+    expect(result.turns[1].capabilityCoverage[0]).toMatchObject({ status: "failed", attempts: 2 });
+    expect(result.turns[1].capabilityCoverage[0].checks.find(check => check.name === "search-attempts-succeeded").passed).toBe(false);
+    gradingInput.execution.turns[1].graphOperations.shift();
+    const withoutFailedAttempt = await gradeGraphMemoryExecution(gradingInput);
+    expect(withoutFailedAttempt.turns[1].capabilityCoverage[0].status).toBe("passed");
+  });
+
+  it.each(["empty", "malformed"])("does not certify an %s original-content read", async failLayerRead => {
+    const upstream = await startUpstream({ failLayerRead });
+    const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+    await bindCapability(recorder.url, "read-token");
+    expect((await jsonRequest(`${recorder.url}/api/graph/layers/9`, { token: "read-token" })).status).toBe(502);
+    const target = await createCandidateTraceDirectory();
+    expect(await recorder.exportInteraction(17, target)).toMatchObject({ status: "complete", eventCount: 1 });
+    expect(JSON.parse(await readFile(join(target, "graph-operations.jsonl"), "utf8"))).toMatchObject({ method: "GET", path: "/api/graph/layers/9", status: 502 });
   });
 
   it("waits for attributed in-flight work before sealing", async () => {
@@ -670,6 +744,19 @@ it("preserves bounded asset request/response parity without widening ordinary gr
   })).resolves.toMatchObject({ status: 502 });
 });
 
+
+it("retains an attributed incoming body overflow as a failed attempt", async () => {
+  const upstream = await startUpstream();
+  const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+  const token = "incoming-overflow-secret"; await bindCapability(recorder.url, token);
+  expect((await jsonRequest(`${recorder.url}/api/graph/search`, { method: "POST", token, body: { query: "x".repeat(4 * 1024 * 1024 + 1) } })).status).toBe(502);
+  const target = await createCandidateTraceDirectory();
+  expect(await recorder.exportInteraction(17, target)).toMatchObject({ status: "complete", eventCount: 1 });
+  const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+  expect(JSON.parse(text)).toMatchObject({ path: "/api/graph/search", status: 502, errorCodes: ["graph_operation_proxy_failed"] });
+  expect(text.length).toBeLessThan(1000);
+  expect(text).not.toContain(token);
+});
 
 it("captures caught compiler failures and server origins once without preserving authored text", async () => {
   const { RelayerGraphClient, NodeObject, html, css } = await import("../packages/graph-client/src/index.ts");

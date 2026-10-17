@@ -41,6 +41,7 @@ import {
   materializeCalibrationFixture,
   gradeCalibrationWorkspace,
   graphMemoryEvalCaseId,
+  GRAPH_MEMORY_GRADING_VERSION,
   gradeGraphMemoryExecution as gradeGraphMemoryExecutionInRunner,
   gradeRecursiveGraphMemoryExecution as gradeRecursiveGraphMemoryExecutionInRunner,
   graphMemoryEvalPrompts,
@@ -87,7 +88,7 @@ export const evalCases = Object.freeze([
   Object.freeze({
     id: graphMemoryEvalCaseId,
     name: "Graph memory · prior accepted reference",
-    description: "Searches a prior accepted layer in a second turn and retains the typed reference in one real product thread.",
+    description: "Retrieves and references the original accepted explanation; reports graph-search coverage separately.",
     defaultSelected: false,
     promptsForRun: graphMemoryEvalPrompts,
     gradeExecution: gradeGraphMemoryExecution,
@@ -2278,16 +2279,22 @@ export class EvalService {
           });
         } catch (error) {
           execution.promotable = false;
+          const graphMemoryFailure = definition.id === graphMemoryEvalCaseId;
           caseGrade = {
-            turns: execution.turns.map(() => ({
+            ...(graphMemoryFailure ? { version: GRAPH_MEMORY_GRADING_VERSION } : {}),
+            turns: execution.turns.map((_, turnIndex) => ({
               checks: [{
                 name: "case-evidence",
                 passed: false,
                 detail: error instanceof Error ? error.message : String(error),
               }],
+              ...(graphMemoryFailure && turnIndex === 1 ? {
+                capabilityCoverage: [{ capability: "graph-search", status: "unknown", attempts: null, checks: [] }],
+              } : {}),
             })),
           };
         }
+        if (caseGrade?.version !== undefined) execution.caseGradingVersion = caseGrade.version;
       }
       const checks = [];
       const externalCheckEvidenceRefs = new Map();
@@ -2298,6 +2305,10 @@ export class EvalService {
         const checkPrefix = threadDefinition
           ? `${threadDefinition.id}:turn-${interaction.sequence}`
           : `turn-${interaction.sequence}`;
+        const caseEvidence = caseGrade?.turns?.[turnIndex]?.evidence;
+        if (caseEvidence !== undefined) turn.caseEvidence = copy(caseEvidence);
+        const capabilityCoverage = caseGrade?.turns?.[turnIndex]?.capabilityCoverage;
+        if (capabilityCoverage !== undefined) turn.capabilityCoverage = copy(capabilityCoverage);
         if (interaction.completionStatus !== "accepted" || !interaction.completionOutput) {
           turnChecks.push({
             name: `${checkPrefix}:accepted`,
@@ -2310,8 +2321,6 @@ export class EvalService {
             ...check,
             name: `${checkPrefix}:${check.name}`,
           })));
-          const caseEvidence = caseGrade?.turns?.[turnIndex]?.evidence;
-          if (caseEvidence !== undefined) turn.caseEvidence = copy(caseEvidence);
           if (definition.requiredChecks?.includes("node-navigation")) {
             turnChecks.push(...checkNodeNavigation(interaction.completionOutput).map((check) => ({
               ...check,

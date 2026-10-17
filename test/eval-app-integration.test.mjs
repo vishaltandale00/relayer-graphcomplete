@@ -1041,9 +1041,10 @@ describe("Relayer Eval application service", () => {
 
     expect(definition).toMatchObject({
       name: "Graph memory · prior accepted reference",
-      description: expect.stringContaining("prior accepted layer"),
+      description: expect.stringContaining("original accepted explanation"),
       defaultSelected: false,
     });
+    expect(definition.description).toContain("graph-search coverage separately");
     expect(firstRun).toEqual(graphMemoryEvalPrompts("run-alpha"));
     expect(firstRun).toHaveLength(2);
     expect(firstRun.join("\n")).not.toContain("GRAPH_MEMORY_ANCHOR:");
@@ -1058,11 +1059,22 @@ describe("Relayer Eval application service", () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-eval-graph-memory-app-test-"));
     directories.push(dataDirectory);
     const configurationPath = join(repositoryRoot, "harnesses", "fixture-graph-memory.yaml");
+    let failFollowup = false;
     const runtime = new GraphCompleteRuntimeService({
       userDataDirectory: dataDirectory,
       graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
       configurationPaths: [configurationPath],
-      additionalImplementations: { "fixture.graph-memory": graphMemoryFixtureFactory },
+      additionalImplementations: { "fixture.graph-memory": (...args) => {
+        const fixture = graphMemoryFixtureFactory(...args);
+        const complete = fixture.complete.bind(fixture);
+        let turns = 0;
+        fixture.complete = async (context) => {
+          turns += 1;
+          if (failFollowup && turns === 2) throw new Error("Deterministic follow-up failure before output.");
+          return complete(context);
+        };
+        return fixture;
+      } },
       candidateTrace: {
         directory: join(dataDirectory, "eval-data", "candidate-trace-spool"),
         policy: {
@@ -1119,11 +1131,19 @@ describe("Relayer Eval application service", () => {
     expect(execution.turns).toHaveLength(2);
     expect(execution.turns.every((turn) => !turn.prompt.includes("GRAPH_MEMORY_ANCHOR:"))).toBe(true);
     expect(execution.turns[1].deterministicChecks).toEqual(expect.arrayContaining([
-      expect.objectContaining({ name: expect.stringContaining("search-returned-prior-root"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("draft-decoy-hidden"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("prior-context-retrieved"), passed: true }),
       expect.objectContaining({ name: expect.stringContaining("typed-reference-target"), passed: true }),
-      expect.objectContaining({ name: expect.stringContaining("ack-search-submit-order"), passed: true }),
+      expect.objectContaining({ name: expect.stringContaining("ack-retrieval-return-order"), passed: true }),
     ]));
+    expect(execution.caseGradingVersion).toBe("graph-memory-retrieval-v2");
+    expect(execution.turns[1].capabilityCoverage).toMatchObject([{
+      capability: "graph-search", status: "passed", attempts: 1,
+      checks: expect.arrayContaining([
+        expect.objectContaining({ name: "search-returned-prior-root", passed: true }),
+        expect.objectContaining({ name: "draft-decoy-hidden", passed: true }),
+        expect.objectContaining({ name: "ack-search-submit-order", passed: true }),
+      ]),
+    }]);
     expect(execution.turns[1].caseEvidence).toMatchObject({
       searchedLayerIds: [execution.turns[0].rootLayerId],
       referenceActionId: expect.any(Number),
@@ -1135,6 +1155,7 @@ describe("Relayer Eval application service", () => {
     ]);
     const persisted = JSON.parse(await readFile(join(dataDirectory, "eval-data", "test-runs.json"), "utf8"));
     expect(JSON.stringify(persisted)).toContain('"authoringErrors"');
+    expect(persisted.runs[0].executions[0].turns[1].capabilityCoverage).toEqual(execution.turns[1].capabilityCoverage);
 
     const secondTrace = await evalService.candidateTraceContext(
       execution.id,
@@ -1441,8 +1462,10 @@ describe("Relayer Eval application service", () => {
       judgeConfigurationName: "deterministic-graph-contract",
     });
     const launderedCompleted = await waitForCompletedRun(launderedEvalService, launderedRun.id, 20_000);
-    expect(launderedCompleted.status).toBe("failed");
-    expect(launderedCompleted.executions[0].turns[1].deterministicChecks).toEqual(expect.arrayContaining([
+    expect(launderedCompleted.status).toBe("passed");
+    expect(launderedCompleted.executions[0].outcomeGrade.qualified).toBe(true);
+    expect(launderedCompleted.executions[0].turns[1].capabilityCoverage[0].status).toBe("failed");
+    expect(launderedCompleted.executions[0].turns[1].capabilityCoverage[0].checks).toEqual(expect.arrayContaining([
       expect.objectContaining({
         name: expect.stringContaining("search-request-contract"),
         passed: false,
@@ -1484,6 +1507,20 @@ describe("Relayer Eval application service", () => {
     const corruptedExecution = corruptedCompleted.executions[0];
     expect(corruptedCompleted.status).toBe("failed");
     expect(corruptedExecution.promotable).toBe(false);
+    expect(corruptedExecution.caseGradingVersion).toBe("graph-memory-retrieval-v2");
+    expect(corruptedExecution.turns[1].capabilityCoverage).toEqual([{
+      capability: "graph-search", status: "unknown", attempts: null, checks: [],
+    }]);
+    await corruptedEvalService.persistTail;
+    const corruptedPersisted = JSON.parse(await readFile(corruptedEvalService.stateFile, "utf8"));
+    const corruptedBundle = JSON.parse(await readFile(join(dataDirectory, "eval-data", corruptedCompleted.bundleRef), "utf8"));
+    const reopenedCorruptedService = await new EvalService({
+      stateFile: corruptedEvalService.stateFile, productSession, configurationPaths: [configurationPath],
+    }).open();
+    for (const saved of [corruptedPersisted.runs[0], corruptedBundle.run, reopenedCorruptedService.getRun(corruptedCompleted.id)]) {
+      expect(saved.executions[0].caseGradingVersion).toBe(corruptedExecution.caseGradingVersion);
+      expect(saved.executions[0].turns[1].capabilityCoverage).toEqual(corruptedExecution.turns[1].capabilityCoverage);
+    }
     expect(corruptedExecution.turns[1].authoringErrors).toMatchObject({ observed: null, coverage: "unavailable", reasons: ["ledger_invalid_or_unreadable"] });
     expect(corruptedExecution.turns.flatMap((turn) => turn.deterministicChecks)).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -1514,6 +1551,22 @@ describe("Relayer Eval application service", () => {
     expect(digestCorruptedTrace.graphOperationsEvidence).toMatchObject({
       status: "invalid",
       error: "Candidate trace graph-operation ledger failed digest validation.",
+    });
+
+    failFollowup = true;
+    const failedRun = await evalService.createRun({
+      testCaseIds: [graphMemoryEvalCaseId],
+      harnessConfigurationNames: ["fixture-graph-memory"],
+      judgeConfigurationName: "deterministic-graph-contract",
+    });
+    const failedCompleted = await waitForCompletedRun(evalService, failedRun.id, 20_000);
+    const failedExecution = failedCompleted.executions[0];
+    expect(failedCompleted.status).toBe("failed");
+    expect(failedExecution.promotable).toBe(false);
+    expect(failedExecution.caseGradingVersion).toBe("graph-memory-retrieval-v2");
+    expect(failedExecution.turns[1]).toMatchObject({
+      status: "failed",
+      capabilityCoverage: [{ capability: "graph-search", status: "unknown", attempts: null, checks: [] }],
     });
   }, 30_000);
 

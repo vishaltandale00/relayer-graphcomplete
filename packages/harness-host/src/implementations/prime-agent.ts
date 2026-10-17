@@ -1,3 +1,4 @@
+import { GRAPH_SEARCH_TITLE_GUIDANCE } from "./graph-search-guidance.js";
 import { modelFamilyGuidance } from "./model-family-guidance.js";
 import { threadIconGuidance } from "./thread-icon-guidance.js";
 import { PrimeVisualAuthoring, submitPrimeLayer } from "./prime-visual-authoring.js";
@@ -763,7 +764,7 @@ ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${modelFa
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
-${renderInteractionInput(context.interactionInput)}
+${renderInteractionInput(context.interactionInput, context.contextMode)}
 
 ${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 ${context.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}
@@ -813,7 +814,7 @@ ${CURRENT_WORKSPACE_GUIDANCE}\n${CURRENT_COMMUNICATION_GUIDANCE_PYTHON}${modelFa
 
 Current interaction node: ${interaction.id}
 Normalized interaction input:
-${renderInteractionInput(context.interactionInput)}
+${renderInteractionInput(context.interactionInput, context.contextMode)}
 
 ${INTERACTION_INPUT_GUIDANCE} In Python, call await graph.get_interaction_input() to re-read it.
 ${context.interactionInput.completionContract?.input.invocationReferences.length ? SUBCOMPLETION_INTEGRATION_GUIDANCE : ""}
@@ -953,12 +954,16 @@ function graphSearchGuidancePython(enabled: boolean): string {
 
 The read-only query profile supports whole-target Content or Layer scans and bounded one- or two-relationship MATCH patterns over CONNECTED, CONTAINS, EXPANDS, and REFERENCES. It rejects mutations, procedures, arbitrary-length paths, and more than two hops. Put values in tagged parameters. Results are tagged dictionaries; the default row cap is 5, the hard cap is 8, and the complete encoded result is bounded to 16 KiB.
 
+${GRAPH_SEARCH_TITLE_GUIDANCE}
+
+The following example uses inspected_node, an accepted GraphNode already read with graph.get_node and inspected for relevance. For a raw Node mapping from graph.get_layer, obtain that typed value with await graph.get_node(node["id"]).
+
 Example:
 import re
 from relayer_graph import GraphSearchRequest
 search = await graph.search(GraphSearchRequest(
     query="MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $title RETURN l AS layer ORDER BY layer ASC",
-    parameters={"title": {"type": "string", "value": "Queue"}},
+    parameters={"title": {"type": "string", "value": inspected_node.title}},
 ))
 if search.get("truncated") is True:
     raise ValueError("Graph search results are truncated; narrow the query before selecting a layer.")

@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import {
+  css,
+  html,
   GraphQueryError,
   LayerLayoutObject,
   LayerObject,
@@ -11,7 +13,8 @@ import {
   NodePlacementObject,
   RelayerGraphClient,
 } from "../packages/graph-client/dist/index.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { buildLayeredNavigationPrompt } from "../packages/harness-host/src/implementations/codex-basic.js";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const pythonClientRoot = join(repositoryRoot, "python", "relayer-graph", "src");
@@ -46,6 +49,34 @@ afterEach(async () => {
 });
 
 describe("real graph-search public client parity", () => {
+  it("executes the emitted title lookup for an accepted HTML section with a different Node title", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-search-section-"));
+    directories.push(directory);
+    const controlToken = "deterministic-search-section-control-token";
+    const server = await startGraphServer(join(directory, "graph.sqlite3"), controlToken);
+    processes.push(server.process);
+    const first = await createInteraction(server.url, controlToken, 71, "Publish a section", 41);
+    const author = clientFor(server.url, first);
+    const node = new NodeObject("info", "When saved content is available", "Publication makes accepted content retrievable.", "concept", "section-node");
+    node.detailAuthoring.setComponent("main", html`<article><h2>Freshness acknowledged</h2><p>Accepted publication is searchable.</p></article>`, css`article { padding: 1rem; }`);
+    await author.submitNode(node);
+    const layer = new LayerObject([node], [], new LayerLayoutObject([new NodePlacementObject(node, 0.5, 0.5)], "default"), "section-layer");
+    await author.submitLayer(layer);
+    await author.addAction(first.node.id, { clientKey: "section-response", kind: "navigate", relation: "expand", label: "Response", target: layer });
+    await author.submit();
+    const second = await createInteraction(server.url, controlToken, 71, "Find the earlier section", 41);
+    const reader = clientFor(server.url, second);
+    const inspectedNode = (await reader.getLayer(layer.ref.id)).nodes[0];
+    const wrongTitle = await reader.search({ queryContractVersion: 1, query: "MATCH (l:Layer)-[:CONTAINS]->(n:Content) WHERE n.title = $topic RETURN l AS layer", parameters: { topic: { type: "string", value: "Freshness acknowledged" } } });
+    expect(wrongTitle.rows).toEqual([]);
+    const prompt = buildLayeredNavigationPrompt(second.node, "@relayer/graph-client", undefined, true, true);
+    const example = prompt.split("For example:\n")[1].split("\n\nGraph search contract failures")[0];
+    const lookup = vi.spyOn(reader, "search");
+    const result = await new Function("graph", "inspectedNode", `return (async () => { ${example} return search; })();`)(reader, inspectedNode);
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ columns: ["layer"], rows: [[{ type: "layer", id: `layer:${layer.ref.id}` }]], truncated: false });
+  });
+
   it("publishes once and returns the same current-thread result and contract error to TypeScript and Python", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-search-client-parity-"));
     directories.push(directory);

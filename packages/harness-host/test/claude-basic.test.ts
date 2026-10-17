@@ -399,6 +399,8 @@ describe("ClaudeBasicHarness", () => {
 
     expect(prompt).toContain("Graph search is available");
     expect(prompt).toContain("await graph.search(request, options)");
+    expect(prompt).toContain("value: inspectedNode.title");
+    expect(prompt).toContain("not a section heading inside authored HTML");
     expect(prompt).toContain('target: { scope: "project", id: knownProjectId }');
     expect(prompt).toContain("Never invent, guess, or discover a target ID");
   });
@@ -563,7 +565,8 @@ describe("ClaudeBasicHarness", () => {
 
     const first = harness.complete({ ...runContext(access), threadHistory: [] });
     await first;
-    const second = harness.complete({ ...runContext(access), threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }] });
+    const second = harness.complete({ ...runContext(access), threadHistory: [{ interactionNodeId: 1, responseLayerId: 9 }],
+      contextMode: "graph-v1", graphHistory: { entries: [], nextBeforeNodeId: null } });
     await second;
 
     expect(calls.map(({ options }) => "resume" in options)).toEqual([false, false]);
@@ -575,6 +578,7 @@ describe("ClaudeBasicHarness", () => {
     expect(calls[1]?.prompt).toContain(JSON.stringify([{ interactionNodeId: 1, responseLayerId: 9 }], null, 2));
     expect(calls[1]?.prompt).toContain("await graph.getNode(interactionNodeId)");
     expect(calls[1]?.prompt).toContain("await graph.getLayer(responseLayerId)");
+    expect(calls[1]?.prompt).toContain("getHistoricalInput");
     expect(harness.state()).toEqual({});
   });
 

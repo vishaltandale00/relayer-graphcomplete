@@ -42,6 +42,12 @@ export function graphTimingFromTrace({ sentAt, events = [], graphOperations = []
   for (const operation of graphOperations) {
     if (operation.method !== "POST" || !GRAPH_WRITE.test(operation.path)) continue;
     const time = at(operation.observedAt);
+    if (operation.errorCodes?.includes("graph_operation_proxy_failed")) {
+      // Transport loss cannot establish whether the server accepted the write.
+      rejections = null;
+      if (["/api/graph/submit", "/api/graph/current/transitions"].includes(operation.path)) publicationUnknown = true;
+      continue;
+    }
     if (operation.status >= 400) { if (rejections !== null) rejections += 1; continue; }
     if (!Number.isInteger(operation.status) || operation.status < 200 || operation.status >= 300) continue;
     if (operation.path === "/api/graph/current/transitions" && !["advance", "return", "stop"].includes(operation.transitionKind)) {

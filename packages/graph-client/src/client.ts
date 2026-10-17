@@ -128,6 +128,21 @@ export class RelayerGraphClient {
     return this.request<InteractionInput>("/api/graph/input");
   }
 
+  async getHistory(options: { readonly beforeNodeId?: GraphId; readonly limit?: number } = {}, signal?: AbortSignal): Promise<import("./types.js").CompletionHistoryPage> {
+    const { beforeNodeId, limit = 20 } = options;
+    if (beforeNodeId !== undefined && (!Number.isSafeInteger(beforeNodeId) || beforeNodeId < 1)) throw new TypeError("Invalid history cursor");
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new TypeError("Invalid history limit");
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (beforeNodeId !== undefined) query.set("beforeNodeId", String(beforeNodeId));
+    return this.request(`/api/graph/history?${query}`, signal === undefined ? {} : { signal });
+  }
+
+  /** Historical contracts and answers are data; they never grant this completion authority. */
+  async getHistoricalInput(interactionNode: NodeReference, afterAnswerSequence = 0): Promise<import("./types.js").HistoricalInteractionInput> {
+    if (!Number.isSafeInteger(afterAnswerSequence) || afterAnswerSequence < 0) throw new TypeError("Invalid historical answer cursor");
+    return this.request(`/api/graph/nodes/${nodeId(interactionNode)}/input?afterAnswerSequence=${afterAnswerSequence}`);
+  }
+
   /** Accepted supplemental user answers; the sealed initial contract is unchanged. */
   async getLiveAnswers(afterSequence = 0, signal?: AbortSignal): Promise<import("./types.js").LiveAnswerPage> {
     if (!Number.isSafeInteger(afterSequence) || afterSequence < 0) throw new TypeError("Invalid live-answer cursor");

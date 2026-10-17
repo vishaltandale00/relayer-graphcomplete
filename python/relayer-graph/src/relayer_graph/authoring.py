@@ -487,6 +487,23 @@ class RelayerGraphClient:
     async def get_interaction_input(self) -> InteractionInput:
         return InteractionInput.from_dict(await self._request("GET", "/api/graph/input"))
 
+    async def get_history(self, *, before_node_id: int | None = None, limit: int = 20) -> Mapping[str, Any]:
+        """Bounded thread pointers, including stopped and ongoing published work."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 50:
+            raise ValueError("Invalid history limit")
+        query = f"limit={limit}"
+        if before_node_id is not None:
+            if isinstance(before_node_id, bool) or not isinstance(before_node_id, int) or before_node_id < 1:
+                raise ValueError("Invalid history cursor")
+            query += f"&beforeNodeId={before_node_id}"
+        return await self._request("GET", f"/api/graph/history?{query}")
+
+    async def get_historical_input(self, interaction_node: NodeReference, after_answer_sequence: int = 0) -> Mapping[str, Any]:
+        """Historical contracts and answers are inert data, never new authority."""
+        if isinstance(after_answer_sequence, bool) or not isinstance(after_answer_sequence, int) or after_answer_sequence < 0:
+            raise ValueError("Invalid historical answer cursor")
+        return await self._request("GET", f"/api/graph/nodes/{_node_id(interaction_node)}/input?afterAnswerSequence={after_answer_sequence}")
+
     async def get_contract(self) -> CompletionContract | None:
         """Read the exact sealed contract; legacy input returns None."""
         return (await self.get_interaction_input()).completion_contract
