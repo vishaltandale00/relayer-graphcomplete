@@ -351,3 +351,27 @@ it("preflights the independently pinned Decisions completion judge and keeps its
   await service.resolveCompletionJudgeRuntime(COMPLETION_JUDGE_SPEC);
   expect(text).toHaveBeenLastCalledWith(COMPLETION_JUDGE_SPEC, {});
 });
+
+
+it.each(["actor", "judge"])("classifies a missing pinned Decisions model before %s inference", async route => {
+  const { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_EVIDENCE_V2, COMPLETION_DECISION_CONTRACT } = await import("../desktop/eval-main/task-completion-judge.mjs");
+  const f = await setup({ openai: true }); await f.connect();
+  const text = vi.fn(); const service = { ...f.service, resolveCodexJudgeRuntime: text };
+  const config = route === "actor" ? { model: "gpt-test", modelReasoningEffort: "low", decision: { contractId: "openai-decisions-codex-text-v1", providerId: "chosen", model: "gpt-6-luna" } }
+    : { ...structuredClone(COMPLETION_JUDGE_SPEC), evidenceContract: structuredClone(COMPLETION_JUDGE_EVIDENCE_V2), decision: { contractId: COMPLETION_DECISION_CONTRACT.id, providerId: "chosen", model: "gpt-6-luna" } };
+  f.fetchImpl.mockImplementationOnce(async () => Response.json({ error: "PRIVATE_PROVIDER_DETAILS" }, { status: 404 }));
+  await expect(route === "actor" ? service.resolveTaskActorRuntime(config) : service.resolveCompletionJudgeRuntime(config)).rejects.toMatchObject({ code: "actor_model_unsupported" });
+  expect(text).not.toHaveBeenCalled();
+  expect(f.fetchImpl.mock.calls.filter(([url]) => String(url).endsWith("/decisions"))).toHaveLength(0);
+});
+
+it("keeps Decisions inference 404s separate from model-discovery errors", async () => {
+  const f = await setup({ openai: true }); await f.connect();
+  const service = { ...f.service, resolveCodexJudgeRuntime: vi.fn(async () => ({})) };
+  const runtime = await service.resolveTaskActorRuntime({ model: "gpt-test", modelReasoningEffort: "low", decision: { contractId: "openai-decisions-codex-text-v1", providerId: "chosen", model: "gpt-6-luna" } });
+  f.fetchImpl.mockImplementationOnce(async () => Response.json({ error: "PRIVATE_PROVIDER_DETAILS" }, { status: 404 }));
+  const error = await runtime.decide({ model: "gpt-6-luna", questions: [] }).catch(error => error);
+  expect(error).toMatchObject({ status: 404 });
+  expect(error.code).not.toBe("actor_model_unsupported");
+  expect(error.message).not.toContain("PRIVATE_PROVIDER_DETAILS");
+});

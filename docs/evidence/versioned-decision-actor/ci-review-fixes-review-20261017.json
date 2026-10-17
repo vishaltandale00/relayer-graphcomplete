@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T16:49:11.495812+00:00",
+  "pullRequest": 755,
+  "reviewType": "Bounded adversarial source, checkpoint, test-subsumption and completed local heavy-evidence review",
+  "workspaceDigest": "e5e515ba4c85002330da98138f8b66322455d2d65cad5980aee094e410c106ec",
+  "priorPrHead": "893a3603a64d7615b43b4b9ae902b308e7865c70",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-review-fixes-source-20261017.json",
+    "sha256": "4e086ec52b8994bb582390ac6a0299c6d9e73e2fb49bd8ede47e7977d72942b2",
+    "files": 159,
+    "allFileHashesAndAggregateIndependentlyVerified": true
+  },
+  "mapping": {
+    "path": "docs/evidence/versioned-decision-actor/ci-review-fixes-20261017.md",
+    "sha256": "d4684fa1c0f813a4322044109aee1f14b15618f505ff95555ae969c9d833c916",
+    "checkpoints": [
+      "MCI-009 / CJ-005",
+      "MCI-009 partial execution",
+      "MCI-010 / CJ preflight"
+    ]
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-review-fixes-verification-20261017.json",
+    "sha256": "0cfab265c22c7c543a7bba331d4f7b6f5ae3bec1f9af66abec72e2caef7e5d7e",
+    "allNineLogHashesSizesAndAttestedExitsIndependentlyVerified": true
+  },
+  "results": {
+    "path": "docs/evidence/versioned-decision-actor/ci-review-fixes-results-20261017.md",
+    "sha256": "94a4ad094550b2f05baffba92eddba3f5c8a5fe408dc7c6d4e2995b03b1899ab",
+    "materialMismatchFound": false
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-review-20261017/outer-exits.json",
+    "sha256": "f3cf8c2995402a03ed21219d04976aa5d5a1f6eb3f96d03c279016ba30916415",
+    "basis": "Actual completed unified-exec/write_stdin outcomes; Python subprocess runner writes each heavy command return code only after process exit. Inner markers independently verified."
+  },
+  "reviewedScope": [
+    "All four executable/test deltas: HumanTaskService all-phase completion-stage export validation; shared Decisions model-discovery error classification; actual persisted adapter/service corruption and interrupted-prefix journeys; actor/judge provider preflight fixtures.",
+    "Pinned-session judge equality, prior evidence, exact phase-specific fields, request reconstruction/digests, terminal identity, per-evidence ordering and duplicate/orphan/reordered rejection; native historical sessions and legal interrupted prefixes.",
+    "GET model-discovery 404 is unsupported-model before text/inference; inference POST404 remains sanitized generic request failure; cancellation and existing completion authority are preserved.",
+    "MCI009/010 product mapping, no assertion/deadline deletion or relaxation, exact-source identities, all final inner outcomes, preserved development failures and historical consumed-input reuse."
+  ],
+  "sourceDelta": {
+    "changedPriorPaths": [
+      "desktop/eval-main/human-task-service.mjs",
+      "desktop/eval-main/provider-setup.mjs",
+      "test/eval-provider-setup.test.mjs",
+      "test/eval-task-actor.test.mjs"
+    ],
+    "addedPath": "docs/evidence/versioned-decision-actor/ci-review-fixes-20261017.md",
+    "unchangedPriorPaths": 154
+  },
+  "observedFinalOutcomes": {
+    "focused": "4 files / 201 tests passed, 3.87s; attested outer exit 0",
+    "build": "Completed native/package/TypeScript build; attested outer exit 0; ordinary local Cargo fingerprints, no new external artifact",
+    "fullBrowser": "Entire runner completed with explicit positive native three-completion, Decisions actor/judge publication and stage reconstruction, input/endpoint/release/calibration, scroll, adverse dispatch, both current-pointer variants, judge and restart/persistence chapters; attested outer exit 0",
+    "compiled": "12 scenarios passed, 18.65s; attested outer exit 0",
+    "defaultCheck": "336 files / 4434 tests passed, 1 file / 3 tests skipped; native fmt/Clippy/workspace/doc/crash, package builds/types/workspaces, separate secret 2, Python 99, receipt lint and PRD readability completed; attested outer exit 0"
+  },
+  "preservedDevelopmentEvidence": [
+    "red.log: 4 failures / 113 passes; actual missing-model actor/judge classification and export integrity regressions reproduced.",
+    "red-pinned.log: 2 failures / 89 skipped; jointly forged evidence/stage judge revision reproduced before session-pin repair.",
+    "green.log 197 and green-final.log 201 passed on earlier development snapshots; neither is relabeled as final-source proof."
+  ],
+  "historicalReuse": {
+    "priorReview": "docs/evidence/versioned-decision-actor/ci-freshness-review-20261017.json",
+    "claim": "Earlier desktop/capture/telemetry results retain their original source identities; no fresh159 invocation is claimed.",
+    "consumerAudit": "Changed Eval host modules are outside desktop main/renderer/native and the explicit telemetry portfolio/inventory. Standalone desktop and annotation/social capture entrypoints do not import them; visual-details EvalService/ReviewSession import chains also exclude them. Relevant scripts, capture inputs and all other154 prior paths remain identical."
+  },
+  "verdict": "No blocking source, authority, mapping, subsumption or local evidence mismatch found for the exact159-file snapshot. Required local portfolio is supported by completed outer attestations and inspected inner outcomes.",
+  "unresolvedBoundaries": [
+    "Fresh published-head hosted CI/freshness and resolution of the two automated review threads remain pending; this receipt does not mark the PR mergeable or perform a merge.",
+    "Packet hashes and sequence validation establish retained-evidence consistency, not authenticity against coordinated rewriting of the entire local event log.",
+    "No paid application inference, live judge calibration, quality/performance/cost advantage, signed release or deployment proof is claimed.",
+    "Historical failed runs, unknown causes, warnings and skips remain preserved under their original receipts; this review neither erases nor reclassifies them."
+  ]
+}

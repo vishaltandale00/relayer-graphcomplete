@@ -6,7 +6,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { actorConfiguration } from "./task-actor.mjs";
-import { completionJudgeStageRequest } from "./task-completion-judge.mjs";
+import { COMPLETION_DECISION_CONTRACT, completionJudgeStageRequest } from "./task-completion-judge.mjs";
 
 const clone = (value) => structuredClone(value);
 const digest = (value) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
@@ -118,6 +118,55 @@ export class HumanTaskService {
     const event = this.find(id).events.find(item => item.id === eventId && item.kind === "actor_completion_stage");
     if (!event) throw failure("Missing completion judge stage.", 404);
     return completionJudgeStageRequest(event.stage, await this.completionJudgeInput(id, event.evidenceEventId));
+  }
+  async validateCompletionJudgeStages(id) {
+    const session = this.find(id);
+    const pinnedJudge = completionJudgeSpec(session);
+    const evidence = new Map();
+    const groups = new Map();
+    const invalid = () => { throw failure("Completion judge stage integrity failure."); };
+    const verdicts = COMPLETION_DECISION_CONTRACT.choices.map(choice => choice.value);
+    for (const event of session.events) {
+      if (event.kind === "actor_completion_evidence") evidence.set(event.id, event);
+      if (event.kind !== "actor_completion_stage") continue;
+      const stage = event.stage;
+      const input = evidence.get(event.evidenceEventId);
+      if (!stage || !input || !isDeepStrictEqual(input.judge, pinnedJudge) || !isDeepStrictEqual(event.judge, input.judge)
+        || !["decisions", "codex"].includes(stage.engine) || !["requested", "completed", "failed"].includes(stage.phase)
+        || stage.contractId !== COMPLETION_DECISION_CONTRACT.id || stage.contractId !== input.judge?.decision?.contractId
+        || stage.model !== (stage.engine === "decisions" ? input.judge.decision.model : input.judge.model)
+        || (stage.engine === "decisions" && stage.providerId !== input.judge.decision.providerId)) invalid();
+      const common = ["contractId", "inputDigest", "engine", "model", "requestDigest", ...(stage.engine === "decisions" ? ["providerId"] : ["selectedVerdict"])];
+      const payload = stage.phase === "requested" ? stage.engine === "decisions" ? ["inputEncoding", "questions"] : ["inputEncoding", "prompt", "outputSchema"]
+        : stage.engine === "decisions" ? ["requestUsage", stage.phase === "completed" ? "selectedVerdict" : "failure"]
+          : ["nativeSessionUsage", ...(stage.phase === "failed" ? ["failure"] : [])];
+      if (Object.keys(stage).sort().join(",") !== [...common, "phase", ...payload].sort().join(",")) invalid();
+      let group = groups.get(event.evidenceEventId);
+      if (stage.phase === "requested") {
+        if (stage.engine === "decisions") {
+          if (group) invalid();
+          group = {}; groups.set(event.evidenceEventId, group);
+        } else if (!group || group.pending || group.done || stage.selectedVerdict !== group.selectedVerdict) invalid();
+        await this.completionJudgeStageInput(id, event.id);
+        group.pending = stage;
+      } else {
+        if (!group?.pending || common.some(key => !isDeepStrictEqual(stage[key], group.pending[key]))) invalid();
+        if (stage.engine === "decisions") {
+          if (stage.requestUsage !== null && (typeof stage.requestUsage !== "object" || Array.isArray(stage.requestUsage)
+            || !Object.keys(stage.requestUsage).length || Object.entries(stage.requestUsage).some(([key, value]) =>
+              !["input_tokens", "output_tokens", "total_tokens"].includes(key) || !Number.isSafeInteger(value) || value < 0))) invalid();
+          if (stage.phase === "completed") {
+            if (!verdicts.includes(stage.selectedVerdict)) invalid();
+            group.selectedVerdict = stage.selectedVerdict;
+          } else if (!["request_failed", "refusal", "invalid_result"].includes(stage.failure)) invalid();
+        } else if ((stage.nativeSessionUsage !== null && (typeof stage.nativeSessionUsage !== "object" || Array.isArray(stage.nativeSessionUsage)))
+          || (stage.phase === "failed" && stage.failure !== "report_failed")) invalid();
+        group.pending = null;
+        group.done = stage.engine === "codex" || stage.phase === "failed";
+      }
+    }
+    // An interrupted run may retain a requested packet or selector result without
+    // its next stage. Such prefixes are evidence of partial work, never success.
   }
   interruptActor(id, reason) {
     return this.serial(async () => {
@@ -679,8 +728,8 @@ export class HumanTaskService {
       const graphAnnotations = this.annotationSnapshotLoader && session.threadIds.length ? await this.annotationSnapshotLoader(session.threadIds) : null;
       for (const event of session.events) {
         if (event.kind === "actor_completion_evidence" && event.input) await this.completionJudgeInput(id, event.id);
-        if (event.kind === "actor_completion_stage" && event.stage?.phase === "requested") await this.completionJudgeStageInput(id, event.id);
       }
+      await this.validateCompletionJudgeStages(id);
       const actorScreenshots = [];
       for (const event of session.events) {
         if (event.kind === "actor_observation" && event.observation?.screenshotArtifact) actorScreenshots.push({ eventId: event.id, ...event.observation.screenshotArtifact, dataUrl: await this.actorScreenshot(id, event.id) });

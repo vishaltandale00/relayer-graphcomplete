@@ -1055,6 +1055,45 @@ it.each([false, true])("persists both actual Decisions judge stages across servi
   }
   expect(JSON.stringify(session.events)).not.toMatch(/PRIVATE_PROVIDER_ERROR|SECRET RUBRIC/);
   expect((await reopened.export(f.id)).bundle.session.events.filter(e => e.kind === "actor_completion_stage")).toEqual(stages);
-  reopened.find(f.id).events.find(e => e.id === stages[0].id).stage.questions[0].instructions += "forged";
+  const retained = structuredClone(reopened.find(f.id).events);
+  for (const event of reopened.find(f.id).events) {
+    if (["actor_completion_evidence", "actor_completion_stage"].includes(event.kind)) event.judge.version = "forged-revision";
+  }
   await expect(reopened.export(f.id)).rejects.toThrow("integrity");
+  reopened.find(f.id).events = structuredClone(retained);
+  for (const corrupt of [
+    events => { events[0].stage.questions[0].instructions += "forged"; },
+    events => { events[0].stage.phase = "completed"; events[0].stage.questions[0].instructions += "forged"; events[0].stage.requestDigest = "forged"; },
+    events => { events[2].stage.phase = "failed"; events[2].stage.prompt += "forged"; },
+    events => { events[1].stage.requestDigest = "forged"; },
+    events => { events[1].stage = structuredClone(events[0].stage); },
+    events => { events[0].stage = structuredClone(events[2].stage); },
+    events => { events[1].stage.phase = "unknown"; },
+    events => { const first = events[0].stage; events[0].stage = events[1].stage; events[1].stage = first; },
+  ]) {
+    reopened.find(f.id).events = structuredClone(retained);
+    corrupt(reopened.find(f.id).events.filter(e => e.kind === "actor_completion_stage"));
+    await expect(reopened.export(f.id)).rejects.toThrow("integrity");
+  }
+});
+
+it.each([1, 2, 3])("exports a real interrupted Decisions assessment after durable stage %s", async stopAfter => {
+  const { createCompletionJudge, COMPLETION_JUDGE_EVIDENCE_V2, COMPLETION_DECISION_CONTRACT } = await import("../desktop/eval-main/task-completion-judge.mjs");
+  const spec = { ...structuredClone(COMPLETION_JUDGE_SPEC), version: "completion-judge-v3-decisions", evidenceContract: structuredClone(COMPLETION_JUDGE_EVIDENCE_V2), decision: { contractId: COMPLETION_DECISION_CONTRACT.id, providerId: "fixture-openai", model: "gpt-6-luna" } };
+  let recorded = 0;
+  const f = await fixture({ completionJudge: spec,
+    completionJudgeRuntime: { textRuntime: {}, decide: async () => ({ answer: { type: "choice", name: "completion_verdict", choice: "complete" } }) },
+    completionJudgeFactory: async options => {
+      const judge = await createCompletionJudge({ ...options, createActor: async () => ({ close: async () => {}, decide: async () => { throw new Error("Reporter must not run after interruption"); } }) });
+      return { close: () => judge.close(), evaluate: (input, signal, { recordStage }) => judge.evaluate(input, signal, { recordStage: async stage => {
+        await recordStage(stage); if (++recorded === stopAfter) throw new Error("Interrupted after durable stage");
+      } }) };
+    }, decide: () => action("finish", { reason: "endpoint_reached", endpointStatus: "reached", remainingWork: "", satisfaction: 3 }) });
+  await f.done;
+  const reopened = await new HumanTaskService(f.options).open();
+  const exported = (await reopened.export(f.id)).bundle.session;
+  expect(exported.status).toBe("interrupted");
+  expect(exported.termination.reason).toBe("actor_failed");
+  expect(exported.events.filter(event => event.kind === "actor_completion_stage")).toHaveLength(stopAfter);
+  expect(exported.events.filter(event => event.kind === "actor_completion_judgment")).toEqual([]);
 });

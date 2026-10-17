@@ -222,7 +222,13 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
       try { return await response.json(); } catch { throw new Error("Actor Decisions response was invalid."); }
     };
     // Discovery verifies the exact account/model without spending inference.
-    const model = await request(`models/${decision.model}`, { method: "GET" }, signal);
+    let model;
+    try { model = await request(`models/${decision.model}`, { method: "GET" }, signal); }
+    catch (error) {
+      signal?.throwIfAborted();
+      if (error.status === 404) throw Object.assign(new Error("Pinned Decisions model is unavailable."), { code: "actor_model_unsupported" });
+      throw error;
+    }
     if (model?.id !== decision.model) throw Object.assign(new Error("Pinned Decisions model is unavailable."), { code: "actor_model_unsupported" });
     const textRuntime = await resolveTextRuntime(config, options);
     return { textRuntime, decide: async (body, requestSignal) => {
