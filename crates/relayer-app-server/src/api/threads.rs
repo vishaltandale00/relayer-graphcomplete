@@ -3408,6 +3408,12 @@ pub(super) async fn resume_interaction(
     require_runtime(&state)?;
     let runs = match state.product.restart_chain(interaction_id).await? {
         Some(chain) if chain.first() == Some(&interaction_id) => chain,
+        // A concurrent duplicate Resume claimed it since it was read: report it as it stands.
+        Some(_) if state.product.was_resumed(interaction_id).await? => {
+            return Ok(Json(ResumedRunsResponse {
+                interactions: vec![state.product.get_interaction(interaction_id).await?.into()],
+            }));
+        }
         Some(_) => {
             return Err(ApiError::conflict(
                 "resume_not_queue_head",
@@ -3674,11 +3680,11 @@ async fn resume_runs(
             Ok(interaction)
                 if interaction.completion_status == "submitted" && !interaction.stop_requested =>
             {
+                // Its preparation already releases its node admission once it is restored, so
+                // the node is released exactly once; a second release here would drop the
+                // admission of the next Resume of the same run.
                 drop(arrivals);
                 restore(claimed[index..].to_vec()).await;
-                if let Some(key) = key {
-                    release_node_run(state.clone(), key, *run, true);
-                }
                 return partial_resume(
                     started,
                     ApiError::conflict(
