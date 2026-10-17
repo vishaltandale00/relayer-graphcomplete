@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { proveActorScroll } from "./eval-actor-scroll-proof.mjs";
 import { join, resolve } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 import { RelayerGraphClient, EdgeObject, LayerObject, LayerLayoutObject, NodeObject, NodePlacementObject, html, detailCapability } from "@relayer/graph-client";
@@ -34,6 +35,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
   let answerRequests = 0;
   let deniedAdmissionChecked = false;
   let approvalObserved = false;
+  let scrollObserved = false;
   try {
     const binaries = resolve(process.env.CARGO_TARGET_DIR || "target", "debug");
     const runtime = new GraphCompleteRuntimeService({ userDataDirectory: data, graphServerBinary: join(binaries, "relayer-graph-server"), configurationPaths: [configuration], temporalFeatures: RECURSIVE_TEMPORAL_FEATURES,
@@ -103,7 +105,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     const familyResponse = await fetch(new URL("/api/model-families", productSession.origin), {
       method: "POST",
       headers: { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Fixture models", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }),
+      body: JSON.stringify({ name: "Fixture models", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] }),
     });
     assert.equal(familyResponse.status, 201, await familyResponse.text());
     const service = await new EvalService({ stateFile: join(data, "eval-data/test-runs.json"), productSession, configurationPaths: [configuration] }).open();
@@ -163,7 +165,17 @@ export async function proveCurrentActor({ browser, directory, authored = false }
       createActor: async () => ({ close: async () => {},
         observe: async (observation, signal) => {
           try {
-          assert.deepEqual(observation.availableActions, ["click", "fill", "select", "scroll"]);
+          if (!scrollObserved) {
+            scrollObserved = true;
+            const sessionId = tasks.list()[0].id;
+            const submission = tasks.get(sessionId).events.find(event => event.kind === "submission");
+            const expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at) };
+            const scrollView = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal });
+            try {
+              await proveActorScroll({ controller: scrollView, page: browser.contexts().at(-1).pages()[0], expected });
+            } finally { await scrollView.close(); }
+          }
+          assert.deepEqual(observation.availableActions, ["click", "fill", "select"]);
           assert.ok(observation.screenshot);
           reactions.push(observation.currentUpdate.revision);
           const status = observation.currentUpdate.completionStatus;

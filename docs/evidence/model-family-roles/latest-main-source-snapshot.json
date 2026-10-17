@@ -1,0 +1,553 @@
+{
+  "main": "d9a26d50b9de1d9cbc61d6620fa49e71e4c7ec2a",
+  "featureHead": "00b870c80a658dfda27805d2f9ad6c2323b0fb31",
+  "algorithm": "SHA256(sorted relative path UTF8 + NUL + current file bytes + NUL), excludes this manifest and later integration ledger",
+  "digest": "aacf011fc370244f3b00aa5a498a0b6538014a012badb357d964ef5e8fdb91a2",
+  "files": [
+    {
+      "path": "crates/relayer-app-server/src/api/conversation_imports.rs",
+      "sha256": "dd13902c8bfc3ca8795fb245d7ae1ee5f5d26ac8116aaebfaa95a9c8ad98fe81",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/environment.rs",
+      "sha256": "a678fb2ec67536dd27b235b6494372822e41205f9898fe9a3986a4b0fbd59c07",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/model_settings.rs",
+      "sha256": "1a432a3ed1d1c5fda294eefe7986b983738887a14fbc5ec3640db2b9707a861d",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/threads.rs",
+      "sha256": "ff49baf82ccbbab1f8e75d5948aadf14dbc8e5695f47dd848c631ef8e784608d",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/api/types.rs",
+      "sha256": "4462985565853a8e465495b181067815877b3c9a414be64e1cc8a939b7ceb263",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export.rs",
+      "sha256": "7f3ac5f16764b119a250740fb242ba99e4a23c0b3bc8b35e6c5d2c1825674867",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/conversation_export_service.rs",
+      "sha256": "69fb012c3afc8d0873b31042f3dbca4bbec55d2c15578edf3c8d702593b0e39a",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/product.rs",
+      "sha256": "f2e4d3a62cb02cfd7158637deced60735e9fda23710a13d5bda217546e165a97",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/catalog.rs",
+      "sha256": "e63f0bb45bafd494b12fc4a7ec5c5e733e45e483e6ba8e1f6781542e7e7c5376",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/model_policy.rs",
+      "sha256": "372dcd717d76e96fdf3ce1594752316648ff8783c5797ec469ce12459ed2352a",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/service.rs",
+      "sha256": "6ed949f2eeba64762c9ac9f1d2862efd79ca1c3d9746f8af5174d98d4c8d2983",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/product/work_context.rs",
+      "sha256": "432a3337853ae05b8576a8ebc94990f6a4bc113be4f7d086f13a45718456e3c2",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "6b9e83117ce01d3516398e3587d05646c1e167f50e74fa6460f535ae02a3e8a1",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage.rs",
+      "sha256": "f576defcf6871f08f2996ca8e82e6576821cb1d8f5109012ab36e3b4ddd5655b",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/action_invocations.rs",
+      "sha256": "e8cc2052670bd97f5b0660eba27fe40f9cef2f634a3b680195f1a9ce64043333",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/approvals.rs",
+      "sha256": "423b03bf6284b58bab4f1e51ce1d0d326c731aadf8ba4538b28b14b3bbeaafc6",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/attempts.rs",
+      "sha256": "5e7a9fd229cabcd440647d3e168c8331ce7326d717b875e0353e22d95744a59c",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/catalog.rs",
+      "sha256": "5c53433b0ce7fabd67b7569b513f5424be5af550d58699f5238de614211468cf",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/completion_executions.rs",
+      "sha256": "163a2c2cceb693e7006f79f24c8ff0871be20a1599157a5d2c2e0ffd6112c45e",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/input_drafts.rs",
+      "sha256": "bc1582ba2036f338399c714408b1d4ff722be87cd47a0422fa39a4f32f39e583",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interaction_contexts.rs",
+      "sha256": "8ca06fb8b0c90843af9fd2507fe033bc988b4dda1b7eabd27a9affab3990149b",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/interactions.rs",
+      "sha256": "2e0db54c26a27504d9930cd36b2593bf0df24bdbf6687fae1e3a6c47df144d49",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations.rs",
+      "sha256": "e47d830a5b40702e7edc27816e7eb2b19b81b1b38df2508478591dec6941c116",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/migrations/0050_model_family_roles.sql",
+      "sha256": "50dcdb0bfcc11c099df5ef4e930f6809c7a3edec6aa0749171ce89bcf7d76c20",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/personal_presentation.rs",
+      "sha256": "553b66d19d4b61a690d5321f86741d8d1a35063037e823f5cc19f24ab934b0f3",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/schema.rs",
+      "sha256": "6456e77790b06b617f49d04119777df3893b43e30060bedc1f73c7924cbdd25a",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/stops.rs",
+      "sha256": "e7eed96ea34e447f2fa269d5831ba1e13cd25852eaed4dd0d4faad7f9f9546bb",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/src/storage/sqlite/threads.rs",
+      "sha256": "f38381cecd0bc6b64218ac5bf7857aed7713a83ead88498950356431ad5cff29",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "sha256": "fd47f7e6ca964f99bbe3ce6984d3fce6a7177d7d04c6ee4dfff27b20661b40a4",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/tests/model_catalog_flow.rs",
+      "sha256": "aa858abff6e1a65c85fdb19d8458f122e606c9d8e2951d9ea51354b5b61a7677",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/tests/product_persistence_flow.rs",
+      "sha256": "1716e50d1713e1cf0d8701c93b9985919b59afab84e5f2940d3b0d1062d9706c",
+      "exists": true
+    },
+    {
+      "path": "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "sha256": "522489b671f2394755346fac6d38d8141141d787ad050836cfa212d22ea5eb99",
+      "exists": true
+    },
+    {
+      "path": "desktop/eval-main/eval-service.mjs",
+      "sha256": "d673c0f08006407a81966756b6061a5c63b26ac1d5a5852b50ddc8fe783d7067",
+      "exists": true
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "0dc08d4065d7ce52216cc735d05b1ff6a6875b6c8d9a5dd3c868d77d258d92a4",
+      "exists": true
+    },
+    {
+      "path": "desktop/eval-main/live-credentials.mjs",
+      "sha256": "e2143b7afd50bb507ce0454398f341ab06d00f3794e3f61a6bad1787409a416f",
+      "exists": true
+    },
+    {
+      "path": "desktop/eval-main/live-credentials.test.mjs",
+      "sha256": "015ee4d246fcf8cb39b505a79a2e1c29c9a97e6a30bbd359ded3a0637cf0b6b4",
+      "exists": true
+    },
+    {
+      "path": "desktop/eval-main/prime-provider.mjs",
+      "sha256": "4c687a7a7a9c42ace3b4de82f2999dc211902e1360a4527ed74f3f8596f6de86",
+      "exists": true
+    },
+    {
+      "path": "desktop/eval-main/provider-setup.mjs",
+      "sha256": "f8c15dca166740b204c51f390a95f60bb06725c89a4013f879878f128607b9a5",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/auth.js",
+      "sha256": "f04c38e56af8ee20d7e94e5f4f751b52d1ed183a9be6165bbec7876f050d5c56",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/model-family-model.js",
+      "sha256": "9279b5c516b5e861851d3a05c8ee23f1079767b70088db3954432a44be9fcb49",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/model-family-settings.js",
+      "sha256": "30bb7d7c5a18a94e6c7394d4a832032ce2f25400ab42f83a0b6f24d85e9c6581",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/model-picker-model.js",
+      "sha256": "7a2b40cc04007364e7d52b4d64b710bc7587b277aff79898187d28be301c7f19",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/model-picker.js",
+      "sha256": "c279cc8a89a2ed2af7d3b9e743b9104ff3a4cd9e5421d5cc0b9190a335d1e57c",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/provider-onboarding-model.js",
+      "sha256": "cb36d53565f106931d2134e791531cacb5da3cb40698d57ec6dbce90345817ee",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/src/provider-ui.js",
+      "sha256": "72093bf332b09a4d4d0796587e370be07d4a04a4332bf15afa780ba4d4d7f633",
+      "exists": true
+    },
+    {
+      "path": "desktop/renderer/styles.css",
+      "sha256": "552cc765ca6ee578cdccb37c7716d95c65efc09a286ce9e75b380ab06a5b52b2",
+      "exists": true
+    },
+    {
+      "path": "desktop/shared/telemetry-module-inventory.mjs",
+      "sha256": "e3dcc200dd5f3a376ef67fc6e67eb30c8158aecdf16602e349f875b66c744acd",
+      "exists": true
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "d51ffdf81e077a147290ee5daf5bb3ac54a1b2941a158a5148cc18335a055b27",
+      "exists": true
+    },
+    {
+      "path": "docs/contracts/harness-model-family-roles.md",
+      "sha256": "ffa9d0e592cc450cf0ca43413017eeef6b9f0ce3b97339170decf51371bf2fe3",
+      "exists": true
+    },
+    {
+      "path": "docs/contracts/model-family-roles.md",
+      "sha256": "01268e5624cdef9a652f345124ddaeba3ee6999b69dc96c2a74ec3f93f9c8431",
+      "exists": true
+    },
+    {
+      "path": "docs/decisions/0006-harness-provider-agnostic-product-boundary.md",
+      "sha256": "2eb12444be95326e90c98b3fbc6cfdecebb9f4b088e085fa66f181021b5cd35f",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "a0e8ab79d94917d6d4b2faacf5a3ac56fc5040628c1d2817aed30c181e974da3",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/README.md",
+      "sha256": "921c738af74d854ba97649ee52a5fef3635e19d84271b78f010941104da929f7",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/combined-source-snapshot.json",
+      "sha256": "296962637295565d15a7d36c310f3603ec1b151c9e5c5d9c2f6031f02fa871f4",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/implementation-snapshot.json",
+      "sha256": "58c0343aee2ed87c5ef88bde2be55334116dfbd6891aa2aaf937b5ab552f8365",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/live-smoke.md",
+      "sha256": "24d7a3e6566b739806c84fbf50d6a53e5c27a463029c0fa98fbcf07622b19930",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/pr-handoff.md",
+      "sha256": "8af0d516a58e3294944e368c87596b90aa0751282589d47692279ebdffd6225a",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/prime-claude-smoke.md",
+      "sha256": "bf3362a87ddad66c98b842c8088f23b2d17223b106a2e3113097262b458c6e2b",
+      "exists": true
+    },
+    {
+      "path": "docs/evidence/model-family-roles/roster-picker.md",
+      "sha256": "7f5dda083942913e777d922bc88699304131e63938e6b93c273fba5ee70f6a85",
+      "exists": true
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "757ab8f7d8a6a70263821c9bde9fc0d2b52a629e640af3187bb6871dc6075705",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "655fe7ffecba2bd5c956d9d0676bcef8c946ce4642c392c2a58f557e5816d3c1",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "1a56b99c4dfa28b1b664bce91ae88dd9b427e9f82eb63269f5d825e7c1387c71",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/src/implementations/model-family-guidance.ts",
+      "sha256": "90869f57eae8c73d01dfaf95b0b2d909ff72aef9286a1ead720b374369a6add2",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "63963c29ad84411a105d567fd89d16a71586b01dfb2b114e16efc101c0ea7b2f",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/src/types.ts",
+      "sha256": "f0b234afc85250f47a7c4b0a702eca0b695adacf59ca0d1796b5eaf0d9229c4b",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/test/claude-basic.test.ts",
+      "sha256": "f93e02c9d9dbfd77be50392f10c95c2cc3029d98c5cda6b47c501a6945d28057",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "15ac781cc1a49d5c9dca6a1845096529cc59c13b2022909976f97d1616f34c53",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/test/fixtures/model-family-roles-v2.json",
+      "sha256": "dd32231d2dabeafec97ead6aaa5b024abedcf4207f00d99b3092d234fb341a49",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/test/host.test.ts",
+      "sha256": "044345e5b5307af16082a4f9a63140ed613ccebe7ad4796eab6223f7d92c23d8",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/test/model-family-fixture.ts",
+      "sha256": "085469650a6a4a2bb50edd009073c2be881040a1751497b60c1689f3dd19c724",
+      "exists": true
+    },
+    {
+      "path": "packages/harness-host/test/prime-agent.test.ts",
+      "sha256": "8632652e2e31707cdfe70516e485ee345ad7442d36e41e151d3cc6cb7573882c",
+      "exists": true
+    },
+    {
+      "path": "scripts/capture-provider-ux-video.mjs",
+      "sha256": "94e054712a69c50b8d29ff9ea6e55c505ec117a647c006d35a19e022d0e0e767",
+      "exists": true
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "sha256": "334e4959c7379cac5836cd9f35782008531dab43337ccd5053633afd05e80314",
+      "exists": true
+    },
+    {
+      "path": "test/attached-portability-e2e.test.mjs",
+      "sha256": "4b3b6702b97a50e49234a9ebbd57a7090519d902142beb8926f7c6d85d3e1cba",
+      "exists": true
+    },
+    {
+      "path": "test/composer-provider-lifecycle.test.mjs",
+      "sha256": "dc50b824cd2c0c1c1ba55051bb68024d61f824bc816091aa73be027947468b76",
+      "exists": true
+    },
+    {
+      "path": "test/conversation-export-eval-e2e.test.mjs",
+      "sha256": "21ce9859260d409af88651572eec4a86465a8b728d5e2593d6c38ded137e805b",
+      "exists": true
+    },
+    {
+      "path": "test/default-family-recovery.test.mjs",
+      "sha256": "cfb12582758fa24b72392e66aeebfab81c8996904e94c7cefec7edd00d267350",
+      "exists": true
+    },
+    {
+      "path": "test/eval-app-integration.test.mjs",
+      "sha256": "d9c2822944545aa48faccb81a04520e1da468529beac75a162b957238e6210c2",
+      "exists": true
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "sha256": "774acbeb8ae8e89a50853c58238ed5f00b576a491143c626c0feb36b13649ed8",
+      "exists": true
+    },
+    {
+      "path": "test/eval-managed-codex-runtime.test.mjs",
+      "sha256": "33c5fadfa8ec8699734f792747228e6d298e7b5e5b99cd9ddc70d87e12dbbdf1",
+      "exists": true
+    },
+    {
+      "path": "test/eval-prime-provider.test.mjs",
+      "sha256": "4ac7e3d50a46dad368ac388b515a2aeb705ca40e9b09beaa643f5aec086469a2",
+      "exists": true
+    },
+    {
+      "path": "test/eval-service-human-model.test.mjs",
+      "sha256": "5d290fd2fb65187d6ed7a45d47124356ef6bd196ff743b42648fa618d7351df5",
+      "exists": true
+    },
+    {
+      "path": "test/eval-service-live-authorization.test.mjs",
+      "sha256": "10635b70477aa5438f809015ce5e7962ddf3eaaf19b17023ee1d3ffaba632125",
+      "exists": true
+    },
+    {
+      "path": "test/eval-service-simulated-user.test.mjs",
+      "sha256": "a2e3c046c473c9f5383f8acd9686c3f3d2ce7290ddcf5cd3b93c959a0c42c66d",
+      "exists": true
+    },
+    {
+      "path": "test/eval-web-host.test.mjs",
+      "sha256": "f85779c138e7ac5a3d832fd49511e27b51c8c26cfbf8191f9185930755728d6a",
+      "exists": true
+    },
+    {
+      "path": "test/first-message-composer-integration.test.mjs",
+      "sha256": "e9b774363507c91078c615efdd8204866bfa13e2d068defc6372be6b7373842b",
+      "exists": true
+    },
+    {
+      "path": "test/fixtures/model-family-roles/admitted-plan-v1.json",
+      "sha256": "776c77e78e6df425f6f1310a01e6c5e62f38be82bc005e40f5440c76eb65952c",
+      "exists": true
+    },
+    {
+      "path": "test/fixtures/model-family-roles/admitted-plan-v2.json",
+      "sha256": "475eddd53796cc35e77d9a1261417d1e66efc79b26722736b67c51596bc25ba3",
+      "exists": true
+    },
+    {
+      "path": "test/fixtures/model-family-roles/execution-plan-v2.json",
+      "sha256": "547d84a7641797402c9593518aab746a6707090a41934ffced11ecfc0fd4d8ce",
+      "exists": true
+    },
+    {
+      "path": "test/fixtures/model-settings-default-family-disconnected.json",
+      "sha256": "ec2ec3c686122aa9d5f064c2aff45ee97d47a7ed48c742868ebf05aac80e34a9",
+      "exists": true
+    },
+    {
+      "path": "test/fixtures/model-settings-default-family-recovery.json",
+      "sha256": "d45e90d851771bcb34368be9d2e0456d3a40c0c205b0dd8953c11938e976b2ac",
+      "exists": true
+    },
+    {
+      "path": "test/graph-program-patch-rerun-e2e.test.mjs",
+      "sha256": "a3c7cf5d3cc46e2348fdecf65e1b759c3a46e1ec7ddcdaf187d60183116d64fd",
+      "exists": true
+    },
+    {
+      "path": "test/harness-settings-repair.test.mjs",
+      "sha256": "0af5d2d36452697259569edd20e60cc7d04f5b1ab9274ec6dc7c0ca2bd332352",
+      "exists": true
+    },
+    {
+      "path": "test/invoke-input-product-integration.test.mjs",
+      "sha256": "e4eff32248ccb409f03ebe155d070277d005d9299820af85627542de5343edfb",
+      "exists": true
+    },
+    {
+      "path": "test/marine-icon-integration.test.mjs",
+      "sha256": "a7723f4f7c8fee56a3b3826c677eb06be949cb34f8dd403d2d1ca9d83f564bac",
+      "exists": true
+    },
+    {
+      "path": "test/model-availability-refresh.test.mjs",
+      "sha256": "f1cee2e64f92f986aa1211c09ed1fa87ff2c81ff8127bc4a2289578cce36817f",
+      "exists": true
+    },
+    {
+      "path": "test/model-family-onboarding.test.mjs",
+      "sha256": "b401481470c31104a5f0630f702c3f3a96724e7ca7234d5a91d453990a8574a5",
+      "exists": true
+    },
+    {
+      "path": "test/model-family-settings-refresh.test.mjs",
+      "sha256": "c3f09e06db1680e0512ed6aae30ca02f0129365871d5e815774d0af1f60b1df3",
+      "exists": true
+    },
+    {
+      "path": "test/model-family-settings.test.mjs",
+      "sha256": "0b37853d0ed7e14a4e54dd555de3ca009649425596b5706dfeea057177fd4f5e",
+      "exists": true
+    },
+    {
+      "path": "test/model-picker-model.test.mjs",
+      "sha256": "8c90bd4b088e13270b69c18518a6ff7b7b2c3416038611ca45d02764bb883649",
+      "exists": true
+    },
+    {
+      "path": "test/model-picker-ui.test.mjs",
+      "sha256": "50c85626138ffd84c0dc4576977dbf2a0e0196a00904e8e0b67c3b38fa045989",
+      "exists": true
+    },
+    {
+      "path": "test/node-run-queue-product-integration.test.mjs",
+      "sha256": "13c795acfa8ef1ffd1a400415c26f35f300fb182337d1bbc493667deebd928bd",
+      "exists": true
+    },
+    {
+      "path": "test/prime-visual-integration.test.mjs",
+      "sha256": "34937bf84f1a067693a8fafb8b75fddd1bf952728e965b581abc7845de7134a2",
+      "exists": true
+    },
+    {
+      "path": "test/provider-onboarding-ipc.test.mjs",
+      "sha256": "5ded3611521d259d01798700adb845eda810b7bbe70200182469dfb9390faa53",
+      "exists": true
+    },
+    {
+      "path": "test/provider-onboarding-model.test.mjs",
+      "sha256": "eea300f7686e3ce760fe55a9ecb695250e9eff721513b25fbb03af4a06a6df33",
+      "exists": true
+    },
+    {
+      "path": "test/provider-straightforward-flow.test.mjs",
+      "sha256": "a0123af104f3e19e7c20421fbe7cc8fecec3bdfb036e68d634ae4f5125d741b5",
+      "exists": true
+    },
+    {
+      "path": "test/provider-ui.test.mjs",
+      "sha256": "af06fee2c529f58c2e11b21edafe54dcf6bd99f4e3cc905ad6b72b7ac5dfd5c8",
+      "exists": true
+    },
+    {
+      "path": "test/recursive-complete-e2e.test.mjs",
+      "sha256": "1778d0a50fefeaff738bf6646ae215ab8f51ccab69d36e3e894aee7ccc7a6581",
+      "exists": true
+    },
+    {
+      "path": "test/support/stop-run-fixture.mjs",
+      "sha256": "35cc88cb24896ff7daa1ec407f537d756aad608d4942c747bd2d79f98f0380fb",
+      "exists": true
+    }
+  ]
+}

@@ -98,7 +98,7 @@ describe("first-message composer integration", () => {
     const before = await start();
     const family = await productRequest(before.session, "/api/model-families", {
       method: "POST",
-      body: JSON.stringify({ name: "Fixture models", enabled: true, members: [{ providerId, modelId }] }),
+      body: JSON.stringify({ name: "Fixture models", enabled: true, members: [{ providerId, modelId, roles: [{ name: "orchestrator" }] }] }),
     });
     const modelSelection = { familyId: family.id, providerId, modelId };
     const createThread = (session) => productRequest(session, "/api/threads", {
@@ -231,7 +231,7 @@ describe("first-message composer integration", () => {
       body: JSON.stringify({
         name: "Fixture models",
         enabled: true,
-        members: [{ providerId: "codex", modelId: "fixture-model" }],
+        members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }],
       }),
     });
     const modelSettings = await productRequest(productSession, "/api/model-settings");

@@ -250,7 +250,7 @@ async function run() {
   const project = await productRequest("/api/projects", { method: "POST", body: JSON.stringify({ path: repositoryRoot }) });
   const family = await productRequest("/api/model-families", {
     method: "POST",
-    body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model" }] }),
+    body: JSON.stringify({ name: "Fixture", enabled: true, members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }] }),
   });
   const thread = await productRequest("/api/threads", {
     method: "POST",
@@ -259,7 +259,7 @@ async function run() {
       initialMessage: "Author deterministic input controls.",
       projectId: project.id,
       harnessId: "fixture-task-system",
-      modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" },
+      modelSelection: { familyId: family.id },
     }),
   });
   await waitForAcceptedInteractions(thread.id, 1);
@@ -270,7 +270,7 @@ async function run() {
       initialMessage: "Author a second deterministic input surface.",
       projectId: project.id,
       harnessId: "fixture-task-system",
-      modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" },
+      modelSelection: { familyId: family.id },
     }),
   });
   await waitForAcceptedInteractions(idleThread.id, 1);
@@ -926,10 +926,14 @@ async function run() {
   const lostThread = await waitForAcceptedInteractions(thread.id, 2);
   await waitFor("failed transport unlocks preserved input stage", () => evaluate("!document.querySelector('#threadPrompt').disabled"));
   const originalAttempt = (await evaluate("window.__implicitAttempts"))[0];
+  const retainedSelection = lostThread.interactions.at(-1).modelSelection;
   if (lostThread.interactions.at(-1).submittedInputs.length !== 3
     || originalAttempt.contexts?.[0]?.annotations?.[0] !== "Preserve this click-time context through reconciliation."
     || originalAttempt.contextConfirmationIds?.length !== 1
-    || originalAttempt.modelSelection?.providerId !== "codex" || originalAttempt.modelSelection?.modelId !== "fixture-model") throw new Error("Lost response did not retain exact input/context/model submission.");
+    || originalAttempt.modelSelection?.familyId !== family.id
+    || Object.keys(originalAttempt.modelSelection).some(key => key !== "familyId")
+    || retainedSelection?.familyId !== family.id || retainedSelection?.providerId !== "codex"
+    || retainedSelection?.modelId !== "fixture-model") throw new Error("Lost response did not retain exact input/context/model submission.");
   await clickNode("Input grammar");
   await waitFor("reconciliation exposes externally retained text", () => evaluate("Boolean(document.querySelector('[aria-label=\"Detach Name the governing constraint\"]'))"));
   await click("[aria-label='Detach Name the governing constraint']");
@@ -954,12 +958,14 @@ async function run() {
     || retryAttempt.inputDraftRevision !== postedDraft?.revision || postedDraft.revision <= detachedDraft.revision
     || retryAttempt.contexts?.[0]?.annotations?.[0] !== originalAttempt.contexts[0].annotations[0]
     || retryAttempt.contextConfirmationIds?.length !== 0
-    || retryAttempt.modelSelection?.providerId !== originalAttempt.modelSelection.providerId
-    || retryAttempt.modelSelection?.modelId !== originalAttempt.modelSelection.modelId) throw new Error(`Changed input generation lost the exact replay payload: ${JSON.stringify({ originalAttempt, retryAttempt, postedDraft })}`);
+    || JSON.stringify(retryAttempt.modelSelection) !== JSON.stringify(originalAttempt.modelSelection)) throw new Error(`Changed input generation lost the exact replay payload: ${JSON.stringify({ originalAttempt, retryAttempt, postedDraft })}`);
   await waitFor("running response preserves accepted reading", () => evaluate(`!document.querySelector('#pendingTurnNotice').classList.contains('hidden')`));
   await clickNode("Selection guard");
   releaseFourthCompletion();
   const acceptedThread = await waitForAcceptedInteractions(thread.id, 3);
+  if (JSON.stringify(acceptedThread.interactions.at(-1).modelSelection) !== JSON.stringify(retainedSelection)) {
+    throw new Error("Changed input generation lost the resolved family orchestrator.");
+  }
   await waitFor("ready response preserves explicit browsing", () => evaluate(`!document.querySelector('#openReadyResult').classList.contains('hidden') && document.querySelector('#detailTitle').textContent === 'Selection guard'`));
   await click("#openReadyResult");
   await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1 && Boolean(document.querySelector('.interaction-input-history-disclosure'))"));

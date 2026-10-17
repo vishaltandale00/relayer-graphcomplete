@@ -150,7 +150,7 @@ export function createEvalPrimeProvider({ userDataDirectory, productServer, prod
         if (!provider?.connected || modelIds.some((id) => !provider.models?.some((model) => (
           model.id === id && model.available !== false && model.visible !== false
         )))) throw new Error("Both requested Prime models must be available in the discovered catalog.");
-        const members = modelIds.map((modelId) => ({ providerId: "eval-openrouter", modelId }));
+        const members = modelIds.map((modelId, index) => ({ providerId: "eval-openrouter", modelId, roles: index === 0 ? [{ name: "orchestrator" }] : [] }));
         const name = "Eval Prime pinned models";
         const existingFamily = settings.families?.find((family) => family.name === name);
         if (existingFamily) {
@@ -206,20 +206,14 @@ export function createEvalPrimeProvider({ userDataDirectory, productServer, prod
   async function validate(harnessId) {
     const settings = await request("/api/model-settings");
     const family = settings.families?.find(({ id }) => id === familyId);
-    const expected = modelIds.map((modelId) => ({ providerId: "eval-openrouter", modelId }));
-    if (!family?.enabled || JSON.stringify(family.members.map(({ providerId, modelId }) => ({ providerId, modelId }))) !== JSON.stringify(expected)) {
+    const expected = modelIds.map((modelId, index) => ({ providerId: "eval-openrouter", modelId, roles: index === 0 ? [{ name: "orchestrator" }] : [] }));
+    if (!family?.enabled || JSON.stringify(family.members.map(({ providerId, modelId, roles }) => ({ providerId, modelId, roles }))) !== JSON.stringify(expected)) {
       throw new Error("Prime Eval family roster changed; refusing model fallback or additional models.");
     }
-    // Validate every member through the same product resolver, then pin the lead.
-    const selections = [];
-    for (const modelId of modelIds) {
-      const selection = { harnessId, familyId, providerId: "eval-openrouter", modelId };
-      const resolved = await request("/api/model-selection/validate", { method: "POST", body: selection });
-      if (resolved.familyId !== familyId || resolved.providerId !== selection.providerId || resolved.modelId !== modelId) {
-        throw new Error("Prime Eval model resolution changed the requested identity.");
-      }
-      selections.push(resolved);
+    const resolved = await request("/api/model-selection/validate", { method: "POST", body: { harnessId, familyId } });
+    if (resolved.familyId !== familyId || resolved.providerId !== "eval-openrouter" || resolved.modelId !== modelIds[0]) {
+      throw new Error("Prime Eval family resolution changed its designated orchestrator.");
     }
-    return selections[0];
+    return resolved;
   }
 }

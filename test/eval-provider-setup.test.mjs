@@ -7,11 +7,12 @@ import { createProviderAdapterRegistry } from "../desktop/main/providers/provide
 
 const cleanups = [];
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); });
-async function setup({ managed = false, openai = false, failing = false, credentialStore, now, accountStatus = "connected", closeFails = false, scheduleTimeout, cancelTimeout, updatesDue = [], inputModalities = ["text", "image"], modelRules = { allow: [], deny: [] } } = {}) {
+async function setup({ managed = false, openai = false, failing = false, credentialStore, now, accountStatus = "connected", closeFails = false, scheduleTimeout, cancelTimeout, updatesDue = [], inputModalities = ["text", "image"], modelRules = { allow: [], deny: [] }, defaultProviderId = "chosen" } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "eval-provider-setup-"));
   cleanups.push(() => rm(directory, { recursive: true, force: true }));
   let stored = [];
   let busy = false;
+  let discoverHook;
   const snapshots = new Map();
   const dependencies = [];
   const adapterId = managed ? "codex-subscription" : openai ? "openai-api" : "openrouter";
@@ -23,7 +24,8 @@ async function setup({ managed = false, openai = false, failing = false, credent
     connection: managed ? { mode: "managed-login" } : { mode: "secret-fields", fields: [{ id: "api-key", label: "Key", kind: "secret" }] },
     create: ({ definition, ...deps }) => {
       dependencies.push(deps);
-      const discover = async () => {
+      const discover = async (options) => {
+        await discoverHook?.(options);
         if (failing) throw new Error(`Provider echoed ${deps.secrets?.["api-key"]}`);
         return { provider: { id: definition.id, label: definition.label, status: "available" },
           systemFamily: { id: definition.id, label: definition.label, modelIds: ["gpt-test"] },
@@ -50,7 +52,7 @@ async function setup({ managed = false, openai = false, failing = false, credent
       return Response.json({ model: "gpt-6-luna", answers: [{ type: "choice", name: "action", choice: "action-0", ignored: "private-key" }], usage: { input_tokens: 12, arbitrary: "private-key" } });
     }
     expect(options.headers.Cookie).toBe("control=private");
-    if (url.pathname === "/api/model-settings") return Response.json({ defaults: { providerId: "chosen" } });
+    if (url.pathname === "/api/model-settings") return Response.json({ defaults: { providerId: defaultProviderId } });
     if (url.pathname === "/api/model-selection/default") return Response.json(selection);
     if (url.pathname === "/api/model-selection/validate") {
       expect(JSON.parse(options.body)).toEqual(selection);
@@ -73,6 +75,7 @@ async function setup({ managed = false, openai = false, failing = false, credent
   });
   cleanups.push(() => service.close());
   return { service, directory, snapshots, dependencies, runtimeResolver, fetchImpl, publishHarnessReadiness, due,
+    setDiscoverHook: hook => { discoverHook = hook; },
     setBusy: (value) => { busy = value; }, seed: (definitions) => { stored = structuredClone(definitions); }, stored: () => stored,
     connect: () => service.connect({ connectionId: "chosen", adapterId, label: "Chosen", fields: { "api-key": "private-key" } }),
   };
@@ -265,8 +268,61 @@ describe("Eval production provider setup", () => {
     expect(judge.environment.CODEX_HOME).toBe(join(fixture.directory, "provider-runtime", "chosen", "codex-home"));
     expect(judge.environment.API_KEY).toBeUndefined();
     await fixture.service.logout("chosen");
-    await expect(fixture.service.resolveCodexJudgeRuntime()).rejects.toThrow("Choose a connected Codex subscription");
+    await expect(fixture.service.resolveCodexJudgeRuntime()).rejects.toMatchObject({ code: "actor_authentication_required" });
   });
+  it("refreshes stale subscription status before judge admission without changing candidate defaults", async () => {
+    const fixture = await setup({ managed: true });
+    await fixture.service.start(); await fixture.connect(); await fixture.service.completeConnection("chosen");
+    const snapshot = fixture.snapshots.get("chosen");
+    fixture.snapshots.set("chosen", { ...snapshot, connected: false });
+    expect((await fixture.service.status()).definitions.find(item => item.id === "chosen").connected).toBe(false);
+    const judge = await fixture.service.resolveCodexJudgeRuntime({ model: "gpt-test", modelReasoningEffort: "low" });
+    expect(judge.environment.CODEX_HOME).toBe(join(fixture.directory, "provider-runtime", "chosen", "codex-home"));
+    expect(fixture.fetchImpl.mock.calls.filter(([url]) => url.pathname === "/api/model-settings/defaults")).toHaveLength(0);
+  });
+
+  it("keeps the candidate provider default while an independent Codex judge refreshes its subscription", async () => {
+    const fixture = await setup({ managed: true, defaultProviderId: "claude-candidate" });
+    await fixture.service.start(); await fixture.connect(); await fixture.service.completeConnection("chosen");
+    fixture.snapshots.set("chosen", { ...fixture.snapshots.get("chosen"), connected: false });
+    const judge = await fixture.service.resolveCodexJudgeRuntime({ model: "gpt-test", modelReasoningEffort: "low" });
+    expect(judge.environment.CODEX_HOME).toBe(join(fixture.directory, "provider-runtime", "chosen", "codex-home"));
+    expect(fixture.fetchImpl.mock.calls.filter(([url]) => url.pathname === "/api/model-settings/defaults")).toHaveLength(0);
+    const settings = await (await fixture.fetchImpl(new URL("http://127.0.0.1/api/model-settings"), { headers: { Cookie: "control=private" } })).json();
+    expect(settings.defaults.providerId).toBe("claude-candidate");
+  });
+
+  it("refuses an uninstalled subscription runtime as missing evaluator authentication without installing it", async () => {
+    const fixture = await setup({ managed: true });
+    fixture.seed([{ id: "codex", adapterId: "codex-subscription", label: "Codex", accessContract: "managed-runtime@1", endpoint: null, credentialReference: null, lifecycleState: "active", removedAt: null }]);
+    fixture.runtimeResolver.get.mockRejectedValue(Object.assign(new Error("private missing runtime"), { code: "managed_runtime_not_installed" }));
+    await fixture.service.start();
+    await expect(fixture.service.resolveCodexJudgeRuntime({ model: "gpt-test", modelReasoningEffort: "low" })).rejects.toMatchObject({ code: "actor_authentication_required" });
+    expect(fixture.runtimeResolver.prepare).not.toHaveBeenCalled();
+  });
+
+  it("cancels the evaluator discovery itself before releasing its route", async () => {
+    const fixture = await setup({ managed: true });
+    await fixture.service.start(); await fixture.connect(); await fixture.service.completeConnection("chosen");
+    let entered;
+    const started = new Promise(resolve => { entered = resolve; });
+    let nativeSignal;
+    fixture.setDiscoverHook(({ signal }) => {
+      nativeSignal = signal;
+      entered();
+      return new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(signal.reason), { once: true }));
+    });
+    const controller = new AbortController();
+    const pending = fixture.service.resolveCodexJudgeRuntime({ model: "gpt-test", modelReasoningEffort: "low" }, { signal: controller.signal });
+    const failure = expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    await started;
+    controller.abort();
+    await failure;
+    expect(nativeSignal.aborted).toBe(true);
+    fixture.setDiscoverHook(null);
+    await expect(fixture.service.logout("chosen")).resolves.toBeDefined();
+  });
+
   it("rejects text-only actor models before candidate inference", async () => {
     const fixture = await setup({ managed: true, inputModalities: ["text"] });
     await fixture.service.start(); await fixture.connect(); await fixture.service.completeConnection("chosen");

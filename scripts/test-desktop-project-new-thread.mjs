@@ -184,7 +184,7 @@ async function run() {
     body: JSON.stringify({
       name: "Fixture models",
       enabled: true,
-      members: [{ providerId: "codex", modelId: "fixture-model" }],
+      members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }],
     }),
   });
 

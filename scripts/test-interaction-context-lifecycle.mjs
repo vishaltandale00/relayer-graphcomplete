@@ -456,13 +456,11 @@ async function run() {
     body: JSON.stringify({
       name: "Fixture models",
       enabled: true,
-      members: [{ providerId: "codex", modelId: "fixture-model" }],
+      members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }],
     }),
   });
   const modelSelection = {
     familyId: fixtureFamily.id,
-    providerId: "codex",
-    modelId: "fixture-model",
   };
   const thread = await productRequest("/api/threads", {
     method: "POST",
@@ -489,11 +487,14 @@ async function run() {
   await openThreadWindow(thread.id);
 
   await click("#threadView [data-model-picker-trigger]");
-  await waitFor("selected model in ongoing picker", () => evaluate(
-    `Boolean(document.querySelector('#threadView [data-model-option][aria-checked="true"]'))`,
-  ));
-  await click('#threadView [data-model-option][aria-checked="true"]');
-  await waitFor("selected model click closes picker and returns focus", () => evaluate(`
+  await waitFor("selected family orchestrator in ongoing picker", () => evaluate(`(() => {
+    const family = document.querySelector('#threadView [data-model-family]');
+    const member = document.querySelector('#threadView [data-family-member]');
+    return family?.value === ${JSON.stringify(String(fixtureFamily.id))}
+      && member?.textContent.includes('Fixture model') && member?.textContent.includes('orchestrator');
+  })()`));
+  await click('#threadView [data-family-member]');
+  await waitFor("selected family member click closes picker and returns focus", () => evaluate(`
     document.querySelector('#threadView [data-model-picker-popover]')?.classList.contains('hidden')
       && document.activeElement === document.querySelector('#threadView [data-model-picker-trigger]')
   `));

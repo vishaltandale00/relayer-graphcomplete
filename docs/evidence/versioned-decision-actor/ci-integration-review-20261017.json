@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T15:37:16.354917+00:00",
+  "pullRequest": 755,
+  "reviewType": "Adversarial main-conflict integration, combined authority and checkpoint mapping static review",
+  "workspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "priorPrHead": "862125fcfc9238d6bfe1ce429cc27c746937fb9a",
+  "integratedMain": "6bc1e76c83ddbc165a5f2cdf2b63152c9ba2f5ed",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-source-20261017.json",
+    "sha256": "240cf74f80f039bcff9cb77651745adcf53dde7fa3c6aa31673518aa0169ad81",
+    "files": 152,
+    "allFileHashesAggregateAndChangedNonEvidenceCoverageIndependentlyVerified": true
+  },
+  "checkpointPlan": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-20261017.md",
+    "sha256": "773dd8e74d40af9dfdeeb989eaa924b9acf6b8aecb8741844c48ff3e2bcded27"
+  },
+  "scopeBoundary": "Reviewed conflict resolutions and interacting automatically merged actor/provider/family/input/capture seams, with incoming FAM/native contracts and existing exact actor/judge reviews as context. Hash verification covers the152-file declared source scope; it is not a claim to have independently re-audited every incoming main Rust/UI hunk or to inherit hosted CI authorization.",
+  "reviewedScope": [
+    "MCI-001 exact Invoke source/action/result/attempt/status/outcome and applied-render readiness retained; weaker invokeSource/capturedAt fallback removed; Send/retry freshness and missing-source/child failures remain",
+    "Both Invoke unit cases retained and adapted to require exact invocationResults; capturedAt cannot substitute for stale rendered evidence; hidden lifecycle metadata excluded from actor observation",
+    "Main native-call300000ms cancellation and closed prepare/execute/validate and none/unknown/completed evidence preserved alongside production Decisions dispatcher, constrained Codex text and completion-judge selectors/reporters",
+    "Actor/judge pinned API contracts, discovery-only preflight, billing rejection before task creation, independent subscription discovery and native auth/runtime refusal preserved",
+    "MCI-003 family-only next-turn request normalization and current-family authorization checks retained; persisted subscription constraint/atomic admission and typed pre-dispatch refusals remain separate from API evaluator billing guards",
+    "Response cap continues to restrict new candidate writes while existing result navigation/reassessment can recover within action/time limits; no automatic completion or fallback",
+    "MCI-004 actual availableActions intersects main visible-overflow scroll availability while retaining revision-gated select/deselect; settled and working nondispatch repair retains main scroll support and ambiguous hover/wheel failure authority",
+    "MCI-005 trusted compiled input capture context and null-before-refresh/stale/disposed registration coexist with partial multiselect local draft/refusal/refresh/input-boundary reset; both distinct test cases retained",
+    "Read-only artifact/getReviewRoot/ReviewSession capture snapshot guards and scope ownership retained; capture-region registration does not become actor action authority",
+    "Fullbrowser fixture keeps9 ordinary native actions with explicit result navigation,3candidate admissions, judge recovery/export/calibration; new main role-inclusive fixture families and scroll/artifact chapters retained",
+    "Current-input fixture retains fixed-revision state-read gate, original ref/pointer rebind and no ambiguous-action retry; main dynamic scroll proof remains independent",
+    "MCI-006 source-bound actual renderer captures and telemetry, PRD7.0 desktop3 plus declared artifact-viewer/visual-node-details heavy entries now explicitly mapped"
+  ],
+  "testSubsumptionVerdict": "No test deletion approved or required. Main invokeSource timestamp-fallback assertions are superseded by a stricter existing product promise: exact applied invocation lifecycle at the source. Their source identity/privacy/wrong-scope/admission intent remains in both retained service cases and stronger delayed-render/current browser checkpoints. The fullbrowser still requires an explicit ordinary result-opening action. Heavy completion remains unproved at this static review.",
+  "resolvedMappingGaps": [
+    "Included declared telemetry evidence for the incoming sealed module inventory/native-family contract.",
+    "Added actual test:desktop:artifact-viewer and test:desktop:visual-node-details to the merged read-only capture seam; browser transport alone is not relabeled as Electron proof."
+  ],
+  "availableWarmEvidence": [
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/focused.log",
+      "sha256": "4189e0e64466573aa4042b26832cf805606c430a0469d9f6318c084adf420518",
+      "observed": "6files277tests passed6.27s; source executables unchanged since the plan-only manifest refresh"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/focused-boundaries.log",
+      "sha256": "5deb8073533c7021db0087dba80c32c5afb4e8e03a935016aa06c0636fcf73a1",
+      "observed": "3files17tests passed1.52s, covering additional native actor/input/observer boundaries; not a heavy-portfolio pass"
+    }
+  ],
+  "verdict": "No remaining blocking static correctness, authority, assertion-subsumption or declared checkpoint-mapping finding in the reviewed conflict/composition scope. The exact152-file digest and plan are verified. New merged heavy outcomes and hosted fresh-head authorization remain separate and pending.",
+  "findings": [],
+  "unresolvedProofLimits": [
+    "New merged check/build/compiled/fullbrowser/desktop5/telemetry and actual SOC/annotation evidence require separate final heavy-evidence review; prior862125fc/1c93 hosted and local results remain historical.",
+    "Incoming main adds real family/native routing/capture behavior; unchanged fixtures or old manifests cannot certify combined execution without the mapped new proof.",
+    "Native cancellation tests use cooperative SDK cancellation; this review does not establish arbitrary unresponsive-provider termination or paid model behavior.",
+    "No paid inference, live Decisions judge calibration, arbitrary cross-provider specialist routing, latency/cost advantage, signed packaging/release or deployment claim.",
+    "Fresh-head hosted CI and freshness gate must qualify the pushed merge commit; merge remains manual. Any bound-source or checkpoint-plan change invalidates this assertion."
+  ],
+  "reviewerActions": {
+    "productionEdits": false,
+    "testEdits": false,
+    "planManifestEdits": false,
+    "testExecution": false,
+    "paidInference": false,
+    "historicalReceiptEdits": false,
+    "separateReviewReceiptOnly": true
+  },
+  "certification": "Bounded static assertion for PR755 exact workspace digestd4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e; no unfinished heavy or hosted result certified."
+}

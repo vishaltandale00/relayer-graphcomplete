@@ -1,5 +1,6 @@
 import { renderSetupPrompt } from "./setup-prompt.mjs";
 import { createRestrictedCodexActor } from "@relayer/eval-runner";
+export { ACTOR_NATIVE_CALL_TIMEOUT_MS } from "@relayer/eval-runner";
 export const ACTOR_SETTLED_OBSERVATION_CONTRACT = Object.freeze({ id: "task-actor-observation-v2", optionObservation: "opened-native-select-accessibility" });
 export const ACTOR_OBSERVATION_CONTRACT = Object.freeze({ ...ACTOR_SETTLED_OBSERVATION_CONTRACT, id: "task-actor-observation-v3", currentObservation: "visible-current-during-execution", currentCaptureLimit: "2*maxActions+1", currentActions: "live-question-controls-and-navigation" });
 

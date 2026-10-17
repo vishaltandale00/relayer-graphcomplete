@@ -180,6 +180,38 @@ impl InteractionExecutionService {
             },
             None => (None, None),
         };
+        if !prepared.matches_model_selection(execution_model_selection.as_ref()) {
+            if let Err(cleanup) = discard_model_preparation(runtime, prepared).await {
+                record_reconciliation_pending(execution, &thread, &interaction, &cleanup).await;
+                return;
+            }
+            let Some(selection) = interaction.model_selection.as_ref() else {
+                record_background_failure(
+                    &execution.product,
+                    &thread,
+                    &interaction,
+                    "Prepared model route no longer matches the interaction".into(),
+                )
+                .await;
+                return;
+            };
+            // Attribute the refused fresh route consistently; stale interaction hints
+            // must not be combined with its current adapter/access contract.
+            let refused = execution_model_selection
+                .as_ref()
+                .map(|route| super::InteractionModelSelection {
+                    family_id: route.family_id,
+                    provider_id: route.provider_id.clone(),
+                    model_id: route.model_id.clone(),
+                })
+                .unwrap_or_else(|| selection.clone());
+            record_pre_execution_model_failure_to_unsent(
+                execution, &thread, &interaction, &refused,
+                execution_model_selection.as_ref(), None, None, "model_unavailable",
+                "The model family changed during preparation. Send again to prepare its current orchestrator.".into(),
+            ).await;
+            return;
+        }
         let harness_policy = match execution_model_selection.as_ref() {
             Some(_) => match execution
                 .product

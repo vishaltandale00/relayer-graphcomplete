@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { abortable } from "./abortable.mjs";
 import { createTaskActor } from "./decision-task-actor.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-import { ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, validateActorAction } from "./task-actor.mjs";
+import { ACTOR_NATIVE_CALL_TIMEOUT_MS, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, validateActorAction } from "./task-actor.mjs";
 
 // Classification may inspect native errors, but evidence and UI use only these
 // closed categories and fixed messages; never copy provider text or error.name.
@@ -38,7 +38,10 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
     invalid_action: "The actor response did not satisfy the action contract. No action was executed.",
     runtime_failure: "Actor runtime failed without claiming task success. No action is replayed automatically.",
   };
-  return { category, message: messages[category] };
+  return { category, message: messages[category],
+    ...(["prepare", "execute", "validate"].includes(error?.actorFailureStage) ? { nativeStage: error.actorFailureStage } : {}),
+    ...(["none", "unknown", "completed"].includes(error?.actorNativeDispatch) ? { nativeDispatch: error.actorNativeDispatch } : {}),
+  };
 }
 
 export class TaskActorService {
@@ -105,7 +108,7 @@ export class TaskActorService {
     let browser;
     let phase = "startup";
     try {
-      await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt });
+      await this.tasks.actorEvent(id, "actor_started", { configuration: task.actor, prompt, nativeCallTimeoutMs: ACTOR_NATIVE_CALL_TIMEOUT_MS });
       actor = await this.createActor({ runtime, config: task.actor, prompt, outputSchema: task.actorSetup?.behaviorContract?.actionSchema });
       signal.throwIfAborted();
       const observationContract = task.actorSetup ? task.actorSetup.behaviorContract?.observationContract ?? null
@@ -222,6 +225,9 @@ export class TaskActorService {
           actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => kind !== "next_step");
         }
         if (judgeInteractionRequired) actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => kind !== "finish");
+        if (Array.isArray(observation.availableActions)) {
+          actionSchema.properties.kind.enum = actionSchema.properties.kind.enum.filter(kind => observation.availableActions.includes(kind));
+        }
         observation.availableActions = [...actionSchema.properties.kind.enum];
         if (completionJudgeFeedback) observation.completionJudgeFeedback = completionJudgeFeedback;
         if (finishRepairPending) observation.previousActionError = "Your previous finish decision was rejected before execution. Reconsider using the visible evidence. endpoint_reached requires endpointStatus reached and empty remainingWork. If work remains, report incomplete or uncertain with satisfied or abandoned. Do not erase unfinished work merely to satisfy the format.";
@@ -301,9 +307,9 @@ export class TaskActorService {
         else {
           try { await browser.act(action, { actionEventId: intent.id, observationEventId: observed.id }); }
           catch (error) {
-            // Only the browser's own checks before click/fill/select certify no
+            // Only the browser's own checks before click/fill/select/scroll certify no
             // dispatch. Playwright failures and product-write errors are ambiguous.
-            if (!["click", "fill", "select", "deselect"].includes(action.kind) || error.actionDispatched !== false
+            if (!["click", "fill", "select", "deselect", "scroll"].includes(action.kind) || error.actionDispatched !== false
               || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
             const retryAllowed = !controlRepairPending && actionsUsed < task.actor.maxActions;
             await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false,

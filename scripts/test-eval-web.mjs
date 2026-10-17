@@ -1,3 +1,5 @@
+import { proveActorScroll } from "./eval-actor-scroll-proof.mjs";
+import { proveArtifactReview } from "./eval-artifact-review-proof.mjs";
 import { CalibrationService } from "../desktop/eval-main/calibration-service.mjs";
 import { SetupRegistry, setupDigest } from "../desktop/eval-main/setup-registry.mjs";
 import assert from "node:assert/strict";
@@ -99,6 +101,7 @@ try {
   } finally { clearTimeout(timeout); if (pending.exitCode === null) pending.kill("SIGKILL"); }
   console.log("PASS interrupted startup: pending native child terminated and profile lock released");
   const browser = await chromium.launch(); resources.push(browser);
+  await proveArtifactReview({ browser, directory });
   const host = await launchHost();
   const duplicate = spawn(process.execPath, ["desktop/eval-main/index.mjs"], {
     env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith("RELAYER_EVAL_AUTORUN"))), RELAYER_EVAL_USER_DATA_DIR: join(directory, "host"), RELAYER_EVAL_PRIME_PROFILE_FILE: "" }, stdio: "ignore",
@@ -112,7 +115,10 @@ try {
   // boot attaches this handler only after the initial catalog/run reads settle.
   await page.waitForFunction(() => typeof document.querySelector("#emptyNewRun")?.onclick === "function");
   await page.locator("#emptyNewRun").click();
-  await page.locator('input[name="cases"]').first().waitFor();
+  await page.locator('input[name="cases"]').first().waitFor().catch(async (error) => {
+    console.error("Case picker diagnostic", JSON.stringify({ pageErrors, body: await page.locator("body").innerText() }));
+    throw error;
+  });
   const catalog = await rpc(host.url, "catalog", []);
   if (process.env.RELAYER_EVAL_REQUIRE_EXTERNAL_CATALOG === "1") {
     assert.ok(catalog.suites.length > 0, "configured external catalog exposes a suite");
@@ -309,6 +315,14 @@ try {
     models: [{ id: "fixture-model", label: "Fixture model", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }],
     systemFamily: { key: "codex", name: "Fixture Codex", modelIds: ["fixture-model"] },
   });
+  // Settings proved a different family. Explicitly select this execution fixture;
+  // family-only resolution must never fall back from that saved default.
+  const controlHeaders = { Cookie: `${productSession.cookie.name}=${productSession.cookie.value}` };
+  const fixtureSettings = await (await fetch(new URL("/api/model-settings", productSession.origin), { headers: controlHeaders })).json();
+  const fixtureFamily = fixtureSettings.families.find((family) => family.members.some((member) => member.providerId === "codex" && member.roles.some((role) => role.name === "orchestrator")));
+  assert.ok(fixtureFamily);
+  const fixtureDefaults = await fetch(new URL("/api/model-settings/defaults", productSession.origin), { method: "PUT", headers: { ...controlHeaders, "Content-Type": "application/json" }, body: JSON.stringify({ familyId: fixtureFamily.id, harnessId: "fixture-task-system", providerId: "codex" }) });
+  assert.equal(fixtureDefaults.status, 200);
   const humanProof = await proveHumanTask({ browser, service, productSession, data });
   await proveDecisionTaskActor({ browser, service, productSession, data });
   await proveActorInputs({ browser, service, productSession, data });
@@ -471,6 +485,7 @@ async function proveProductionSettings({ browser, product, productSession, runti
   }), "new family carousel settled before editing");
   await page.locator("#familyNameInput").fill("My eval models");
   assert.equal(await page.locator('[data-member-model="0"]').inputValue(), "fixture-model");
+  await page.locator('[data-member-orchestrator="0"]').check();
   await page.locator("#saveFamilyEdit").click();
   await until(async () => (await productSettings()).families.some((family) => family.name === "My eval models"), "custom family persisted through production API");
   const customFamily = (await productSettings()).families.find((family) => family.name === "My eval models");
@@ -777,6 +792,8 @@ async function proveTaskActor({ browser, service, productSession, data }) {
         } finally { await restore.evaluate(restore => restore()); await restore.dispose(); }
       };
       await actorPage.locator(".graph-node").first().waitFor({ state: "visible" });
+      try { await proveActorScroll({ controller, page: actorPage }); }
+      catch (error) { console.error("Actor scroll browser proof failed:", error); throw error; }
       try {
       // Same-view polling must preserve the target even during native dispatch.
       {
@@ -1217,7 +1234,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     assert.equal(String(task.events.findLast(event => event.kind === "presentation").snapshot.layerId), String(lastTurn.completionOutput.rootLayer.layer.id), "the exact returned response layer is painted before actor finishes");
     for (const snapshot of snapshots) {
       assert.deepEqual(Object.keys(snapshot).sort(), [...["availableActions", "controls", "screenshot", "text"], ...(snapshot.completionJudgeFeedback ? ["completionJudgeFeedback"] : [])].sort());
-      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", "scroll", ...(snapshot === snapshots[7] ? [] : ["finish"])]);
+      assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot === snapshots[7] ? [] : ["finish"])]);
       for (const control of snapshot.controls) assert.deepEqual(Object.keys(control).sort(), ["name", "ref", "role"]);
     }
     assert.ok(task.events.filter(event => event.kind === "actor_observation").every(event => !event.observation.screenshot && event.observation.screenshotArtifact));
@@ -1357,7 +1374,7 @@ async function proveTaskActor({ browser, service, productSession, data }) {
       const created = tasks.list().find(item => !beforeIndividual.has(item.id));
       return created && ["completed", "interrupted", "failed"].includes(created.status) ? tasks.get(created.id) : null;
     }, "independent completion selection completed through actual form");
-    assert.equal(individual.status, "completed");
+    assert.equal(individual.status, "completed", JSON.stringify(individual.events.filter(event => event.kind === "actor_error")));
     assert.equal(individual.evaluatorRelease, undefined);
     assert.deepEqual(individual.completionJudgeSetup, completionRevision);
     const individualExport = await tasks.export(individual.id);
@@ -1479,7 +1496,8 @@ async function proveHumanTask({ browser, service, productSession, data }) {
   await dashboard.goto(host.url);
   // Keep a completed run polling while Human Grader is open, as in the child host.
   const run = await service.createRun(selection);
-  await until(() => service.getRun(run.id).status === "passed", "shared dashboard completed run");
+  const sharedRun = await until(() => { const value = service.getRun(run.id); return ["passed", "failed", "error", "interrupted"].includes(value.status) ? value : null; }, "shared dashboard completed run").catch((error) => { console.error(JSON.stringify(service.getRun(run.id))); throw error; });
+  assert.equal(sharedRun.status, "passed", JSON.stringify(sharedRun));
   try {
     // Human task slice: the production composer remains writable under separate
     // scope; evidence is captured without paid inference or an alternate renderer.
@@ -1518,7 +1536,7 @@ async function proveHumanTask({ browser, service, productSession, data }) {
     const modelValidation = await humanPage.evaluate(async (selection) => {
       const response = await fetch("/api/model-selection/validate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ harnessId: "fixture-task-system", ...selection }) });
       return { status: response.status, body: await response.json() };
-    }, pinnedModel);
+    }, { familyId: pinnedModel.familyId });
     assert.equal(modelValidation.status, 200, "validation must reach the product resolver with scoped control authority: " + JSON.stringify(modelValidation));
     await humanPage.locator(".graph-node").first().click();
     await humanPage.locator("#annotationComment").fill("This node helped me understand the task.");
