@@ -4,7 +4,7 @@ import { createTaskActor, decisionActorChoices } from "../desktop/eval-main/deci
 
 const decision = { contractId: "openai-decisions-codex-text-v1", providerId: "openai-test", model: "gpt-6-luna" };
 const observation = (extra = {}) => ({ screenshot: "cGl4ZWxz", text: "Visible workspace", availableActions: ACTOR_ACTION_SCHEMA.properties.kind.enum,
-  controls: [{ ref: "node-a", role: "button", name: "Explore recommendation" }, { ref: "reply", role: "textarea", name: "Message" },
+  controls: [{ ref: "node-a", role: "button", name: "Explore recommendation" }, { ref: "reply", role: "textarea", name: "Message", canFill: true },
     { ref: "menu", role: "select", name: "Choose region" }], ...extra });
 const operation = (kind, ref = "", value = "") => ({ kind, ref, value, reason: "", satisfaction: null, comment: "", endpointStatus: null, remainingWork: "" });
 async function actorFixture(choose = () => "click") {
@@ -114,4 +114,21 @@ it("preserves the Decisions request limits with explicit screenshot omissions an
     await expect(f.actor.decide(observation({ controls: Array.from({ length: 256 }, (_, index) => ({ ref: `ref-${index}`, role: "button", name: "Item" })) })))
       .rejects.toMatchObject({ code: "actor_decision_limit" });
   } finally { await f.actor.close(); }
+});
+
+
+it("offers fill only for observed DOM capability, independently of role", () => {
+  const controls = [
+    { ref: "checkbox", role: "input", inputType: "checkbox", canFill: false, name: "Check" },
+    { ref: "radio", role: "textbox", inputType: "radio", canFill: false, name: "Radio" },
+    { ref: "readonly", role: "input", inputType: "text", canFill: false, name: "Read only" },
+    { ref: "unknown", role: "textbox", name: "Unverified" },
+    { ref: "text", role: "input", inputType: "text", canFill: true, name: "Text" },
+    { ref: "range", role: "input", inputType: "range", canFill: true, name: "Range" },
+  ];
+  for (const working of [false, true]) {
+    const offered = decisionActorChoices(observation({ controls }), ACTOR_ACTION_SCHEMA, working);
+    expect(offered.filter(choice => choice.action?.kind === "fill").map(choice => choice.action.ref)).toEqual(["text", "range"]);
+    expect(offered.some(choice => choice.action?.kind === "click" && choice.action.ref === "checkbox")).toBe(true);
+  }
 });

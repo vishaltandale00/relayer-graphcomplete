@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import {decisionActorChoices} from '../desktop/eval-main/decision-task-actor.mjs';
+import {ACTOR_ACTION_SCHEMA} from '../desktop/eval-main/task-actor.mjs';
 import {mkdtemp,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join,resolve} from 'node:path';
@@ -13,6 +15,32 @@ import {openTaskActorBrowser} from '../desktop/eval-main/task-actor-browser.mjs'
 import {INPUT_ACTOR_OBSERVATION_CONTRACT} from '../desktop/eval-main/task-actor.mjs';
 
 async function until(fn){const end=Date.now()+30000;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(r=>setTimeout(r,50));}throw new Error('Input proof timed out');}
+async function proveFillCapabilities(controller, page) {
+ await page.evaluate(() => {
+  const fields = document.createElement('fieldset'); fields.id = 'actor-fill-proof';
+  fields.style.cssText = 'position:fixed;top:40px;left:400px;width:240px;z-index:99999;background:white;display:grid;gap:5px';
+  fields.innerHTML = '<input aria-label="Fill text"><input aria-label="Fill checkbox" type="checkbox" role="textbox"><input aria-label="Fill radio" type="radio"><input aria-label="Fill range" type="range" min="0" max="10"><input aria-label="Fill readonly" readonly><textarea aria-label="Fill area"></textarea>';
+  document.querySelector('.workspace-layout').append(fields);
+ });
+ try {
+  const observation = await controller.observe();
+  const controls = observation.controls.filter(control => control.name.startsWith('Fill '));
+  assert.equal(controls.length, 6, 'all fixture controls are actually visible');
+  const choices = decisionActorChoices({...observation, controls}, ACTOR_ACTION_SCHEMA);
+  const fill = choices.filter(choice => choice.action?.kind === 'fill');
+  assert.deepEqual(fill.map(choice => controls.find(control => control.ref === choice.action.ref).name), ['Fill text', 'Fill range', 'Fill area']);
+  assert.equal(controls.find(control => control.name === 'Fill checkbox').inputType, 'checkbox');
+  assert.ok(choices.some(choice => choice.action?.kind === 'click' && choice.action.ref === controls.find(control => control.name === 'Fill checkbox').ref));
+  for (const choice of fill) {
+   const control = controls.find(control => control.ref === choice.action.ref);
+   const value = control.inputType === 'range' ? '7' : 'A real reply';
+   await controller.act({...choice.action, value});
+   assert.equal(await page.getByLabel(control.name, {exact:true}).inputValue(), value);
+  }
+  console.log('PASS actor fill capability: observed DOM type, checkbox/radio/readonly exclusion, text/textarea/range Playwright fill and click retained');
+ } finally { await page.locator('#actor-fill-proof').evaluate(element => element.remove()); }
+}
+
 export async function proveActorInputs({browser,service,productSession,data}){
  const tasks=await new HumanTaskService({stateFile:join(data,'actor-input-v4.json'),evalService:service,productSession}).open();
  const task=await tasks.create({testCaseId:'empty-project.visual-node-detail.single-turn',harnessConfigurationName:'fixture-node-detail',maxCompletions:2,endpoint:'Send and inspect a follow-up'});
@@ -26,6 +54,7 @@ export async function proveActorInputs({browser,service,productSession,data}){
  const get=async name=>{const obs=await controller.observe();const control=obs.controls.find(c=>c.name===name);assert.ok(control,`Visible control ${name}: ${JSON.stringify(await page.locator('#sendInteraction').evaluate(el=>({disabled:el.disabled,title:el.title,name:el.getAttribute('aria-label')})))}`);return control;};
  const refused=action=>assert.rejects(controller.act(action),{code:'actor_control_unavailable',actionDispatched:false});
  try{
+  await proveFillCapabilities(controller, page);
   await page.evaluate(()=>{
    const s=document.createElement('select');s.id='list-proof';s.multiple=true;s.size=3;s.setAttribute('aria-label','Signals proof');
    s.style.cssText='position:fixed;top:190px;left:500px;width:220px;z-index:99999';
@@ -126,7 +155,7 @@ if(import.meta.url===pathToFileURL(process.argv[1]??'').href){
   const productSession=await product.start();
   await product.seedProviderCatalog({providerId:'codex',label:'Fixture route',connected:true,models:[{id:'gpt-6.1-sol',label:'Luna',order:0,visible:true,available:true,providerDefault:true,metadata:{}}],systemFamily:{key:'codex',name:'Codex',modelIds:['gpt-6.1-sol']}});
   const request=async(path,method,body)=>{const r=await fetch(new URL(path,productSession.origin),{method,headers:{Cookie:`${productSession.cookie.name}=${productSession.cookie.value}`,'Content-Type':'application/json'},body:JSON.stringify(body)});const v=await r.json();assert.ok(r.ok,JSON.stringify(v));return v;};
-  const family=await request('/api/model-families','POST',{name:'Input proof fixture',enabled:true,members:[{providerId:'codex',modelId:'gpt-6.1-sol'}]});
+  const family=await request('/api/model-families','POST',{name:'Input proof fixture',enabled:true,members:[{providerId:'codex',modelId:'gpt-6.1-sol',roles:[{name:'orchestrator'}]}]});
   await request('/api/model-settings/defaults','PUT',{harnessId:'fixture-node-detail',familyId:family.id,providerId:'codex',modelId:'gpt-6.1-sol'});
   const service=await new EvalService({stateFile:join(data,'runs.json'),productSession,configurationPaths:configs}).open();owned.push(service);
   const browser=await chromium.launch();owned.push(browser);

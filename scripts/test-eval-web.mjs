@@ -1235,7 +1235,11 @@ async function proveTaskActor({ browser, service, productSession, data }) {
     for (const snapshot of snapshots) {
       assert.deepEqual(Object.keys(snapshot).sort(), [...["availableActions", "controls", "screenshot", "text"], ...(snapshot.completionJudgeFeedback ? ["completionJudgeFeedback"] : [])].sort());
       assert.deepEqual(snapshot.availableActions, ["click", "fill", "select", ...(snapshot === snapshots[7] ? [] : ["finish"])]);
-      for (const control of snapshot.controls) assert.deepEqual(Object.keys(control).sort(), ["name", "ref", "role"]);
+      for (const control of snapshot.controls) {
+        assert.deepEqual(Object.keys(control).sort(), ["canFill", "inputType", "name", "ref", "role"]);
+        assert.equal(typeof control.canFill, "boolean");
+        assert.ok(control.inputType === null || typeof control.inputType === "string");
+      }
     }
     assert.ok(task.events.filter(event => event.kind === "actor_observation").every(event => !event.observation.screenshot && event.observation.screenshotArtifact));
     assert.equal(task.events.filter((event) => event.kind === "actor_satisfaction").length, 2);

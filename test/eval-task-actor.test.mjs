@@ -1,5 +1,5 @@
 import { Window } from "happy-dom";
-import { taskActorControlIdentity, taskActorRebindControl, taskActorWorkingControlAllowed } from "../desktop/eval-main/task-actor-browser.mjs";
+import { taskActorControlIdentity, taskActorRebindControl, taskActorWorkingControlAllowed, taskActorFillCapability } from "../desktop/eval-main/task-actor-browser.mjs";
 import { taskActorPresentationReady, taskActorCurrentIdentity, taskActorCurrentUnchanged } from "../desktop/eval-main/task-actor-browser.mjs";
 import { mkdtemp, rm, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -1025,7 +1025,8 @@ it("a fresh no-action reaction ends recovery before a later question races", asy
   expect(f.tasks.get(f.id).completions).toBe(1);
 });
 
-it.each([false, true])("persists both actual Decisions judge stages across service recovery or reporter failure (failure=%s)", async reportFails => {
+it.each(["complete", "report_failed", "later_actor_failed"])("persists actual Decisions judge stages across recovery and failure (%s)", async outcome => {
+  const reportFails = outcome === "report_failed";
   const { createCompletionJudge, COMPLETION_JUDGE_EVIDENCE_V2, COMPLETION_DECISION_CONTRACT } = await import("../desktop/eval-main/task-completion-judge.mjs");
   const spec = { ...structuredClone(COMPLETION_JUDGE_SPEC), version: "completion-judge-v3-decisions", evidenceContract: structuredClone(COMPLETION_JUDGE_EVIDENCE_V2), decision: { contractId: COMPLETION_DECISION_CONTRACT.id, providerId: "fixture-openai", model: "gpt-6-luna" } };
   const requests = []; let calls = 0;
@@ -1036,7 +1037,7 @@ it.each([false, true])("persists both actual Decisions judge stages across servi
       if (reportFails) throw new Error("PRIVATE_PROVIDER_ERROR");
       const verdict = outputSchema.properties.verdict.enum[0];
       return { action: { verdict, evidenceExplanation: verdict === "complete" ? "Dates are visibly included in the plan." : "The trip dates remain unspecified.", continuationHint: verdict === "complete" ? "" : "Please make the trip dates explicit." }, usage: { input_tokens: calls * 100 } };
-    } }) }), decide: () => choices.shift() });
+    } }) }), decide: () => { if (outcome === "later_actor_failed" && calls === 1) throw new Error("Later actor failure"); return choices.shift(); } });
   await f.done; const session = f.tasks.get(f.id);
   const stages = session.events.filter(e => e.kind === "actor_completion_stage");
   expect(stages.slice(0, 3).map(e => [e.stage.engine, e.stage.phase])).toEqual([["decisions", "requested"], ["decisions", "completed"], ["codex", "requested"]]);
@@ -1048,6 +1049,9 @@ it.each([false, true])("persists both actual Decisions judge stages across servi
   if (reportFails) {
     expect(judgments).toEqual([]); expect(session.status).toBe("interrupted"); expect(session.termination.reason).not.toBe("endpoint_reached");
     expect(stages.at(-1).stage).toMatchObject({ engine: "codex", phase: "failed", nativeSessionUsage: null }); expect(f.dispatches).toEqual([]);
+  } else if (outcome === "later_actor_failed") {
+    expect(judgments.map(e => e.verdict)).toEqual(["incomplete"]);
+    expect(session.status).toBe("interrupted"); expect(session.termination.reason).toBe("actor_failed");
   } else {
     expect(judgments.map(e => e.verdict)).toEqual(["incomplete", "complete"]);
     expect(session.termination.reason).toBe("endpoint_reached"); expect(f.dispatches).toEqual(["/api/threads/1/interactions"]);
@@ -1056,6 +1060,21 @@ it.each([false, true])("persists both actual Decisions judge stages across servi
   expect(JSON.stringify(session.events)).not.toMatch(/PRIVATE_PROVIDER_ERROR|SECRET RUBRIC/);
   expect((await reopened.export(f.id)).bundle.session.events.filter(e => e.kind === "actor_completion_stage")).toEqual(stages);
   const retained = structuredClone(reopened.find(f.id).events);
+  if (!reportFails) for (const corrupt of [
+    events => events.filter(event => event.kind !== "actor_completion_stage"),
+    events => events.filter(event => event.id !== stages[3].id),
+    events => events.filter(event => event.id !== stages.at(-1).id),
+    events => [...events.filter(event => event.id !== stages[3].id), events.find(event => event.id === stages[3].id)],
+    events => { events.find(event => event.kind === "actor_completion_judgment").verdict = "complete"; return events; },
+  ]) {
+    reopened.find(f.id).events = corrupt(structuredClone(retained));
+    await expect(reopened.export(f.id)).rejects.toThrow("integrity");
+  }
+  if (outcome === "complete") {
+    reopened.find(f.id).events = retained.filter(event => !["actor_completion_evidence", "actor_completion_stage", "actor_completion_judgment"].includes(event.kind));
+    await expect(reopened.export(f.id)).rejects.toThrow("integrity");
+  }
+  reopened.find(f.id).events = structuredClone(retained);
   for (const event of reopened.find(f.id).events) {
     if (["actor_completion_evidence", "actor_completion_stage"].includes(event.kind)) event.judge.version = "forged-revision";
   }
@@ -1096,4 +1115,15 @@ it.each([1, 2, 3])("exports a real interrupted Decisions assessment after durabl
   expect(exported.termination.reason).toBe("actor_failed");
   expect(exported.events.filter(event => event.kind === "actor_completion_stage")).toHaveLength(stopAfter);
   expect(exported.events.filter(event => event.kind === "actor_completion_judgment")).toEqual([]);
+});
+
+
+it("derives fill capability from actual editable DOM types without expanding working authority", () => {
+  const document = new Window().document;
+  document.body.innerHTML = '<fieldset data-live-answer-scope="answer"><input id="text"><input id="check" type="checkbox" role="textbox"><input id="radio" type="radio"><input id="range" type="range"><input id="readonly" readonly><textarea id="area"></textarea><div id="spoof" role="textbox">Label</div></fieldset>';
+  const capabilities = Object.fromEntries([...document.querySelectorAll("[id]")].map(element => [element.id, taskActorFillCapability(element)]));
+  expect(Object.entries(capabilities).filter(([, value]) => value.canFill).map(([id]) => id)).toEqual(["text", "range", "area"]);
+  expect(capabilities.check.inputType).toBe("checkbox");
+  expect(taskActorWorkingControlAllowed(document.getElementById("range"), "fill")).toBe(false);
+  expect(taskActorWorkingControlAllowed(document.getElementById("text"), "fill")).toBe(true);
 });

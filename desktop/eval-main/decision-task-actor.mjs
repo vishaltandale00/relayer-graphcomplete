@@ -14,7 +14,7 @@ export function decisionActorChoices(observation, schema, working = false, execu
   for (const control of observation.controls ?? []) {
     if (typeof control.ref !== "string" || !control.ref || typeof control.name !== "string") continue;
     if (allowed.has("click")) add(emptyAction("click", control.ref));
-    if (allowed.has("fill") && ["input", "textarea", "textbox"].includes(control.role)) add(emptyAction("fill", control.ref));
+    if (allowed.has("fill") && control.canFill === true) add(emptyAction("fill", control.ref));
     if (allowed.has("select") && control.optionObservation === "opened-native-select-accessibility") {
       for (const label of control.options ?? []) if (typeof label === "string") add(emptyAction("select", control.ref, label));
     }

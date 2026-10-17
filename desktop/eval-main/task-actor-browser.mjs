@@ -64,6 +64,14 @@ export function taskActorCurrentUnchanged(pointer, previous) {
 }
 
 // These functions are serialized by Playwright; keep their dependencies local.
+export function taskActorFillCapability(element) {
+  const inputType = element.matches("input") ? element.type : null;
+  const supportedInput = ["text", "email", "number", "password", "search", "tel", "url",
+    "color", "date", "time", "datetime-local", "month", "range", "week"].includes(inputType);
+  return { inputType, canFill: !element.disabled && !element.matches(":disabled") && !element.readOnly
+    && (supportedInput || element.matches("textarea") || element.isContentEditable === true) };
+}
+
 export function taskActorWorkingControlAllowed(element, kind) {
   if (kind === "scroll") return true;
   const live = element?.closest?.("[data-live-answer-scope]");
@@ -323,6 +331,9 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           const identity = await handle.evaluate(taskActorAuthoredNavigation) ?? await handle.evaluate(taskActorControlIdentity);
           if (identity) controlIdentities.set(ref, identity);
           controls[index].ref = ref;
+          const fill = await handle.evaluate(taskActorFillCapability);
+          if (working && fill.canFill) fill.canFill = await handle.evaluate(taskActorWorkingControlAllowed, "fill");
+          Object.assign(controls[index], fill);
           if (listObservation) {
             const list = await handle.evaluate(taskActorOpenedSelect, { visibleList: true });
             if (list?.list) {

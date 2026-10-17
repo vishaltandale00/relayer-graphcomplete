@@ -124,10 +124,25 @@ export class HumanTaskService {
     const pinnedJudge = completionJudgeSpec(session);
     const evidence = new Map();
     const groups = new Map();
+    const prior = new Map();
+    let latestJudgment;
     const invalid = () => { throw failure("Completion judge stage integrity failure."); };
     const verdicts = COMPLETION_DECISION_CONTRACT.choices.map(choice => choice.value);
     for (const event of session.events) {
+      prior.set(event.id, event);
       if (event.kind === "actor_completion_evidence") evidence.set(event.id, event);
+      if (event.kind === "actor_completion_judgment" && pinnedJudge?.decision) {
+        const input = evidence.get(event.evidenceEventId);
+        const group = groups.get(event.evidenceEventId);
+        const intent = prior.get(input?.actorActionEventId);
+        const observation = prior.get(input?.observationEventId);
+        if (!group?.reported || group.judged || !isDeepStrictEqual(event.judge, pinnedJudge)
+          || intent?.kind !== "actor_action" || intent.action?.kind !== "finish" || observation?.kind !== "actor_observation"
+          || event.actorActionEventId !== intent.id || event.observationEventId !== observation.id
+          || intent.observationEventId !== observation.id || event.verdict !== group.selectedVerdict
+          || !isDeepStrictEqual(event.usage, group.nativeSessionUsage)) invalid();
+        group.judged = true; latestJudgment = event;
+      }
       if (event.kind !== "actor_completion_stage") continue;
       const stage = event.stage;
       const input = evidence.get(event.evidenceEventId);
@@ -163,7 +178,16 @@ export class HumanTaskService {
           || (stage.phase === "failed" && stage.failure !== "report_failed")) invalid();
         group.pending = null;
         group.done = stage.engine === "codex" || stage.phase === "failed";
+        if (stage.engine === "codex" && stage.phase === "completed") {
+          group.reported = true; group.nativeSessionUsage = stage.nativeSessionUsage;
+        }
       }
+    }
+    if (pinnedJudge?.decision && session.status === "completed") {
+      if ([...evidence.keys()].some(eventId => !groups.get(eventId)?.judged)) invalid();
+      if (session.termination?.reason !== "budget_exhausted"
+        && (!latestJudgment || session.termination?.completionJudgeEventId !== latestJudgment.id
+          || (session.termination.reason === "endpoint_reached" && latestJudgment.verdict !== "complete"))) invalid();
     }
     // An interrupted run may retain a requested packet or selector result without
     // its next stage. Such prefixes are evidence of partial work, never success.
