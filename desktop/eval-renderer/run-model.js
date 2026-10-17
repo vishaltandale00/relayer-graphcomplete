@@ -252,6 +252,12 @@ export function projectExecutionDossier(run, execution) {
   const hasJudgeOutput = asArray(execution.turns).some((turn) => (
     turn?.deterministicJudge || asArray(turn?.judgeResults).length > 0
   ));
+  const coverageByTurn = asArray(execution.turns).flatMap((turn, index) => (
+    asArray(turn.capabilityCoverage).map(coverage => ({ coverage, index }))
+  ));
+  if (execution.testCaseId === "graph-memory.prior-accepted-reference" && coverageByTurn.length === 0) {
+    coverageByTurn.push({ index: 1, coverage: { capability: "graph-search", status: "unknown", attempts: null, checks: [] } });
+  }
   return {
     id: execution.id,
     case: caseSnapshotProjection(execution),
@@ -273,6 +279,18 @@ export function projectExecutionDossier(run, execution) {
     mechanism: {
       checks: humanComparisonRequired ? legacyGates.map(gateProjection) : [],
     },
+    capabilityCoverage: coverageByTurn.map(({ coverage, index }) => ({
+        ...gateProjection({
+          id: `turn-${index + 1}:${coverage.capability}`,
+          label: `Turn ${index + 1} · ${coverage.capability === "graph-search" ? "Graph search" : coverage.capability}`,
+          status: coverage.status,
+          detail: coverage.status === "not_exercised" ? "No search attempted. Search conformance is unqualified."
+            : coverage.status === "unknown" ? "Search coverage has not been established."
+            : `${coverage.attempts} search attempt(s). Coverage does not change memory correctness.`,
+        }),
+        score: null,
+        checks: asArray(coverage.checks).map(gateProjection),
+      })),
     timing: asArray(execution.turns).flatMap((turn, index) => (
       turn?.timing ? [timingProjection(turn, index)] : []
     )),

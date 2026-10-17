@@ -68,6 +68,7 @@ const personalPresentation = (interactionNodeId: number, versionInteractionNodeI
 const graphReadResponse = (url: string, nodeId = 1, contexts: InteractionInput["contexts"] = [], leasedActionId?: number) => new Response(
   JSON.stringify(url.endsWith("/personal-presentation")
     ? { error: { code: "personal_presentation_not_attached" } }
+    : new URL(url).pathname.endsWith("/history") ? { entries: [], nextBeforeNodeId: null }
     : url.endsWith("/input") ? interactionInput(nodeId, contexts) : { node: graphNode(nodeId, leasedActionId) }),
   { status: url.endsWith("/personal-presentation") ? 404 : 200, headers: { "content-type": "application/json" } },
 );
@@ -1462,6 +1463,134 @@ describe("HarnessHost", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it.each([false, true])("releases access after root history bootstrap fails (pre-admitted: %s)", async (preAdmitted) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-history-bootstrap-failure-"));
+    const release = vi.fn();
+    const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
+    const acquire = vi.fn(async () => ({
+      access: {
+        kind: "secret" as const, contract: "secret@1" as const,
+        providerId: model.providerId, adapterId: model.adapterId, adapterImplementationVersion: "1",
+        endpoint: "https://api.openai.test", fields: { "api-key": "fixture-secret" },
+      },
+      release,
+    }));
+    let failHistory = true;
+    let accepted = false;
+    const complete = vi.fn(async () => { accepted = true; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (new URL(url).pathname.endsWith("/history") && failHistory) {
+        expect(acquire).toHaveBeenCalledOnce();
+        expect(release).not.toHaveBeenCalled();
+        throw new Error("history bootstrap unavailable");
+      }
+      if (url.endsWith("/output")) return accepted
+        ? new Response(JSON.stringify(completion))
+        : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 });
+      return graphReadResponse(url);
+    }));
+    const host = new HarnessHost({
+      stateFile: join(directory, "sessions.json"), controlToken: "control", accessBroker: { acquire },
+      implementations: { test: () => ({ complete, state: emptyState }) },
+    });
+    try {
+      await host.initialize();
+      await host.createSession({
+        threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+        configuration: { ...testConfiguration, executionAccessContracts: ["secret@1"] },
+      });
+      const admission = preAdmitted ? await host.admitProviderExecution(1, model, new AbortController().signal) : undefined;
+      await expect(host.complete(1, 1, graph(), model, undefined, undefined, admission?.executionLeaseId))
+        .rejects.toMatchObject({ message: "history bootstrap unavailable", effectBoundary: "none" });
+      expect(complete).not.toHaveBeenCalled();
+      await vi.waitFor(() => expect(release).toHaveBeenCalledOnce());
+      if (admission !== undefined) {
+        expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+        expect(release).toHaveBeenCalledOnce();
+      }
+      // The failed bootstrap must leave no active completion claim blocking a retry.
+      failHistory = false;
+      await expect(host.complete(1, 1, graph(), model)).resolves.toMatchObject({ output: completion });
+      expect(complete).toHaveBeenCalledOnce();
+      expect(acquire).toHaveBeenCalledTimes(2);
+      await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(2));
+    } finally {
+      await host.close();
+      vi.unstubAllGlobals();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true].flatMap(preAdmitted => ["pending", "late response"].map(timing => ({ preAdmitted, timing }))))(
+    "cancels root history before native execution ($timing, pre-admitted: $preAdmitted)", async ({ preAdmitted, timing }) => {
+      const directory = await mkdtemp(join(tmpdir(), "relayer-history-bootstrap-cancel-"));
+      const release = vi.fn();
+      const model = { providerId: "openai-work", adapterId: "openai-api", modelId: "gpt-5.2" };
+      const acquire = vi.fn(async () => ({
+        access: { kind: "secret" as const, contract: "secret@1" as const,
+          providerId: model.providerId, adapterId: model.adapterId, adapterImplementationVersion: "1",
+          endpoint: "https://api.openai.test", fields: { "api-key": "fixture-secret" } },
+        release,
+      }));
+      let enteredHistory!: () => void;
+      const historyEntered = new Promise<void>(resolve => { enteredHistory = resolve; });
+      let finishHistory: (() => void) | undefined;
+      let historySignal: AbortSignal | null | undefined;
+      let holdHistory = true;
+      let accepted = false;
+      const complete = vi.fn(async () => { accepted = true; });
+      vi.stubGlobal("fetch", vi.fn(async (url: string, init?: RequestInit) => {
+        if (new URL(url).pathname.endsWith("/history") && holdHistory) {
+          historySignal = init?.signal;
+          return new Promise<Response>((resolve, reject) => {
+            finishHistory = () => resolve(graphReadResponse(url));
+            if (timing === "pending") historySignal?.addEventListener("abort", () => reject(historySignal?.reason), { once: true });
+            enteredHistory();
+          });
+        }
+        if (url.endsWith("/output")) return accepted ? new Response(JSON.stringify(completion))
+          : new Response(JSON.stringify({ error: { code: "completion_not_found" } }), { status: 404 });
+        return graphReadResponse(url);
+      }));
+      const host = new HarnessHost({
+        stateFile: join(directory, "sessions.json"), controlToken: "control", accessBroker: { acquire },
+        implementations: { test: () => ({ complete, state: emptyState }) },
+      });
+      let completing: Promise<unknown> | undefined;
+      try {
+        await host.initialize();
+        await host.createSession({ threadId: 1, permissionProfileId: "auto", workingDirectory: directory,
+          configuration: { ...testConfiguration, executionAccessContracts: ["secret@1"] } });
+        const admission = preAdmitted ? await host.admitProviderExecution(1, model, new AbortController().signal) : undefined;
+        const controller = new AbortController();
+        completing = host.complete(1, 1, graph(), model, controller.signal, undefined, admission?.executionLeaseId);
+        const outcome = completing.catch(error => error);
+        await historyEntered;
+        expect(acquire).toHaveBeenCalledOnce();
+        controller.abort(new Error("fixture cancelled"));
+        if (timing === "late response") finishHistory?.();
+        expect(historySignal?.aborted).toBe(true);
+        await vi.waitFor(() => expect(release).toHaveBeenCalledOnce(), { timeout: 500 });
+        expect(await outcome).toMatchObject({ message: "fixture cancelled" });
+        expect(complete).not.toHaveBeenCalled();
+        if (admission !== undefined) {
+          expect(await host.releaseProviderExecution(admission.executionLeaseId)).toBe(true);
+          expect(release).toHaveBeenCalledOnce();
+        }
+        holdHistory = false;
+        await expect(host.complete(1, 1, graph(), model)).resolves.toMatchObject({ output: completion });
+        expect(complete).toHaveBeenCalledOnce();
+        await vi.waitFor(() => expect(release).toHaveBeenCalledTimes(2));
+      } finally {
+        finishHistory?.();
+        await completing?.catch(() => undefined);
+        await host.close();
+        vi.unstubAllGlobals();
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("holds trusted pre-admission through attempt setup and consumes its effective adapter version once", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-harness-pre-admission-"));
@@ -2984,6 +3113,8 @@ describe("HarnessHost", () => {
       expect(contexts.get(1)).toMatchObject({ origin: { kind: "root" }, threadHistory: firstHistory });
       expect(contexts.get(2)).toMatchObject({ origin: { kind: "root" }, threadHistory: history });
       for (const context of contexts.values()) {
+        expect(context.contextMode).toBe("graph-v1");
+        expect(context.graphHistory).toEqual({ entries: [], nextBeforeNodeId: null });
         expect(context).not.toHaveProperty("nativeSession");
         expect(context).not.toHaveProperty("requireNativeContinuity");
       }

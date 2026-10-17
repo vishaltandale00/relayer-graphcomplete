@@ -1395,12 +1395,15 @@ export class HarnessHost {
         }
         selectedAccess = accessLease.access;
       }
+      const graphHistory = origin.kind === "root" ? await graph.getHistory({ limit: 8 }, signal) : undefined;
+      if (origin.kind === "root") signal.throwIfAborted();
       // A turn cancelled and force-stopped before its native work starts ends as a cancellation.
       if (forceSignal.aborted) throw signal.reason;
       harnessStarted = true;
       onNativeStarted?.();
       const native = session.harness.complete({
         origin,
+        ...(graphHistory === undefined ? {} : { contextMode: "graph-v1" as const, graphHistory }),
         ...(traceContext?.threadIconSelection === undefined ? {} : { threadIconSelection: traceContext.threadIconSelection }),
         ...(origin.kind !== "root" || traceContext?.threadHistory === undefined ? {} : { threadHistory: traceContext.threadHistory }),
         inputGraph: interaction,

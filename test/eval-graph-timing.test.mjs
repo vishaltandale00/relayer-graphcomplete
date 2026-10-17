@@ -62,6 +62,16 @@ describe("time to first graph from a candidate trace", () => {
     expect(measure([transition("return", 8), transition("advance", 5)])).toMatchObject({ firstGraphSeconds: 5, acceptedSeconds: 8 });
   });
 
+  it.each(["/api/graph/submit", "/api/graph/current/transitions", "/api/graph/nodes"])("keeps uncertain proxy write outcomes distinct from server rejections: %s", path => {
+    const timing = graphTimingFromTrace({ sentAt: T0, ledgerComplete: true, graphOperations: [
+      { ...op("POST", path, 502, 4), errorCodes: ["graph_operation_proxy_failed"] },
+      op("POST", "/api/graph/submit", 200, 5),
+    ] });
+    expect(timing.graphWriteRejections).toBeNull();
+    expect(timing.firstGraphSeconds).toBe(path === "/api/graph/nodes" ? 5 : null);
+    expect(timing.acceptedSeconds).toBe(path === "/api/graph/nodes" ? 5 : null);
+  });
+
   it("keeps partial and missing evidence unknown independently", () => {
     expect(graphTimingFromTrace({ sentAt: T0, graphOperations: [op("POST", "/api/graph/submit", 200, 5)], events: [] }))
       .toMatchObject({ firstGraphSeconds: null, acceptedSeconds: null, graphWriteRejections: null, programRuns: null });

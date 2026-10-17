@@ -855,6 +855,30 @@ describe("CodexBasicHarness", () => {
     expect(searchGuidance).not.toMatch(/graph\.search\(\{[^}]*\b(?:permit|credential|database|token|authority)\s*:/s);
   });
 
+  it.each([
+    { name: "exact observed title", truncated: false, rows: [[{ type: "layer", id: "layer:42" }]], reference: true },
+    { name: "empty result", truncated: false, rows: [], reference: false },
+    { name: "truncated result", truncated: true, rows: [[{ type: "layer", id: "layer:42" }]], reference: false },
+  ])("executes the emitted search recipe against $name", async ({ truncated, rows, reference }) => {
+    const prompt = buildLayeredNavigationPrompt(runContext(1, "token"), "@relayer/graph-client", undefined, true, true);
+    const searchExample = prompt.split("For example:\n")[1]!.split("\n\nGraph search contract failures")[0]!;
+    const referenceExample = prompt.slice(prompt.indexOf("const priorLayer = search.rows"), prompt.indexOf("Do not turn a node, relationship"));
+    const inspectedNode = { title: "When graph content becomes available", authoredDetail: { components: [{ html: "<h2>Freshness acknowledged</h2>" }] } };
+    const graph = {
+      search: vi.fn(async () => ({ truncated, rows })),
+      addAction: vi.fn(async () => undefined),
+    };
+    const execute = new Function("graph", "inspectedNode", "summaryNode", "currentLayer", `return (async () => { ${searchExample}\n${referenceExample} })();`);
+    const run = execute(graph, inspectedNode, {}, {});
+    if (reference) await run;
+    else await expect(run).rejects.toThrow();
+    expect(graph.search).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      parameters: { anchor: { type: "string", value: inspectedNode.title } },
+    }));
+    if (reference) expect(graph.addAction).toHaveBeenCalledExactlyOnceWith({}, expect.objectContaining({ target: 42, relation: "reference" }));
+    else expect(graph.addAction).not.toHaveBeenCalled();
+  });
+
   it("uses the picker-selected root model and native delegation in the product configuration", async () => {
     const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"));
     let submitted: CodexAppServerTurnOptions | undefined;
@@ -1085,6 +1109,13 @@ describe("CodexBasicHarness", () => {
       access: codexAccess(),
     });
     expect(submissions[1]?.prompt).not.toContain("This run starts a fresh session");
+    for (const id of [4, 5]) await harness.complete({
+      ...runContext(id, `graph-${id}`), contextMode: "graph-v1",
+      graphHistory: { entries: [], nextBeforeNodeId: null },
+    });
+    expect(submissions.slice(2).map(options => "savedThreadId" in options)).toEqual([false, false]);
+    expect(submissions[2]?.prompt).toContain("getHistoricalInput");
+    expect(submissions[3]?.prompt).toContain("getHistory");
   });
 
   it("fails recursive Codex execution closed without fresh admission and access", async () => {

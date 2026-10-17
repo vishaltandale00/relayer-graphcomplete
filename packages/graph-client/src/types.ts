@@ -3,6 +3,23 @@ import type { EdgeShape, NodeSide } from "./edge-shapes.js";
 import type { CompiledNodeDetail } from "./detail.js";
 
 export type GraphId = number;
+export interface CompletionHistoryEntry {
+  readonly interactionNodeId: GraphId;
+  readonly lifecycle: "active" | "succeeded" | "stopped" | "failed" | null;
+  readonly currentLayerId: GraphId | null;
+  readonly returnedLayerId: GraphId | null;
+  readonly parentNodeId: GraphId | null;
+  readonly sourceCompletionId: GraphId | null;
+}
+export interface CompletionHistoryPage {
+  readonly entries: readonly CompletionHistoryEntry[];
+  readonly nextBeforeNodeId: GraphId | null;
+}
+export interface HistoricalInteractionInput {
+  readonly input: InteractionInput;
+  readonly liveAnswers: readonly { readonly sequence: number; readonly occurrence: LiveAnswer["occurrence"]; readonly question: SubmittedInputAction; readonly value: SubmittedInputValue }[];
+  readonly nextAnswerSequence: number | null;
+}
 
 export interface LiveAnswer {
   readonly sequence: number;
