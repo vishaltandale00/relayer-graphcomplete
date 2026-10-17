@@ -140,7 +140,6 @@ describe("independent Windows candidate", () => {
       for (const name of executables) {
         expect(await readFile(join(resources, "bin", name), "utf8")).toBe(`native fixture: ${name}\nsigned fixture`);
       }
-      await rm(resources, { recursive: true, force: true });
       // A rejecting copy aggregate does not drain sibling writers. One exact
       // directory-filtered EXE tests failure propagation without racing cleanup.
       const rejected = [];
@@ -155,7 +154,15 @@ describe("independent Windows candidate", () => {
       await expect(copyFiles(failingMatchers, transformer)).rejects.toThrow("signing rejected");
       expect(rejected).toEqual([join(resources, "bin", executables[0])]);
       for (const name of f.names) expect(await readFile(join(f.directory, name), "utf8")).toBe(`native fixture: ${name}`);
-    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+      await rm(resources, { recursive: true, force: true });
+      signingPackager.signIf = async () => { throw Error("signing rejected"); };
+      await expect(copyFiles(matchers, transformer)).rejects.toThrow("signing rejected");
+    } finally {
+      // copyFiles can reject through Promise.all before sibling copies settle.
+      // Allow only bounded filesystem cleanup retries; signing assertions above
+      // still observe the production copy/signing failure unchanged.
+      await rm(f.repositoryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 
   it("dispatches CLI preparation and consumption through production release orchestration before assembly", async () => {
