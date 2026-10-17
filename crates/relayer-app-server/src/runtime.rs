@@ -819,6 +819,55 @@ impl RuntimeClient {
         command: &CompleteInteraction<'_>,
         prepared_interaction_node: Option<i64>,
     ) -> Result<PreparedInteraction, RuntimeError> {
+        self.prepare_interaction_node(command, prepared_interaction_node, None)
+            .await
+    }
+
+    /// Prepares a run again on the graph interaction it is already bound to, for a message a
+    /// restart interrupted that has no input identity to replay (#722). The graph creates
+    /// nothing; activation mints a fresh capability for that node, as after a graph restart.
+    pub(crate) async fn prepare_existing(
+        &self,
+        command: &CompleteInteraction<'_>,
+        interaction_node: i64,
+    ) -> Result<PreparedInteraction, RuntimeError> {
+        if command.invocation.is_some() || command.input_identity.is_some() {
+            return Err(RuntimeError::Protocol(
+                "only an unidentified message reuses its graph interaction".into(),
+            ));
+        }
+        let mut attempt = 0;
+        let metadata = loop {
+            attempt += 1;
+            match self.interaction_metadata(interaction_node).await {
+                Ok(metadata) => break metadata,
+                Err(error)
+                    if error.is_retryable_startup_failure() && attempt < CONTROL_RETRY_ATTEMPTS =>
+                {
+                    tokio::time::sleep(std::time::Duration::from_millis(attempt * 25)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        if metadata.node_id != interaction_node
+            || metadata.invocation.is_some()
+            || metadata.durable_invocation.is_some()
+            || metadata.input_identity.is_some()
+        {
+            return Err(RuntimeError::Protocol(
+                "interrupted message's graph interaction provenance mismatch".into(),
+            ));
+        }
+        self.prepare_interaction_node(command, None, Some(interaction_node))
+            .await
+    }
+
+    async fn prepare_interaction_node(
+        &self,
+        command: &CompleteInteraction<'_>,
+        prepared_interaction_node: Option<i64>,
+        existing_interaction_node: Option<i64>,
+    ) -> Result<PreparedInteraction, RuntimeError> {
         let selected = self
             .configurations
             .get(command.harness_configuration_name)
@@ -893,25 +942,32 @@ impl RuntimeClient {
             "submittedInputs": command.submitted_inputs,
             "mintCapability": false,
         });
-        let interaction: CreateInteractionResponse =
-            if command.invocation.is_some() || command.input_identity.is_some() {
-                self.post_idempotent(
-                    create_url.clone(),
-                    &create_body,
-                    &self.graph_control_token,
-                    StatusCode::OK,
-                    "graph interaction creation",
-                )
-                .await?
-            } else {
-                self.post(
-                    create_url,
-                    &create_body,
-                    &self.graph_control_token,
-                    StatusCode::OK,
-                )
-                .await?
-            };
+        let interaction: CreateInteractionResponse = if let Some(node) = existing_interaction_node {
+            CreateInteractionResponse {
+                node: GraphNodeResponse { id: node },
+                graph_token: String::new(),
+                input_identity: None,
+                input_digest: None,
+                input_children: Vec::new(),
+            }
+        } else if command.invocation.is_some() || command.input_identity.is_some() {
+            self.post_idempotent(
+                create_url.clone(),
+                &create_body,
+                &self.graph_control_token,
+                StatusCode::OK,
+                "graph interaction creation",
+            )
+            .await?
+        } else {
+            self.post(
+                create_url,
+                &create_body,
+                &self.graph_control_token,
+                StatusCode::OK,
+            )
+            .await?
+        };
         if !interaction.graph_token.is_empty() {
             self.revoke_capability(&interaction.graph_token).await?;
             return Err(RuntimeError::Protocol(

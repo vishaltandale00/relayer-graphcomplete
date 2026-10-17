@@ -4980,11 +4980,11 @@ async fn verify_unbound_durable_restart(agent: bool) {
     world.restart().await;
     let recovered = world.product.get_interaction(world.child.id).await.unwrap();
     assert_eq!(recovered.graph_node_id, Some(world.completion_id));
-    // Existing startup semantics fail agent work but preserve an unlaunched
-    // user call as submitted. Neither branch may substitute another call.
+    // Startup fails agent work. An unlaunched user call keeps its exact binding and waits,
+    // interrupted, for the user's Resume (#722). Neither branch may substitute another call.
     assert_eq!(
         recovered.completion_status,
-        if agent { "failed" } else { "submitted" }
+        if agent { "failed" } else { "interrupted" }
     );
     assert_eq!(
         world

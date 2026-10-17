@@ -4898,10 +4898,34 @@ type HeldCompletes = Arc<Mutex<Vec<(i64, Value, Option<tokio::sync::oneshot::Sen
 struct HeldRunsFixture {
     _temporary: tempfile::TempDir,
     database: std::path::PathBuf,
+    root: std::path::PathBuf,
+    catalog: std::path::PathBuf,
+    graph_url: String,
+    harness_url: String,
+    capacity: Option<usize>,
     app: Router,
     thread_id: i64,
     source_interaction_id: i64,
     held: HeldCompletes,
+    /// Complete calls an earlier process of the app made before a restart. They are never
+    /// decided, as a provider never answers a process that is gone.
+    frozen: Vec<(i64, Value, Option<tokio::sync::oneshot::Sender<bool>>)>,
+    /// Each graph current a Stop or a Discard stopped, by node.
+    stopped_currents: Arc<Mutex<Vec<i64>>>,
+    /// The graph interactions whose result the graph accepted.
+    accepted_nodes: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Invoke actions whose graph preparation the graph refuses.
+    refused_actions: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Invoke actions whose graph preparation answers with a body that cannot be read.
+    garbled_actions: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Accepted graph interactions whose output read answers with another node's output.
+    mismatched_outputs: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// How many times the graph answered an output read with another node's output.
+    mismatched_reads: Arc<AtomicUsize>,
+    /// How many times the graph was asked to create an interaction.
+    graph_creates: Arc<AtomicUsize>,
+    /// While set, the graph answers interaction metadata reads with 503.
+    metadata_unavailable: Arc<std::sync::atomic::AtomicBool>,
     graph_task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
     harness_task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
 }
@@ -5022,7 +5046,80 @@ impl HeldRunsFixture {
         let graph_nodes = Arc::new(AtomicI64::new(202));
         let graph_metadata = Arc::new(Mutex::new(HashMap::<i64, Value>::new()));
         let created_metadata = graph_metadata.clone();
+        // The graph prepares one interaction per input identity or invoked action, as the real
+        // graph does, so a run that runs again keeps its interaction node.
+        let prepared_nodes = Arc::new(Mutex::new(HashMap::<String, i64>::new()));
+        // A run's canonical output exists only once its Complete call was accepted.
+        let accepted_nodes = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let read_accepted = accepted_nodes.clone();
+        let harness_accepted = accepted_nodes.clone();
+        let current_accepted = accepted_nodes.clone();
+        let stop_accepted = accepted_nodes.clone();
+        let refused_actions = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let prepare_refused = refused_actions.clone();
+        let garbled_actions = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let prepare_garbled = garbled_actions.clone();
+        let graph_creates = Arc::new(AtomicUsize::new(0));
+        let counted_creates = graph_creates.clone();
+        let mismatched_outputs = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let output_mismatched = mismatched_outputs.clone();
+        let mismatched_reads = Arc::new(AtomicUsize::new(0));
+        let counted_mismatches = mismatched_reads.clone();
+        let metadata_unavailable = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let metadata_down = metadata_unavailable.clone();
+        let stopped_currents = Arc::new(Mutex::new(Vec::<i64>::new()));
+        let read_stopped = stopped_currents.clone();
+        let recorded_stops = stopped_currents.clone();
         let graph = axum::Router::new()
+            .route(
+                "/api/control/interactions/{id}/current",
+                axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
+                    let stopped = read_stopped.lock().unwrap().contains(&id);
+                    let accepted = current_accepted.lock().unwrap().contains(&id);
+                    async move {
+                        axum::Json(json!({
+                            "completionId": id,
+                            "lifecycle": if accepted { "succeeded" } else if stopped { "stopped" } else { "active" },
+                            "headRevision": if stopped || accepted { 2 } else { 1 }, "currentLayerId": null,
+                            "finalLayerId": null, "safeReason": null,
+                            "temporalFeatures": {"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true,
+                                "projectionUi": false, "invokeResolution": false, "providerRecursion": false}
+                        }))
+                    }
+                }),
+            )
+            .route(
+                "/api/control/interactions/{id}/current/receipts",
+                axum::routing::post(|| async {
+                    (StatusCode::NOT_FOUND, axum::Json(json!({"error": {"code": "receipt_not_found", "message": "none"}})))
+                }),
+            )
+            .route(
+                "/api/control/interactions/{id}/current/transitions",
+                axum::routing::post(
+                    move |axum::extract::Path(id): axum::extract::Path<i64>, axum::Json(body): axum::Json<Value>| {
+                        let accepted = stop_accepted.lock().unwrap().contains(&id);
+                        if !accepted {
+                            recorded_stops.lock().unwrap().push(id);
+                        }
+                        async move {
+                            // A current the graph already accepted refuses a Stop.
+                            if accepted {
+                                return (
+                                    StatusCode::CONFLICT,
+                                    axum::Json(json!({"error": {"code": "completion_terminal", "message": "Already accepted."}})),
+                                );
+                            }
+                            (StatusCode::OK, axum::Json(json!({
+                                "completionId": id, "revision": 2, "lifecycle": "stopped",
+                                "currentLayerId": null, "finalLayerId": null,
+                                "operationKey": body["operationKey"], "requestDigest": "sha256:test",
+                                "snapshotDigest": "sha256:test", "projectionSequence": 2
+                            })))
+                        }
+                    },
+                ),
+            )
             // Stop needs the temporal schema, as in the desktop.
             .route(
                 "/api/control/temporal-features",
@@ -5056,25 +5153,64 @@ impl HeldRunsFixture {
                 axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                     let graph_nodes = graph_nodes.clone();
                     let created_metadata = created_metadata.clone();
+                    let prepared_nodes = prepared_nodes.clone();
+                    counted_creates.fetch_add(1, Ordering::SeqCst);
+                    let refused = body["invocation"]["sourceActionId"]
+                        .as_i64()
+                        .is_some_and(|action| prepare_refused.lock().unwrap().contains(&action));
+                    let garbled = body["invocation"]["sourceActionId"]
+                        .as_i64()
+                        .is_some_and(|action| prepare_garbled.lock().unwrap().contains(&action));
                     async move {
+                        if garbled {
+                            // A body the product cannot read, as when a response is lost on the way.
+                            return (StatusCode::OK, "truncated graph response").into_response();
+                        }
+                        if refused {
+                            return (
+                                StatusCode::UNPROCESSABLE_ENTITY,
+                                axum::Json(json!({"error": {"code": "invocation_refused", "message": "The graph refuses this call."}})),
+                            )
+                                .into_response();
+                        }
                         // The graph refuses this input, as it refuses a stale context target.
                         if body["text"] == "Rejected by the graph" {
                             return (
                                 StatusCode::UNPROCESSABLE_ENTITY,
                                 axum::Json(json!({"error": {"code": "context_target_missing", "message": "The context target is gone."}})),
-                            );
+                            )
+                                .into_response();
                         }
-                        let node_id = graph_nodes.fetch_add(1, Ordering::SeqCst);
-                        created_metadata
-                            .lock()
-                            .unwrap()
-                            .insert(node_id, body["invocation"].clone());
+                        let identity = if !body["inputIdentity"].is_null() {
+                            Some(format!("input:{}", body["inputIdentity"]))
+                        } else if !body["invocation"].is_null() {
+                            Some(format!("invocation:{}", body["invocation"]))
+                        } else {
+                            None
+                        };
+                        let existing = identity
+                            .as_ref()
+                            .and_then(|identity| prepared_nodes.lock().unwrap().get(identity).copied());
+                        let node_id = existing
+                            .unwrap_or_else(|| graph_nodes.fetch_add(1, Ordering::SeqCst));
+                        if let Some(identity) = identity {
+                            prepared_nodes.lock().unwrap().insert(identity, node_id);
+                        }
+                        created_metadata.lock().unwrap().insert(
+                            node_id,
+                            json!({
+                                "invocation": body["invocation"],
+                                "inputIdentity": body["inputIdentity"],
+                                "inputDigest": body["inputDigest"]
+                            }),
+                        );
                         // An identified input, such as a retry's, is echoed back as the
                         // graph records it.
                         (StatusCode::OK, axum::Json(json!({
                             "node": { "id": node_id }, "graphToken": "",
                             "inputIdentity": body["inputIdentity"], "inputDigest": body["inputDigest"]
                         })))
+                        .into_response()
                     }
                 }),
             )
@@ -5082,11 +5218,27 @@ impl HeldRunsFixture {
                 "/api/control/interactions/{id}",
                 axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
                     let graph_metadata = graph_metadata.clone();
+                    let down = metadata_down.load(Ordering::SeqCst);
                     async move {
-                        axum::Json(json!({
+                        if down {
+                            return (
+                                StatusCode::SERVICE_UNAVAILABLE,
+                                axum::Json(json!({"error": {"code": "unavailable", "message": "Graph unavailable."}})),
+                            );
+                        }
+                        let metadata = graph_metadata.lock().unwrap().get(&id).cloned();
+                        let field = |name: &str| {
+                            metadata
+                                .as_ref()
+                                .map(|metadata| metadata[name].clone())
+                                .unwrap_or(Value::Null)
+                        };
+                        (StatusCode::OK, axum::Json(json!({
                             "nodeId": id,
-                            "invocation": graph_metadata.lock().unwrap().get(&id).cloned()
-                        }))
+                            "invocation": field("invocation"),
+                            "inputIdentity": field("inputIdentity"),
+                            "inputDigest": field("inputDigest")
+                        })))
                     }
                 }),
             )
@@ -5095,12 +5247,25 @@ impl HeldRunsFixture {
                 "/api/control/interactions/{id}/output",
                 axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
                     let source_output = source_output.clone();
+                    let accepted = id == 101 || read_accepted.lock().unwrap().contains(&id);
+                    let mismatched = output_mismatched.lock().unwrap().contains(&id);
+                    if accepted && mismatched {
+                        counted_mismatches.fetch_add(1, Ordering::SeqCst);
+                    }
                     async move {
-                        axum::Json(if id == 101 {
+                        if !accepted {
+                            return (
+                                StatusCode::NOT_FOUND,
+                                axum::Json(json!({"error": {"code": "completion_not_found", "message": "Not accepted."}})),
+                            );
+                        }
+                        // A faulty graph answers with another node's output.
+                        let node = if mismatched { id + 1000 } else { id };
+                        (StatusCode::OK, axum::Json(if id == 101 {
                             source_output
                         } else {
-                            json!({"nodeId": id, "rootLayer": {"layer": {"id": 900 + id}, "nodes": [], "edges": [], "actions": []}})
-                        })
+                            json!({"nodeId": node, "rootLayer": {"layer": {"id": 900 + node}, "nodes": [], "edges": [], "actions": []}})
+                        }))
                     }
                 }),
             );
@@ -5137,12 +5302,14 @@ impl HeldRunsFixture {
                 "/sessions/{id}/complete",
                 axum::routing::post(move |axum::Json(body): axum::Json<Value>| {
                     let held = harness_held.clone();
+                    let accepted = harness_accepted.clone();
                     async move {
                         let run = body["traceContext"]["productInteractionId"].as_i64().unwrap();
                         let node_id = body["graph"]["nodeId"].as_i64().unwrap();
                         let (decide, decision) = tokio::sync::oneshot::channel();
                         held.lock().unwrap().push((run, body, Some(decide)));
                         if decision.await.unwrap_or(false) {
+                            accepted.lock().unwrap().insert(node_id);
                             (StatusCode::OK, axum::Json(json!({"output": {
                                 "nodeId": node_id,
                                 "rootLayer": {"layer": {"id": 900 + node_id}, "nodes": [], "edges": [], "actions": []}
@@ -5192,13 +5359,77 @@ impl HeldRunsFixture {
         Self {
             _temporary: temporary,
             database,
+            root,
+            catalog,
+            graph_url,
+            harness_url,
+            capacity,
             app,
             thread_id,
             source_interaction_id,
             held,
+            frozen: Vec::new(),
+            stopped_currents,
+            accepted_nodes,
+            refused_actions,
+            garbled_actions,
+            mismatched_outputs,
+            mismatched_reads,
+            graph_creates,
+            metadata_unavailable,
             graph_task,
             harness_task,
         }
+    }
+
+    /// Restarts the app on the same database, graph and harness, as a relaunch does. The
+    /// earlier process's provider calls never answer, so nothing it ran can settle.
+    async fn restart(&mut self) {
+        self.frozen.append(&mut self.held.lock().unwrap());
+        self.app = open_app_with_runtime_capacity(
+            &self.database,
+            &self.root,
+            &self.catalog,
+            &self.graph_url,
+            &self.harness_url,
+            self.capacity,
+        )
+        .await;
+    }
+
+    /// Reopens the app on the same database with no GraphComplete runtime.
+    async fn reopen_without_graph(&mut self) {
+        self.app = open_app(&self.database, &self.root).await;
+    }
+
+    /// Posts to a run's own endpoint, such as `resume` or `discard`.
+    async fn run_action(&self, run: i64, action: &str) -> (StatusCode, Value) {
+        let thread_id = self.thread_id;
+        app_post(
+            &self.app,
+            &format!("/api/threads/{thread_id}/interactions/{run}/{action}"),
+            json!({}),
+        )
+        .await
+    }
+
+    /// The thread as the thread list reports it.
+    async fn thread_summary(&self) -> Value {
+        let threads = response_json(
+            self.app
+                .clone()
+                .oneshot(api_request("GET", "/api/threads", None, true))
+                .await
+                .unwrap(),
+        )
+        .await;
+        threads["threads"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|thread| thread["id"] == self.thread_id)
+            .unwrap()
+            .clone()
     }
 
     /// A user invokes an action. Returns the run and its status in the response.
@@ -5326,6 +5557,27 @@ impl HeldRunsFixture {
             .find(|thread| thread["id"] == self.thread_id)
             .unwrap()["activity"]
             .clone()
+    }
+
+    /// How many interactions the thread has, so a test can tell no user message was added.
+    async fn interaction_count(&self) -> usize {
+        let thread_id = self.thread_id;
+        response_json(
+            self.app
+                .clone()
+                .oneshot(api_request(
+                    "GET",
+                    &format!("/api/state?threadId={thread_id}"),
+                    None,
+                    true,
+                ))
+                .await
+                .unwrap(),
+        )
+        .await["interactions"]
+            .as_array()
+            .unwrap()
+            .len()
     }
 
     async fn status_of(&self, run: i64) -> String {
@@ -6227,6 +6479,578 @@ async fn a_retry_waits_for_capacity_like_any_human_started_run() {
     fixture.finish();
 }
 
+/// PAUSE-002 (#722, PRD 8.2): a restart stops every run where it was, and nothing starts on
+/// its own, across a second restart too. A run that was executing is interrupted when it can
+/// run again on its own interaction: an invoke, an identified send, or a plain message with no
+/// input identity (owner decision, 2026-10-16). A run that was queued, behind its node or for capacity, is paused. Resume starts a
+/// node's chain from its head, in order, on the same interaction nodes, and re-queues the rest.
+/// Discard ends a run stopped with its text, stopping its graph current first. Resume all
+/// starts what is left.
+#[tokio::test]
+async fn a_restart_pauses_queued_runs_and_resume_starts_them_in_order() {
+    // Node 7 offers actions 41, 42 and 43; action 44 has node 8.
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 7), (43, 7), (44, 8)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, Some(4)).await;
+    let thread_id = fixture.thread_id;
+
+    let (head, _) = fixture.invoke(41).await;
+    let head_node = fixture.started(head).await["graph"]["nodeId"].clone();
+    let plain = fixture.send("A plain message").await["id"]
+        .as_i64()
+        .unwrap();
+    let plain_node = fixture.started(plain).await["graph"]["nodeId"].clone();
+    let (status, identified) = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/interactions"),
+        json!({ "text": "An identified message", "inputId": "send-before-restart" }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{identified}");
+    let identified = identified["id"].as_i64().unwrap();
+    let identified_node = fixture.started(identified).await["graph"]["nodeId"].clone();
+    let (other, _) = fixture.invoke(44).await;
+    let other_node = fixture.started(other).await["graph"]["nodeId"]
+        .as_i64()
+        .unwrap();
+    let (second, _) = fixture.invoke(42).await;
+    fixture.waits_for(second, "node").await;
+    let (third, _) = fixture.invoke(43).await;
+    fixture.waits_for(third, "node").await;
+    let waiting = fixture.send("Waits for a slot").await["id"]
+        .as_i64()
+        .unwrap();
+    fixture.waits_for(waiting, "capacity").await;
+    let turns_before = fixture.interaction_count().await;
+
+    // Two restarts in a row change nothing more, and nothing starts on its own.
+    for _ in 0..2 {
+        fixture.restart().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            fixture.started_runs().is_empty(),
+            "a run started on its own"
+        );
+        for run in [head, plain, identified, other] {
+            let interaction = fixture.interaction(run).await;
+            assert_eq!(
+                interaction["completionStatus"], "interrupted",
+                "{interaction}"
+            );
+            assert!(
+                interaction["completionError"]
+                    .as_str()
+                    .unwrap()
+                    .contains("Resume runs it again")
+            );
+        }
+        for run in [second, third, waiting] {
+            let interaction = fixture.interaction(run).await;
+            assert_eq!(interaction["completionStatus"], "paused", "{interaction}");
+            assert!(interaction.get("queueReason").is_none());
+        }
+        assert_eq!(fixture.interaction(second).await["runNodeId"], 7);
+        // Paused and interrupted runs are not active: the thread shows no run and can be
+        // archived, and its list entry counts them.
+        let summary = fixture.thread_summary().await;
+        assert_eq!(summary["pausedRuns"], 7, "{summary}");
+        assert!(summary.get("activity").is_none(), "{summary}");
+        assert_eq!(summary["archiveBlocked"], false);
+    }
+
+    // Only the head of a node's chain resumes.
+    let (status, refused) = fixture.run_action(second, "resume").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "resume_not_queue_head");
+    assert_eq!(fixture.status_of(second).await, "paused");
+
+    // Resuming the head runs it again on its own interaction node, and the runs behind it wait
+    // for it in order.
+    let (status, resumed) = fixture.run_action(head, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    let resumed_ids: Vec<i64> = resumed["interactions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|run| run["id"].as_i64().unwrap())
+        .collect();
+    assert_eq!(resumed_ids, [head, second, third]);
+    assert_eq!(fixture.started(head).await["graph"]["nodeId"], head_node);
+    fixture.waits_for(second, "node").await;
+    fixture.waits_for(third, "node").await;
+    // A repeated click starts nothing twice.
+    let (status, again) = fixture.run_action(head, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(fixture.started_runs(), [head]);
+
+    // The identified message runs again on its own interaction node: no new user message.
+    let (status, _) = fixture.run_action(identified, "resume").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        fixture.started(identified).await["graph"]["nodeId"],
+        identified_node
+    );
+    assert_eq!(fixture.interaction_count().await, turns_before);
+    // So does the plain message, which has no input identity: it reruns on its graph node.
+    let (status, _) = fixture.run_action(plain, "resume").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fixture.started(plain).await["graph"]["nodeId"], plain_node);
+    assert_eq!(fixture.interaction_count().await, turns_before);
+    fixture.settle(plain, true);
+    fixture.settled(plain, "accepted").await;
+
+    // The chain keeps same-node order, whatever each run's outcome.
+    fixture.settle(head, true);
+    let second_body = fixture.started(second).await;
+    let head_node = head_node.as_i64().unwrap();
+    assert!(
+        second_body["traceContext"]["threadHistory"]
+            .as_array()
+            .unwrap()
+            .contains(&json!({"interactionNodeId": head_node, "responseLayerId": 900 + head_node})),
+        "{}",
+        second_body["traceContext"]["threadHistory"]
+    );
+    fixture.waits_for(third, "node").await;
+    fixture.settle(second, false);
+    fixture.started(third).await;
+    fixture.settle(third, true);
+    fixture.settle(identified, true);
+    for (run, outcome) in [
+        (head, "accepted"),
+        (second, "failed"),
+        (third, "accepted"),
+        (identified, "accepted"),
+    ] {
+        fixture.settled(run, outcome).await;
+    }
+
+    // Discard stops an interrupted run's graph current first, then ends it with its text.
+    let (status, _) = fixture.run_action(other, "discard").await;
+    assert_eq!(status, StatusCode::OK);
+    fixture.settled(other, "stopped").await;
+    assert_eq!(fixture.interaction(other).await["text"], "Action 44");
+    assert!(
+        fixture
+            .stopped_currents
+            .lock()
+            .unwrap()
+            .contains(&other_node)
+    );
+    assert_eq!(fixture.thread_summary().await["pausedRuns"], 1);
+
+    // Resume all starts what is left: the message that waited for capacity.
+    let (status, all) = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/resume"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{all}");
+    assert_eq!(all["interactions"].as_array().unwrap().len(), 1);
+    assert_eq!(all["interactions"][0]["id"], waiting);
+    fixture.started(waiting).await;
+    fixture.settle(waiting, true);
+    fixture.settled(waiting, "accepted").await;
+    assert_eq!(
+        fixture.started_runs(),
+        [head, identified, plain, second, third, waiting]
+    );
+    assert_eq!(fixture.thread_summary().await["pausedRuns"], 0);
+    // A repeated Resume of a run the user resumed, which has ended since, reports it as it
+    // stands and starts nothing.
+    let (status, ended) = fixture.run_action(head, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{ended}");
+    assert_eq!(ended["interactions"][0]["completionStatus"], "accepted");
+    // A run that was never resumed is refused: the discarded one, and a run that was never
+    // paused at all.
+    for never_resumed in [other, fixture.source_interaction_id] {
+        let (status, refused) = fixture.run_action(never_resumed, "resume").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["code"], "run_not_resumable");
+    }
+    // A repeated Discard reports the run it discarded as it stands; a Discard of a run that
+    // was never paused or interrupted is refused.
+    let (status, discarded) = fixture.run_action(other, "discard").await;
+    assert_eq!(status, StatusCode::OK, "{discarded}");
+    assert_eq!(discarded["completionStatus"], "stopped");
+    for never_discarded in [head, fixture.source_interaction_id] {
+        let (status, refused) = fixture.run_action(never_discarded, "discard").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["code"], "run_not_resumable");
+    }
+    assert_eq!(
+        fixture.started_runs(),
+        [head, identified, plain, second, third, waiting]
+    );
+    fixture.finish();
+}
+
+/// PAUSE-004 (#722): startup still recovers what the graph accepted. A run interrupted at one
+/// restart whose result the graph accepted after all is accepted at the next, never left for a
+/// Resume that would run it again. A Discard of a run the graph accepted keeps its result.
+#[tokio::test]
+async fn a_restart_recovers_an_interrupted_run_the_graph_accepted() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 8)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let (first, _) = fixture.invoke(41).await;
+    let first_node = fixture.started(first).await["graph"]["nodeId"]
+        .as_i64()
+        .unwrap();
+    let (second, _) = fixture.invoke(42).await;
+    let second_node = fixture.started(second).await["graph"]["nodeId"]
+        .as_i64()
+        .unwrap();
+    fixture.restart().await;
+    assert_eq!(fixture.status_of(first).await, "interrupted");
+    assert_eq!(fixture.status_of(second).await, "interrupted");
+
+    // The graph accepted both results, but the product never recorded them.
+    fixture
+        .accepted_nodes
+        .lock()
+        .unwrap()
+        .extend([first_node, second_node]);
+    // While the graph answers with another node's output, the Discard's graph Stop never
+    // records it as this run's result; it keeps settling until the canonical output reads.
+    fixture
+        .mismatched_outputs
+        .lock()
+        .unwrap()
+        .insert(second_node);
+    let (status, discarded) = fixture.run_action(second, "discard").await;
+    assert_eq!(status, StatusCode::OK, "{discarded}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while fixture.mismatched_reads.load(Ordering::SeqCst) < 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Stop never read the output"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let settling = fixture.interaction(second).await;
+    assert_eq!(settling["completionStatus"], "submitted", "{settling}");
+    assert!(settling["completionOutput"].is_null(), "{settling}");
+    fixture.mismatched_outputs.lock().unwrap().clear();
+    fixture.settled(second, "accepted").await;
+    let accepted = fixture.interaction(second).await;
+    assert_eq!(
+        accepted["completionOutput"]["nodeId"], second_node,
+        "{accepted}"
+    );
+    // A repeated Discard of it reports the accepted run as it stands.
+    let (status, repeated) = fixture.run_action(second, "discard").await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["completionStatus"], "accepted");
+    fixture.restart().await;
+    let recovered = fixture.interaction(first).await;
+    assert_eq!(recovered["completionStatus"], "accepted", "{recovered}");
+    assert_eq!(recovered["completionOutput"]["nodeId"], first_node);
+    assert!(fixture.started_runs().is_empty());
+    assert_eq!(fixture.thread_summary().await["pausedRuns"], 0);
+    fixture.finish();
+}
+
+/// PAUSE-003 (#722): a Resume whose head cannot start leaves no run stranded. The head records
+/// its failure, the runs behind it are paused again, and nothing starts; the next run is then
+/// the head.
+#[tokio::test]
+async fn a_resume_whose_head_cannot_start_pauses_the_rest_again() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 7), (43, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let (head, _) = fixture.invoke(41).await;
+    fixture.started(head).await;
+    let (second, _) = fixture.invoke(42).await;
+    fixture.waits_for(second, "node").await;
+    let (third, _) = fixture.invoke(43).await;
+    fixture.waits_for(third, "node").await;
+    fixture.restart().await;
+
+    fixture.refused_actions.lock().unwrap().insert(41);
+    let (status, refused) = fixture.run_action(head, "resume").await;
+    assert!(!status.is_success(), "{status} {refused}");
+    assert_eq!(fixture.status_of(head).await, "failed");
+    for run in [second, third] {
+        assert_eq!(fixture.status_of(run).await, "paused");
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(fixture.started_runs().is_empty());
+    let summary = fixture.thread_summary().await;
+    assert!(
+        summary.get("activity").is_none() || summary["activity"] == "failed",
+        "{summary}"
+    );
+    assert_eq!(summary["archiveBlocked"], false);
+
+    // The next run is the head now, and its chain resumes in order.
+    let (status, resumed) = fixture.run_action(second, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    fixture.started(second).await;
+    fixture.waits_for(third, "node").await;
+    fixture.settle(second, true);
+    fixture.started(third).await;
+    fixture.settle(third, true);
+    fixture.settled(third, "accepted").await;
+    fixture.finish();
+}
+
+/// PAUSE-004 (#722, owner decision 2026-10-16): a thread's first message has no input identity,
+/// yet a restart while it runs never just fails it. It is interrupted, and Resume runs it
+/// exactly once more, on its own graph interaction node, with no second user message.
+#[tokio::test]
+async fn a_restart_interrupts_a_threads_first_message_and_resume_reruns_it_once() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let settings = response_json(
+        fixture
+            .app
+            .clone()
+            .oneshot(api_request("GET", "/api/model-settings", None, true))
+            .await
+            .unwrap(),
+    )
+    .await;
+    let family_id = settings["families"][0]["id"].as_i64().unwrap();
+    let (status, thread) = app_post(
+        &fixture.app,
+        "/api/threads",
+        json!({
+            "title": "First message",
+            "initialMessage": "Start a new plan",
+            "harnessId": "codex-basic",
+            "modelSelection": {"familyId": family_id, "providerId": "codex", "modelId": "test-model"}
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{thread}");
+    let thread_id = thread["id"].as_i64().unwrap();
+    let first = thread["rootInteractionId"].as_i64().unwrap();
+    let first_node = fixture.started(first).await["graph"]["nodeId"].clone();
+    // A message claimed but not yet bound to the graph when Relayer stopped.
+    let pool = sqlite_pool(&fixture.database).await;
+    let unbound = sqlx::query(
+        "INSERT INTO interactions(thread_id,sequence,text,created_at,completion_status,permission_profile_id,model_provider_id,provider_model_id,model_family_id)
+         SELECT thread_id,sequence+1,'Not bound yet',created_at,'submitted',permission_profile_id,model_provider_id,provider_model_id,model_family_id FROM interactions WHERE id=?1",
+    )
+    .bind(first)
+    .execute(&pool)
+    .await
+    .unwrap()
+    .last_insert_rowid();
+    pool.close().await;
+    let state_of = |app: Router| async move {
+        response_json(
+            app.oneshot(api_request(
+                "GET",
+                &format!("/api/state?threadId={thread_id}"),
+                None,
+                true,
+            ))
+            .await
+            .unwrap(),
+        )
+        .await
+    };
+    let first_of = |state: &Value| {
+        state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == first)
+            .unwrap()
+            .clone()
+    };
+
+    // Two restarts in a row leave it interrupted, and nothing reruns it on its own. The second
+    // comes with an upgraded harness, whose digest no longer matches the message's binding.
+    for restart in 0..2 {
+        if restart == 1 {
+            let catalog = fs::read_to_string(&fixture.catalog).unwrap();
+            fs::write(
+                &fixture.catalog,
+                catalog.replace("\"sha256:test\"", "\"sha256:upgraded\""),
+            )
+            .unwrap();
+        }
+        fixture.restart().await;
+        let state = state_of(fixture.app.clone()).await;
+        let interrupted = first_of(&state);
+        assert_eq!(
+            interrupted["completionStatus"], "interrupted",
+            "{interrupted}"
+        );
+        assert!(
+            interrupted["completionError"]
+                .as_str()
+                .unwrap()
+                .contains("Resume runs it again")
+        );
+        assert_eq!(state["interactions"].as_array().unwrap().len(), 2);
+        let waiting = state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == unbound)
+            .unwrap();
+        assert_eq!(waiting["completionStatus"], "interrupted", "{waiting}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        assert!(fixture.started_runs().is_empty());
+    }
+    let creates_before_resume = fixture.graph_creates.load(Ordering::SeqCst);
+
+    let uri = format!("/api/threads/{thread_id}/interactions/{first}/resume");
+    let (status, resumed) = app_post(&fixture.app, &uri, json!({})).await;
+    assert_eq!(status, StatusCode::OK, "{resumed}");
+    assert_eq!(fixture.started(first).await["graph"]["nodeId"], first_node);
+    // The graph created nothing: the message reran on its own interaction.
+    assert_eq!(
+        fixture.graph_creates.load(Ordering::SeqCst),
+        creates_before_resume
+    );
+    // A second click starts nothing more.
+    let (status, _) = app_post(&fixture.app, &uri, json!({})).await;
+    assert_eq!(status, StatusCode::OK);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(fixture.started_runs(), [first]);
+    fixture.settle(first, true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = state_of(fixture.app.clone()).await;
+        if first_of(&state)["completionStatus"] == "accepted" {
+            assert_eq!(state["interactions"].as_array().unwrap().len(), 2);
+            assert_eq!(first_of(&state)["graphNodeId"], first_node);
+            // It ran under the upgraded harness, recorded on the same node.
+            assert_eq!(
+                first_of(&state)["harnessConfigurationDigest"],
+                "sha256:upgraded"
+            );
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the first message never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    // The message that was never bound is prepared when it resumes, once.
+    let (status, _) = app_post(
+        &fixture.app,
+        &format!("/api/threads/{thread_id}/interactions/{unbound}/resume"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    fixture.started(unbound).await;
+    assert_eq!(
+        fixture.graph_creates.load(Ordering::SeqCst),
+        creates_before_resume + 1
+    );
+    fixture.settle(unbound, true);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        let state = state_of(fixture.app.clone()).await;
+        let settled = state["interactions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|interaction| interaction["id"] == unbound)
+            .unwrap()["completionStatus"]
+            == "accepted";
+        if settled {
+            assert_eq!(state["interactions"].as_array().unwrap().len(), 2);
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the unbound message never settled"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(fixture.started_runs(), [first, unbound]);
+    fixture.finish();
+}
+
+/// PAUSE-004 (#722): a restart that cannot reach the graph still interrupts a plain message
+/// instead of failing it, and Resume runs it once the graph is back.
+#[tokio::test]
+async fn a_restart_without_the_graph_still_interrupts_a_plain_message() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let plain = fixture.send("A plain message").await["id"]
+        .as_i64()
+        .unwrap();
+    let node = fixture.started(plain).await["graph"]["nodeId"].clone();
+    fixture.metadata_unavailable.store(true, Ordering::SeqCst);
+    fixture.restart().await;
+    let interrupted = fixture.interaction(plain).await;
+    assert_eq!(
+        interrupted["completionStatus"], "interrupted",
+        "{interrupted}"
+    );
+    fixture.metadata_unavailable.store(false, Ordering::SeqCst);
+    let (status, _) = fixture.run_action(plain, "resume").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(fixture.started(plain).await["graph"]["nodeId"], node);
+    fixture.settle(plain, true);
+    fixture.settled(plain, "accepted").await;
+
+    // Reopened without GraphComplete, a repeated Resume of the settled run still reports it
+    // as it stands, and a run that was never paused is still refused, from the stored runs.
+    fixture.reopen_without_graph().await;
+    let (status, repeated) = fixture.run_action(plain, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["interactions"][0]["completionStatus"], "accepted");
+    let source = fixture.source_interaction_id;
+    let (status, refused) = fixture.run_action(source, "resume").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "run_not_resumable");
+    fixture.finish();
+}
+
+/// PAUSE-003 (#722): a Resume whose graph preparation ends without starting the run, for
+/// example with an unreadable answer, leaves it waiting for the user again, holding nothing.
+/// The chain behind it stays paused, and a later Resume runs it in order.
+#[tokio::test]
+async fn a_resume_whose_preparation_ends_ambiguously_waits_for_the_user_again() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7), (42, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let (head, _) = fixture.invoke(41).await;
+    fixture.started(head).await;
+    let (second, _) = fixture.invoke(42).await;
+    fixture.waits_for(second, "node").await;
+    fixture.restart().await;
+
+    fixture.garbled_actions.lock().unwrap().insert(41);
+    let (status, body) = fixture.run_action(head, "resume").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["code"], "resume_not_started");
+    assert_eq!(fixture.status_of(head).await, "interrupted");
+    assert_eq!(fixture.status_of(second).await, "paused");
+    assert!(fixture.started_runs().is_empty());
+    let summary = fixture.thread_summary().await;
+    assert!(summary.get("activity").is_none(), "{summary}");
+
+    // Once the graph answers again, the chain resumes in order; its node was never left held.
+    // Two overlapping Resumes, as a retried delivery sends: both report the chain's head, and
+    // it starts once.
+    fixture.garbled_actions.lock().unwrap().clear();
+    let ((first_status, first), (repeat_status, repeat)) = tokio::join!(
+        fixture.run_action(head, "resume"),
+        fixture.run_action(head, "resume")
+    );
+    assert_eq!(first_status, StatusCode::OK, "{first}");
+    assert_eq!(repeat_status, StatusCode::OK, "{repeat}");
+    assert_eq!(first["interactions"][0]["id"], head);
+    assert_eq!(repeat["interactions"][0]["id"], head);
+    fixture.started(head).await;
+    fixture.waits_for(second, "node").await;
+    assert_eq!(fixture.started_runs(), [head]);
+    fixture.settle(head, true);
+    fixture.started(second).await;
+    fixture.settle(second, true);
+    fixture.settled(second, "accepted").await;
+    fixture.finish();
+}
+
 async fn app_post(app: &Router, uri: &str, body: Value) -> (StatusCode, Value) {
     let response = app
         .clone()
@@ -6931,7 +7755,7 @@ async fn product_model_selection_is_validated_inherited_transported_and_auditabl
 }
 
 #[tokio::test]
-async fn interrupted_action_invocation_remains_submitted_for_source_pair_recovery() {
+async fn a_restart_interrupts_running_invokes_and_pauses_queued_runs() {
     let temporary = tempfile::Builder::new()
         .prefix("relayer-interrupted-action-")
         .tempdir()
@@ -7069,17 +7893,24 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(message_status, "failed");
-    assert!(message_error.contains("Send it again"), "{message_error}");
+    // A message turn that waited for capacity is paused (#722); it keeps its text and the
+    // context it snapshotted, and waits for the user's Resume.
+    assert_eq!(message_status, "paused");
+    assert!(
+        message_error.contains("Resume starts it"),
+        "{message_error}"
+    );
     let waits: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM run_capacity_waits")
         .fetch_one(&pool)
         .await
         .unwrap();
     assert_eq!(waits, 0);
-    for interaction in [
-        result_interaction_id,
-        queued_interaction_id,
-        capacity_invoke,
+    // The run that was executing is interrupted; the runs queued behind its node or for
+    // capacity are paused. Nothing starts any of them on its own.
+    for (interaction, status, note) in [
+        (result_interaction_id, "interrupted", "Resume runs it again"),
+        (queued_interaction_id, "paused", "Resume starts it"),
+        (capacity_invoke, "paused", "Resume starts it"),
     ] {
         let (startup_status, startup_error): (String, String) = sqlx::query_as(
             "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
@@ -7088,8 +7919,8 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(startup_status, "submitted");
-        assert!(startup_error.contains("Invoke the action again"));
+        assert_eq!(startup_status, status);
+        assert!(startup_error.contains(note), "{startup_error}");
     }
     pool.close().await;
     let state = response_json(
@@ -7110,7 +7941,7 @@ async fn interrupted_action_invocation_remains_submitted_for_source_pair_recover
         .iter()
         .find(|interaction| interaction["id"] == result_interaction_id)
         .unwrap();
-    assert_eq!(recovered["completionStatus"], "submitted");
+    assert_eq!(recovered["completionStatus"], "interrupted");
     assert_eq!(recovered["graphNodeId"], serde_json::Value::Null);
 }
 
@@ -7233,11 +8064,16 @@ async fn startup_malformed_create_response_preserves_unbound_lease_for_later_res
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(after_failure.0, "submitted");
+    // The run keeps its graph lease, unbound, and waits, interrupted, for the user's Resume
+    // (#722), which prepares it on that lease again.
+    assert_eq!(after_failure.0, "interrupted");
     assert_eq!(after_failure.1, None);
-    assert!(after_failure.2.unwrap().contains("Invoke the action again"));
+    assert!(after_failure.2.unwrap().contains("Resume runs it again"));
     pool.close().await;
 
+    let creates_at_first_startup = creates.load(Ordering::SeqCst);
+
+    // A second restart leaves it interrupted: startup never prepares or runs it on its own.
     let second_reopen =
         open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
     drop(second_reopen);
@@ -7249,10 +8085,10 @@ async fn startup_malformed_create_response_preserves_unbound_lease_for_later_res
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(after_recovery.0, "submitted");
-    assert_eq!(after_recovery.1, Some(93));
+    assert_eq!(after_recovery.0, "interrupted");
+    assert_eq!(after_recovery.1, None);
     assert!(!after_recovery.2.unwrap().contains("reconciliation pending"));
-    assert_eq!(creates.load(Ordering::SeqCst), 5);
+    assert_eq!(creates.load(Ordering::SeqCst), creates_at_first_startup);
     pool.close().await;
 
     graph_task.abort();
@@ -7260,7 +8096,7 @@ async fn startup_malformed_create_response_preserves_unbound_lease_for_later_res
 }
 
 #[tokio::test]
-async fn startup_binding_failure_preserves_unbound_invocation_for_next_recovery() {
+async fn startup_binding_failure_preserves_unbound_invocation_for_resume() {
     let temporary = tempfile::Builder::new()
         .prefix("relayer-startup-binding-retry-")
         .tempdir()
@@ -7381,13 +8217,15 @@ async fn startup_binding_failure_preserves_unbound_invocation_for_next_recovery(
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(after_failure, ("submitted".into(), None));
+    // It keeps its graph lease, unbound, and waits, interrupted, for the user's Resume (#722).
+    assert_eq!(after_failure, ("interrupted".into(), None));
     sqlx::query("DROP TRIGGER fail_startup_bind")
         .execute(&pool)
         .await
         .unwrap();
     pool.close().await;
 
+    // A second restart leaves it so: nothing prepares or runs it until the user resumes it.
     let second_reopen =
         open_app_with_runtime(&database, &root, &catalog, &graph_url, &harness_url).await;
     drop(second_reopen);
@@ -7398,8 +8236,8 @@ async fn startup_binding_failure_preserves_unbound_invocation_for_next_recovery(
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(after_recovery, ("submitted".into(), Some(93)));
-    assert_eq!(creates.load(Ordering::SeqCst), 2);
+    assert_eq!(after_recovery, ("interrupted".into(), None));
+    assert_eq!(creates.load(Ordering::SeqCst), 1);
     pool.close().await;
 
     graph_task.abort();
@@ -7748,12 +8586,13 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .iter()
         .find(|interaction| interaction["id"] == result_id)
         .unwrap();
-    assert_eq!(first_recovery["completionStatus"], "submitted");
+    // It was executing, so it waits, interrupted, for the user's Resume (#722).
+    assert_eq!(first_recovery["completionStatus"], "interrupted");
     assert!(
         first_recovery["completionError"]
             .as_str()
             .unwrap()
-            .contains("Invoke the action again")
+            .contains("Resume runs it again")
     );
     let first_strict_approval = first_state["interactions"]
         .as_array()
@@ -7761,7 +8600,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .iter()
         .find(|interaction| interaction["id"] == strict_approval_wait_id)
         .unwrap();
-    assert_eq!(first_strict_approval["completionStatus"], "submitted");
+    assert_eq!(first_strict_approval["completionStatus"], "interrupted");
     assert_ne!(first_strict_approval["completionStatus"], "failed");
     let first_strict_resolution = first_state["approvals"]
         .as_array()
@@ -7834,12 +8673,12 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .find(|interaction| interaction["id"] == unbound_id)
         .unwrap();
     assert_eq!(unbound["graphNodeId"], 93);
-    assert_eq!(unbound["completionStatus"], "submitted");
+    assert_eq!(unbound["completionStatus"], "interrupted");
     assert!(
         unbound["completionError"]
             .as_str()
             .unwrap()
-            .contains("Invoke the action again")
+            .contains("Resume runs it again")
     );
     let corrupt = state["interactions"]
         .as_array()
@@ -7906,13 +8745,13 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
         .iter()
         .find(|interaction| interaction["id"] == strict_approval_wait_id)
         .unwrap();
-    assert_eq!(strict_approval_wait["completionStatus"], "submitted");
+    assert_eq!(strict_approval_wait["completionStatus"], "interrupted");
     assert_eq!(strict_approval_wait["graphNodeId"], 99);
     assert!(
         strict_approval_wait["completionError"]
             .as_str()
             .unwrap()
-            .contains("Invoke the action again")
+            .contains("Resume runs it again")
     );
     let legacy_approval_wait = state["interactions"]
         .as_array()
@@ -7950,7 +8789,7 @@ async fn interrupted_bound_invocation_recovers_canonical_graph_acceptance() {
 }
 
 #[tokio::test]
-async fn interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread_on_restart() {
+async fn interrupted_ordinary_interaction_waits_for_resume_and_releases_the_thread_on_restart() {
     let temporary = tempfile::Builder::new()
         .prefix("relayer-interrupted-interaction-")
         .tempdir()
@@ -8020,12 +8859,14 @@ async fn interrupted_ordinary_interaction_becomes_failed_and_releases_the_thread
         .iter()
         .find(|interaction| interaction["id"] == interrupted_id)
         .unwrap();
-    assert_eq!(recovered["completionStatus"], "failed");
+    // Even without the graph runtime, a message that was executing waits, interrupted, for the
+    // user's Resume (#722); it never holds the thread.
+    assert_eq!(recovered["completionStatus"], "interrupted");
     assert!(
         recovered["completionError"]
             .as_str()
             .unwrap()
-            .contains("Send a follow-up to continue")
+            .contains("Resume runs it again")
     );
 
     let follow_up = reopened
@@ -9052,8 +9893,8 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     })
     .to_string();
     let mut interaction_ids = Vec::new();
-    // A graph-bound message that waited for capacity (#720) is reconciled with its graph
-    // interaction like the running one, even though retirement rebinds it at startup.
+    // A graph-bound message that waited for capacity (#720) is paused before retirement
+    // rebinds it (#722), so startup neither reconciles nor runs it.
     for (sequence, status, graph_node_id) in [
         (2, "running", Some(902_i64)),
         (3, "waiting_for_approval", None),
@@ -9132,24 +9973,19 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
     let resumed =
         open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
             .await;
-    for _ in 0..100 {
-        let both_resumed = {
-            let resumed_inputs = resumed_inputs.lock().unwrap();
-            ["send-restart-2", "send-restart-3", "send-restart-4"]
-                .iter()
-                .all(|expected| resumed_inputs.iter().any(|actual| actual == expected))
-        };
-        if both_resumed {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-
+    // Startup reconciles the interrupted sends with the graph, but nothing reruns them, and
+    // the paused send is never prepared.
+    tokio::time::sleep(Duration::from_millis(200)).await;
     {
         let resumed_inputs = resumed_inputs.lock().unwrap();
-        for expected in ["send-restart-2", "send-restart-3", "send-restart-4"] {
+        for expected in ["send-restart-2", "send-restart-3"] {
             assert!(resumed_inputs.iter().any(|actual| actual == expected));
         }
+        assert!(
+            !resumed_inputs
+                .iter()
+                .any(|actual| actual == "send-restart-4")
+        );
     }
     let pool = sqlite_pool(&database).await;
     let migrated_harness: String =
@@ -9159,7 +9995,11 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
             .await
             .unwrap();
     assert_eq!(migrated_harness, "codex-basic");
-    for interaction_id in interaction_ids {
+    for (interaction_id, (expected, note)) in interaction_ids.into_iter().zip([
+        ("interrupted", "Resume runs it again"),
+        ("interrupted", "Resume runs it again"),
+        ("paused", "Resume starts it"),
+    ]) {
         let (status, error): (String, Option<String>) = sqlx::query_as(
             "SELECT completion_status,completion_error FROM interactions WHERE id=?1",
         )
@@ -9167,12 +10007,8 @@ async fn product_harness_retirement_precedes_retryable_startup_reconciliation() 
         .fetch_one(&pool)
         .await
         .unwrap();
-        assert_eq!(status, "submitted");
-        assert!(
-            error.unwrap().contains(
-                "startup reconciliation was interrupted transiently and is ready to resume"
-            )
-        );
+        assert_eq!(status, expected);
+        assert!(error.unwrap().contains(note));
     }
     pool.close().await;
 
@@ -10050,6 +10886,24 @@ async fn identified_context_replays_after_response_loss_and_resumes_bound_input_
     let resumed =
         open_app_with_runtime_allow_override(&database, &root, &catalog, &graph_url, &harness_url)
             .await;
+    // Nothing reruns it on its own (#722): it waits, interrupted, until the user resumes it,
+    // and then runs on the same bound input.
+    let pool = sqlite_pool(&database).await;
+    let status: String =
+        sqlx::query_scalar("SELECT completion_status FROM interactions WHERE id=?1")
+            .bind(first_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    pool.close().await;
+    assert_eq!(status, "interrupted");
+    let (resume_status, resume_body) = app_post(
+        &resumed,
+        &format!("/api/threads/{thread_id}/interactions/{first_id}/resume"),
+        json!({}),
+    )
+    .await;
+    assert_eq!(resume_status, StatusCode::OK, "{resume_body}");
     for _ in 0..100 {
         let pool = sqlite_pool(&database).await;
         let status: String =

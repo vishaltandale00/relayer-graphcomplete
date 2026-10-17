@@ -404,6 +404,7 @@ async fn validate_archive_authority(pool: &SqlitePool) -> Result<(), StorageErro
     // guard must fail at reopen, before a caller can admit execution on archived work.
     // Newest first: an object a later migration redefines is checked against that definition.
     let migrations = [
+        include_str!("migrations/0052_paused_runs_archive.sql"),
         include_str!("migrations/0049_node_run_queue.sql"),
         include_str!("migrations/0042_thread_archive.sql"),
     ];
@@ -531,6 +532,44 @@ pub(super) async fn validate(pool: &SqlitePool) -> Result<(), StorageError> {
     validate_foreign_key(
         pool,
         "run_capacity_waits",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    // The runs the user resumed after a restart (#722).
+    validate_columns(
+        pool,
+        "run_resumptions",
+        &[
+            ("interaction_id", "INTEGER", false, 1),
+            ("resumed_at", "TEXT", true, 0),
+        ],
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "run_resumptions",
+        "interaction_id",
+        "interactions",
+        "id",
+        "CASCADE",
+    )
+    .await?;
+    // The runs the user discarded after a restart (#722).
+    validate_columns(
+        pool,
+        "run_discards",
+        &[
+            ("interaction_id", "INTEGER", false, 1),
+            ("discarded_at", "TEXT", true, 0),
+        ],
+    )
+    .await?;
+    validate_foreign_key(
+        pool,
+        "run_discards",
         "interaction_id",
         "interactions",
         "id",
@@ -1547,6 +1586,71 @@ mod tests {
                     Err(crate::storage::StorageError::IncompatibleSchema(_))
                 ),
                 "reopened with run_capacity_waits as {replacement:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn run_discards_table_is_validated_on_reopen() {
+        for replacement in [
+            None,
+            Some(
+                "CREATE TABLE run_discards (interaction_id INTEGER PRIMARY KEY, discarded_at TEXT)",
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = directory.path().join("schema.sqlite3");
+            let store = SqliteProductStore::open(&database).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::query("DROP TABLE run_discards")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            if let Some(table) = replacement {
+                sqlx::query(table).execute(&mut *connection).await.unwrap();
+            }
+            drop(connection);
+            store.pool.close().await;
+            assert!(
+                matches!(
+                    SqliteProductStore::open(&database).await,
+                    Err(crate::storage::StorageError::IncompatibleSchema(_))
+                ),
+                "reopened with run_discards as {replacement:?}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn run_resumptions_table_is_validated_on_reopen() {
+        for replacement in [
+            None,
+            Some(
+                "CREATE TABLE run_resumptions (interaction_id INTEGER PRIMARY KEY, resumed_at TEXT)",
+            ),
+            Some(
+                "CREATE TABLE run_resumptions (interaction_id INTEGER PRIMARY KEY, resumed_at TEXT NOT NULL)",
+            ),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = directory.path().join("schema.sqlite3");
+            let store = SqliteProductStore::open(&database).await.unwrap();
+            let mut connection = store.pool.acquire().await.unwrap();
+            sqlx::query("DROP TABLE run_resumptions")
+                .execute(&mut *connection)
+                .await
+                .unwrap();
+            if let Some(table) = replacement {
+                sqlx::query(table).execute(&mut *connection).await.unwrap();
+            }
+            drop(connection);
+            store.pool.close().await;
+            assert!(
+                matches!(
+                    SqliteProductStore::open(&database).await,
+                    Err(crate::storage::StorageError::IncompatibleSchema(_))
+                ),
+                "reopened with run_resumptions as {replacement:?}"
             );
         }
     }

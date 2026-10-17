@@ -101,6 +101,9 @@ function workspace() {
       clipboard: navigator.clipboard,
     } : null,
     onStopInteraction: (threadId, interactionId) => import("./threads.js").then(({ stopInteraction }) => stopInteraction(threadId, interactionId)),
+    onResumeInteraction: (threadId, interactionId) => import("./threads.js").then(({ resumeInteraction }) => resumeInteraction(threadId, interactionId)),
+    onResumeAllRuns: (threadId) => import("./threads.js").then(({ resumeAllRuns }) => resumeAllRuns(threadId)),
+    onDiscardInteraction: (threadId, interactionId) => import("./threads.js").then(({ discardInteraction }) => discardInteraction(threadId, interactionId)),
     onSubmitInteraction: (
       text,
       modelSelection,

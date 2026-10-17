@@ -185,7 +185,24 @@ impl NodeRunQueue {
         sequence: i64,
     ) -> Arrival {
         let mut nodes = self.nodes.lock().await;
+        Self::arrive_locked(nodes.entry(key).or_default(), run, sequence)
+    }
+
+    /// Joins several runs of one node to its queue in one step, in the order given, so no run
+    /// arriving meanwhile comes between them (#722: a resumed chain).
+    pub(crate) async fn arrive_all(
+        &self,
+        key: NodeRunKey,
+        runs: &[(InteractionId, i64)],
+    ) -> Vec<Arrival> {
+        let mut nodes = self.nodes.lock().await;
         let node = nodes.entry(key).or_default();
+        runs.iter()
+            .map(|(run, sequence)| Self::arrive_locked(node, *run, *sequence))
+            .collect()
+    }
+
+    fn arrive_locked(node: &mut NodeState, run: InteractionId, sequence: i64) -> Arrival {
         let waits = node.waits(run);
         match &mut node.holder {
             Some(holder) if holder.run == run => {

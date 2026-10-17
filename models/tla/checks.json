@@ -222,7 +222,9 @@
       "AtomicAdmission": "TRUE",
       "ReleaseOnSettle": "TRUE",
       "ContextAtStart": "TRUE",
-      "StartupInterruptsQueued": "TRUE"
+      "StartupPausesQueued": "TRUE",
+      "ResumeHeadOnly": "TRUE",
+      "AutoResume": "FALSE"
     },
     "capacity-today": {
       "Limit": "2",
@@ -234,7 +236,7 @@
       "ReleaseHandsSlot": "TRUE",
       "Fifo": "TRUE",
       "ChildrenUncounted": "TRUE",
-      "StartupInterruptsWaits": "TRUE",
+      "StartupPausesWaits": "TRUE",
       "AtomicHandOff": "TRUE",
       "WaitBehindWaiting": "TRUE"
     }
@@ -2719,10 +2721,85 @@
       "properties": [
         "QueuedNeverStartsWhileActive",
         "QueuedStartInOrder",
-        "QueuedRunSeesRunAhead"
+        "QueuedRunSeesRunAhead",
+        "NoStartWithoutResume",
+        "ResumeKeepsOrder"
       ],
       "expect": "pass",
-      "finding": "Two runs on one node never run at once, and a queued run never starts while another run on its node is active. Queued runs start in the order they were created, and each reads the thread when it starts, so it sees the accepted result of the run ahead. Across a restart, no run waits on a node nothing holds."
+      "finding": "Two runs on one node never run at once, and a queued run never starts while another run on its node is active. Queued runs start in the order they were created, and each reads the thread when it starts, so it sees the accepted result of the run ahead. Across a restart, no run waits on a node nothing holds. No paused or interrupted run starts until the user resumes it, though startup may still record a result the graph accepted, and a resumed chain keeps same-node order."
+    },
+    {
+      "id": "node-queue-second-restart",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "SameNode": "2",
+        "MaxRestarts": "2"
+      },
+      "invariants": [
+        "TypeOK",
+        "OneRunPerNode",
+        "QueuedHasRunAhead"
+      ],
+      "properties": [
+        "NoStartWithoutResume",
+        "ResumeKeepsOrder"
+      ],
+      "expect": "pass",
+      "finding": "Across two restarts, paused and interrupted runs stay as they are, nothing starts any of them on its own, and a chain resumed between the restarts keeps same-node order."
+    },
+    {
+      "id": "node-queue-resume-reachable",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "invariants": [
+        "NeverResumes"
+      ],
+      "expect": {
+        "violated": "NeverResumes"
+      },
+      "finding": "Reachability: after a restart the user resumes a paused or interrupted run, and it runs. So the resume properties are not vacuous."
+    },
+    {
+      "id": "node-queue-resume-liveness",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "fair": true,
+      "properties": [
+        "ResumedRunsStart"
+      ],
+      "expect": "pass",
+      "finding": "A resumed run waiting in its node's queue starts or ends, unless another restart pauses it again."
+    },
+    {
+      "id": "node-queue-resume-head-reverted",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "ResumeHeadOnly": "FALSE"
+      },
+      "properties": [
+        "ResumeKeepsOrder"
+      ],
+      "expect": {
+        "violated": "ResumeKeepsOrder"
+      },
+      "finding": "If a run inside a paused chain could resume alone, it would start while an earlier run on its node still waits for the user, out of creation order."
+    },
+    {
+      "id": "node-queue-auto-resume-reverted",
+      "module": "NodeRunQueue",
+      "preset": "node-queue-today",
+      "constants": {
+        "AutoResume": "TRUE"
+      },
+      "properties": [
+        "NoStartWithoutResume"
+      ],
+      "expect": {
+        "violated": "NoStartWithoutResume"
+      },
+      "finding": "Before #722, startup ran an interrupted identified send again on its own. A run then starts after a restart without the user's Resume."
     },
     {
       "id": "node-queue-concurrency",
@@ -2759,7 +2836,7 @@
         "QueuedRunsLeaveTheQueue"
       ],
       "expect": "pass",
-      "finding": "Across a restart, every queued run leaves the queue: it starts, is stopped, or is interrupted at startup, where invoking its action again resumes it."
+      "finding": "Across a restart, every queued run leaves the queue: it starts, is stopped, or is paused at startup until the user resumes it."
     },
     {
       "id": "node-queue-race-reverted",
@@ -2813,7 +2890,7 @@
       "module": "NodeRunQueue",
       "preset": "node-queue-today",
       "constants": {
-        "StartupInterruptsQueued": "FALSE"
+        "StartupPausesQueued": "FALSE"
       },
       "invariants": [
         "QueuedHasRunAhead"
@@ -2833,14 +2910,15 @@
         "NoIdleSlotWhileWaiting",
         "WaitIsLive",
         "OneRunPerNode",
-        "ChildrenNeverWait"
+        "ChildrenNeverWait",
+        "PausedHoldsNothing"
       ],
       "properties": [
         "StartsInOrder",
         "NoStartAheadOfWaiting"
       ],
       "expect": "pass",
-      "finding": "Executing human-started runs never exceed the limit. Runs waiting for capacity start first in, first out by when they began to wait, and no new run starts while another waits. No run waits while a slot is idle, every waiting run is in the live wait, runs on one node still run one at a time, and a child never waits for capacity. Across a restart, no run stays queued for a slot."
+      "finding": "Executing human-started runs never exceed the limit. Runs waiting for capacity start first in, first out by when they began to wait, and no new run starts while another waits. No run waits while a slot is idle, every waiting run is in the live wait, runs on one node still run one at a time, and a child never waits for capacity. Across a restart, no run stays queued for a slot: it is paused, and a paused run holds no slot, node or place in the wait."
     },
     {
       "id": "capacity-children-beside-full",
@@ -2889,7 +2967,7 @@
         "WaitingRunsLeaveTheWait"
       ],
       "expect": "pass",
-      "finding": "Across a restart, every run waiting for capacity leaves the wait: it starts, is removed, or is interrupted at startup.",
+      "finding": "Across a restart, every run waiting for capacity leaves the wait: it starts, is removed, or is paused at startup.",
       "constants": {
         "Limit": "1"
       }
@@ -2992,7 +3070,7 @@
       "module": "RunCapacity",
       "preset": "capacity-today",
       "constants": {
-        "StartupInterruptsWaits": "FALSE"
+        "StartupPausesWaits": "FALSE"
       },
       "invariants": [
         "WaitIsLive"
