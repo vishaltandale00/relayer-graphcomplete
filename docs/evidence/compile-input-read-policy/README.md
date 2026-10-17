@@ -103,3 +103,74 @@ A current controlled recipe cannot retroactively qualify old unconstrained build
 Do not relabel the previous 0/24 full-tree bound or 12/24 static projection as hits.
 Stop this experiment with measured go/no-go and named missing inputs; do not grow
 transport machinery or production sandbox policy to force a positive result.
+
+## Exact-pair executable reuse diagnostic
+
+`reuse.py`, `reuse_container.py` and `capture_runner.py` support a separately
+bounded experiment, not a production cache. The initial proposed pair is actual
+main parent `548de4c3f1bf61e8dd2aa11f4526b44fb043d2be` (A) and merge
+`a437a59bddd258fd55753fa63ee4c1326df80a8f` (B). Their 16 changed diagnostic files
+are outside the declared projection. This nominates the pair; it does not qualify
+compilation identity.
+
+Both full snapshots must compile independently at `/workspace` and `/target`,
+with identical pinned image, toolchain, environment, registry and requalified native
+inputs. Cargo JSON discovers all emitted test executables and ordinary helper
+binaries. Every executable's path, mode, size, hash, package, target, profile and
+features must match independently built B output before transported A bytes may run.
+The expected B receipt and exact source-pair provenance are trusted experiment
+inputs retained outside the archive. This independent B compilation is an
+experimental admission oracle, with its full cost disclosed. It is not a cheap
+production hit verifier.
+
+A fresh target receives only allowlisted regular executable files. Checksums,
+member paths, modes, sizes, duplicates, missing files and extra files fail closed.
+No producer or baseline target is mounted in the replay container. Loader inspection
+requires resolved libraries from the pinned image and rejects missing dependencies.
+It does not prove arbitrary future dynamic loads or subprocess closure.
+
+The baseline runs `cargo test --workspace --frozen --lib --bins --tests -- --test-threads=2` through
+Cargo's target-runner hook. The hook records each real command, environment and
+package working directory and monotonic invocation order, lists its libtest cases,
+and executes it freshly. Replay preserves that observed order and fixed concurrency.
+Replay uses those recorded invocations and demands the same complete case inventory,
+passing summaries and exit codes. Ordinary helper binaries stay at embedded paths.
+Fresh consumer fixtures come from B. Existing Node dependencies are read-only and
+inventoried, including package-local `node_modules`; links must resolve within those modules or declared workspace packages.
+Package build outputs start fresh in both execution containers. The
+reviewed external launcher protects tracked package inputs while permitting generated
+`dist` and graph-client `agent-resource` output. Sources and dependency inventories
+are checked before and after each phase.
+
+A runtime-only correction may retain existing compilation evidence only when the
+source, compile recipe and every executable remain unchanged. Its separate
+`execution` record pins the execution diagnostic and complete dependency inventory,
+and requires executable temporary storage for real fixture helpers. This record
+does not rewrite compiler provenance or qualify the failed runtime attempt. Both
+fresh baseline and replay must use the same corrected execution record, with
+preparation costs and the original failure retained.
+
+This scope is the default-feature compiled executable tests. It excludes doctests,
+crash-feature tests, required example compilation, complete CI equivalence and
+release proof. No prior pass substitutes for fresh replay. No test is deleted.
+The Cargo behavior used here is documented in the official
+[test command](https://doc.rust-lang.org/cargo/commands/cargo-test.html) and
+[target runner](https://doc.rust-lang.org/cargo/reference/config.html#targettriplerunner)
+references.
+
+| Changed seam | Deterministic checkpoint |
+| --- | --- |
+| Fresh Cargo inventory and exact-pair admission | Reused compilation, incomplete completion, changed context/provenance, omitted helper, changed bytes or features reject |
+| Archive publication and restore | Real executable round-trip succeeds without producer files; corrupt, missing, extra, linked or mode-changed members reject |
+| Fresh test execution | Real subprocess reads current runtime data/environment; failure is retained; listed cases must match a complete passing libtest summary |
+| Suite replay | Missing executable coverage, wrong package directory, reversed invocation order or extra restored files stop before execution |
+| Runtime validation | Tracked source mutation rejects; generated outputs are explicitly scoped; package-local dependency drift and dependency-link escape reject; corrupt restored bytes never reach loader inspection |
+
+Required source gates remain `npm run check` and `npm run build`, plus adversarial
+source and evidence review. A factory grant separately bounds Linux execution,
+transfer, incremental disk and owned-container cleanup. Record producer compilation,
+packing/publication, consumer transfer, verification/install, baseline compile/tests,
+and replay tests separately. Actual Tailscale transfer is not hosted-cache latency.
+Retain all failed attempts, exact revisions, source/recipe hashes, inner results and
+unknowns. Even matching binaries plus passing replay qualify only this pair and
+recipe; `completeDigest` stays null and production admission remains unqualified.
