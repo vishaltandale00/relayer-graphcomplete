@@ -6,7 +6,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { actorConfiguration } from "./task-actor.mjs";
-import { COMPLETION_DECISION_CONTRACT, completionJudgeStageRequest } from "./task-completion-judge.mjs";
+import { COMPLETION_DECISION_CONTRACT, completionJudgeStageRequest, validateCompletionAssessment } from "./task-completion-judge.mjs";
 
 const clone = (value) => structuredClone(value);
 const digest = (value) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
@@ -132,6 +132,9 @@ export class HumanTaskService {
       prior.set(event.id, event);
       if (event.kind === "actor_completion_evidence") evidence.set(event.id, event);
       if (event.kind === "actor_completion_judgment" && pinnedJudge?.decision) {
+        try {
+          validateCompletionAssessment({ verdict: event.verdict, evidenceExplanation: event.evidenceExplanation, continuationHint: event.continuationHint });
+        } catch { invalid(); }
         const input = evidence.get(event.evidenceEventId);
         const group = groups.get(event.evidenceEventId);
         const intent = prior.get(input?.actorActionEventId);

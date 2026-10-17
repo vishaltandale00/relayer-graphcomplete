@@ -1061,6 +1061,15 @@ it.each(["complete", "report_failed", "later_actor_failed"])("persists actual De
   expect((await reopened.export(f.id)).bundle.session.events.filter(e => e.kind === "actor_completion_stage")).toEqual(stages);
   const retained = structuredClone(reopened.find(f.id).events);
   if (!reportFails) for (const corrupt of [
+    ...[
+      judgment => { delete judgment.evidenceExplanation; },
+      judgment => { judgment.evidenceExplanation = " "; },
+      judgment => { judgment.evidenceExplanation = "x".repeat(4001); },
+      judgment => { delete judgment.continuationHint; },
+      judgment => { judgment.continuationHint = "x".repeat(401); },
+      judgment => { judgment.continuationHint = ""; },
+    ].map(mutate => events => { mutate(events.find(event => event.kind === "actor_completion_judgment")); return events; }),
+    ...(outcome === "complete" ? [events => { events.findLast(event => event.kind === "actor_completion_judgment").continuationHint = "Keep going"; return events; }] : []),
     events => events.filter(event => event.kind !== "actor_completion_stage"),
     events => events.filter(event => event.id !== stages[3].id),
     events => events.filter(event => event.id !== stages.at(-1).id),

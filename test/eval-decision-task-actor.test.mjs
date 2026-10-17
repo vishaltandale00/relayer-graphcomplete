@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { ACTOR_ACTION_SCHEMA, actorConfiguration } from "../desktop/eval-main/task-actor.mjs";
-import { createTaskActor, decisionActorChoices } from "../desktop/eval-main/decision-task-actor.mjs";
+import { createTaskActor, decisionActorChoices, createDecisionActorHistory, DECISION_ACTOR_HISTORY_LIMITS } from "../desktop/eval-main/decision-task-actor.mjs";
 
 const decision = { contractId: "openai-decisions-codex-text-v1", providerId: "openai-test", model: "gpt-6-luna" };
 const observation = (extra = {}) => ({ screenshot: "cGl4ZWxz", text: "Visible workspace", availableActions: ACTOR_ACTION_SCHEMA.properties.kind.enum,
@@ -131,4 +131,66 @@ it("offers fill only for observed DOM capability, independently of role", () => 
     expect(offered.filter(choice => choice.action?.kind === "fill").map(choice => choice.action.ref)).toEqual(["text", "range"]);
     expect(offered.some(choice => choice.action?.kind === "click" && choice.action.ref === "checkbox")).toBe(true);
   }
+});
+
+
+it("discards retained content at both count and aggregate history limits with stable observation identities", () => {
+  const history = createDecisionActorHistory();
+  for (let index = 0; index < 130; index++) history.remember(observation(), operation("click"), "Working");
+  let snapshot = history.snapshot();
+  expect(snapshot.history).toHaveLength(127);
+  expect(snapshot.images).toHaveLength(127);
+  expect(snapshot.omissions).toEqual({ earlierObservations: 3, earlierScreenshots: 3 });
+  expect(snapshot.history[0].observationNumber).toBe(4);
+  expect(snapshot.images[0].observationNumber).toBe(4);
+  expect(snapshot.history.some(entry => "screenshot" in entry)).toBe(false);
+  const image = "a".repeat(DECISION_ACTOR_HISTORY_LIMITS.screenshotCharacters);
+  history.remember(observation({ screenshot: image, text: "x".repeat(DECISION_ACTOR_HISTORY_LIMITS.textCharacters) }), operation("click"));
+  snapshot = history.snapshot();
+  expect(snapshot.history).toEqual([]);
+  expect(snapshot.images).toEqual([{ observationNumber: 131, screenshot: image }]);
+  expect(snapshot.omissions).toEqual({ earlierObservations: 131, earlierScreenshots: 130 });
+  history.remember(observation({ screenshot: "new" }), operation("click"));
+  snapshot = history.snapshot();
+  expect(snapshot.images).toEqual([{ observationNumber: 132, screenshot: "new" }]);
+  expect(snapshot.history.map(entry => entry.observationNumber)).toEqual([132]);
+  expect(snapshot.omissions).toEqual({ earlierObservations: 131, earlierScreenshots: 131 });
+  history.clear();
+  expect(history.snapshot()).toEqual({ history: [], images: [], omissions: { earlierObservations: 0, earlierScreenshots: 0 } });
+  const halfText = "t".repeat(DECISION_ACTOR_HISTORY_LIMITS.textCharacters / 2);
+  history.remember(observation({ screenshot: undefined, text: halfText }), null);
+  history.remember(observation({ screenshot: undefined, text: halfText }), null);
+  expect(history.snapshot().history.map(entry => entry.observationNumber)).toEqual([2]);
+  expect(history.snapshot().omissions.earlierObservations).toBe(1);
+  history.remember(observation({ screenshot: "a".repeat(DECISION_ACTOR_HISTORY_LIMITS.screenshotCharacters + 1) }), null);
+  expect(history.snapshot().images).toEqual([]);
+  expect(history.snapshot().omissions.earlierScreenshots).toBe(1);
+});
+
+it("reports evicted text and image history to both selectors and text generation", async () => {
+  let wanted = "fill";
+  const f = await actorFixture(() => wanted);
+  try {
+    for (let index = 0; index < 130; index++) await f.actor.observe(observation({ availableActions: [] }), undefined, { actionSchema: ACTOR_ACTION_SCHEMA });
+    const result = await f.actor.decide(observation());
+    const content = f.requests[0].input[0].content;
+    const state = JSON.parse(content[0].text);
+    expect(state.history).toHaveLength(127);
+    expect(state.history[0].observationNumber).toBe(4);
+    expect(state.omissions).toEqual({ earlierObservations: 3, earlierScreenshots: 3 });
+    expect(content[1].text).toBe("Earlier observation 4");
+    expect(result.decisionEvidence).toMatchObject({ omittedEarlierObservations: 3, omittedEarlierScreenshots: 3 });
+    const generated = f.generator.decide.mock.calls[0][0];
+    expect(generated.decisionHistory).toEqual(state.history);
+    expect(generated.decisionHistoryOmissions).toEqual(state.omissions);
+    expect(state.observation.controls).toEqual(observation().controls);
+    await f.actor.observe(observation({ availableActions: [] }), undefined, { actionSchema: ACTOR_ACTION_SCHEMA });
+    expect(f.generator.observe.mock.calls.at(-1)[0].decisionHistoryOmissions).toEqual({ earlierObservations: 4, earlierScreenshots: 4 });
+    await f.actor.observe(observation(), undefined, { actionSchema: ACTOR_ACTION_SCHEMA });
+    expect(f.generator.decide.mock.calls.at(-1)[0].decisionHistoryOmissions).toEqual({ earlierObservations: 5, earlierScreenshots: 5 });
+    wanted = "finish";
+    f.generator.decide.mockImplementationOnce(async obs => ({ action: obs.selectedOperation, usage: null }));
+    await f.actor.decide(observation());
+    expect(f.generator.decide.mock.calls.at(-1)[0].decisionHistoryOmissions).toEqual({ earlierObservations: 6, earlierScreenshots: 6 });
+  } finally { await f.actor.close(); }
 });
