@@ -13,6 +13,19 @@ use crate::{
     storage::StorageError,
 };
 
+/// How a Resume's claim met the runs it asked for (#722).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum RestartClaim {
+    /// The head was claimed, with the runs behind it that were still paused or interrupted.
+    Claimed(Vec<InteractionId>),
+    /// Another Resume claimed the head first. Nothing was claimed, and the caller reports
+    /// the head as it stands.
+    AlreadyResumed,
+    /// The head is no longer paused or interrupted, and no Resume claimed it, for example
+    /// because a Discard ended it. Nothing was claimed.
+    Changed,
+}
+
 /// How a Discard met a paused or interrupted run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RestartDiscard {
@@ -189,10 +202,10 @@ impl SqliteProductStore {
         &self,
         thread: ThreadId,
         runs: &[InteractionId],
-    ) -> Result<Vec<InteractionId>, StorageError> {
+    ) -> Result<RestartClaim, StorageError> {
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
         let mut claimed = Vec::new();
-        for run in runs {
+        for (index, run) in runs.iter().enumerate() {
             let changed = sqlx::query(
                 "UPDATE interactions SET completion_status='submitted',completion_error=NULL
                  WHERE id=?1 AND thread_id=?2 AND completion_status IN ('paused','interrupted')
@@ -212,10 +225,25 @@ impl SqliteProductStore {
                     .execute(&mut *transaction)
                     .await?;
                 claimed.push(*run);
+            } else if index == 0 {
+                // The head must be the run that starts. A durable Resume of it means a
+                // concurrent duplicate Resume won; anything else changed it.
+                let resumed: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM run_resumptions WHERE interaction_id=?1)",
+                )
+                .bind(run.value())
+                .fetch_one(&mut *transaction)
+                .await?;
+                transaction.rollback().await?;
+                return Ok(if resumed {
+                    RestartClaim::AlreadyResumed
+                } else {
+                    RestartClaim::Changed
+                });
             }
         }
         transaction.commit().await?;
-        Ok(claimed)
+        Ok(RestartClaim::Claimed(claimed))
     }
 
     /// Returns a run whose resume was claimed, but which never started, to where the restart
@@ -522,18 +550,26 @@ mod tests {
                 .claim_restart_runs(thread, &[runs[1], runs[2], runs[0]])
                 .await
                 .unwrap(),
-            vec![runs[1], runs[2]]
+            RestartClaim::Claimed(vec![runs[1], runs[2]])
         );
         assert_eq!(store.completion_status_for_test(runs[1]).await, "submitted");
         assert!(store.was_resumed(runs[1]).await.unwrap());
         assert!(!store.was_resumed(runs[0]).await.unwrap());
-        assert!(
-            store
-                .claim_restart_runs(thread, &[runs[1]])
-                .await
-                .unwrap()
-                .is_empty()
+        // A duplicate Resume that lost the claim finds the winner's Resume on record.
+        assert_eq!(
+            store.claim_restart_runs(thread, &[runs[1]]).await.unwrap(),
+            RestartClaim::AlreadyResumed
         );
+        // A head a Discard ended was changed, and the run behind it is not claimed.
+        assert_eq!(
+            store
+                .claim_restart_runs(thread, &[runs[0], runs[3]])
+                .await
+                .unwrap(),
+            RestartClaim::Changed
+        );
+        assert_eq!(store.completion_status_for_test(runs[3]).await, "paused");
+        assert!(!store.was_resumed(runs[3]).await.unwrap());
         // A claimed run that never started returns to where the restart left it.
         assert!(
             store

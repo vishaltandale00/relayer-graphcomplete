@@ -27,7 +27,7 @@ mod interactions;
 mod migrations;
 mod node_runs;
 mod paused_runs;
-pub(crate) use paused_runs::RestartDiscard;
+pub(crate) use paused_runs::{RestartClaim, RestartDiscard};
 mod personal_presentation;
 mod product_state;
 mod projects;

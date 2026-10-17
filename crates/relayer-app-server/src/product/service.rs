@@ -2927,7 +2927,7 @@ impl ProductService {
         &self,
         thread: ThreadId,
         runs: &[InteractionId],
-    ) -> Result<Vec<InteractionId>, ProductError> {
+    ) -> Result<crate::storage::RestartClaim, ProductError> {
         self.storage
             .claim_restart_runs(thread, runs)
             .await

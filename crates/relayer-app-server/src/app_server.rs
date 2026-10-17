@@ -327,6 +327,12 @@ async fn reconcile_interrupted_interaction(
                             "accepted output not yet readable"
                         ))
                     })?;
+                if output.get("nodeId").and_then(serde_json::Value::as_i64) != Some(graph_node_id) {
+                    return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                        "canonical output node mismatch for interaction {}",
+                        interaction.id
+                    )));
+                }
                 if !storage
                     .recover_interaction_accepted(interaction.id, &output)
                     .await

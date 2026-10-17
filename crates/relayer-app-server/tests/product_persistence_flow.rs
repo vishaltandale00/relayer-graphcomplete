@@ -4918,6 +4918,10 @@ struct HeldRunsFixture {
     refused_actions: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// Invoke actions whose graph preparation answers with a body that cannot be read.
     garbled_actions: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// Accepted graph interactions whose output read answers with another node's output.
+    mismatched_outputs: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// How many times the graph answered an output read with another node's output.
+    mismatched_reads: Arc<AtomicUsize>,
     /// How many times the graph was asked to create an interaction.
     graph_creates: Arc<AtomicUsize>,
     /// While set, the graph answers interaction metadata reads with 503.
@@ -5057,6 +5061,10 @@ impl HeldRunsFixture {
         let prepare_garbled = garbled_actions.clone();
         let graph_creates = Arc::new(AtomicUsize::new(0));
         let counted_creates = graph_creates.clone();
+        let mismatched_outputs = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let output_mismatched = mismatched_outputs.clone();
+        let mismatched_reads = Arc::new(AtomicUsize::new(0));
+        let counted_mismatches = mismatched_reads.clone();
         let metadata_unavailable = Arc::new(std::sync::atomic::AtomicBool::new(false));
         let metadata_down = metadata_unavailable.clone();
         let stopped_currents = Arc::new(Mutex::new(Vec::<i64>::new()));
@@ -5240,6 +5248,10 @@ impl HeldRunsFixture {
                 axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
                     let source_output = source_output.clone();
                     let accepted = id == 101 || read_accepted.lock().unwrap().contains(&id);
+                    let mismatched = output_mismatched.lock().unwrap().contains(&id);
+                    if accepted && mismatched {
+                        counted_mismatches.fetch_add(1, Ordering::SeqCst);
+                    }
                     async move {
                         if !accepted {
                             return (
@@ -5247,10 +5259,12 @@ impl HeldRunsFixture {
                                 axum::Json(json!({"error": {"code": "completion_not_found", "message": "Not accepted."}})),
                             );
                         }
+                        // A faulty graph answers with another node's output.
+                        let node = if mismatched { id + 1000 } else { id };
                         (StatusCode::OK, axum::Json(if id == 101 {
                             source_output
                         } else {
-                            json!({"nodeId": id, "rootLayer": {"layer": {"id": 900 + id}, "nodes": [], "edges": [], "actions": []}})
+                            json!({"nodeId": node, "rootLayer": {"layer": {"id": 900 + node}, "nodes": [], "edges": [], "actions": []}})
                         }))
                     }
                 }),
@@ -5359,6 +5373,8 @@ impl HeldRunsFixture {
             accepted_nodes,
             refused_actions,
             garbled_actions,
+            mismatched_outputs,
+            mismatched_reads,
             graph_creates,
             metadata_unavailable,
             graph_task,
@@ -5379,6 +5395,11 @@ impl HeldRunsFixture {
             self.capacity,
         )
         .await;
+    }
+
+    /// Reopens the app on the same database with no GraphComplete runtime.
+    async fn reopen_without_graph(&mut self) {
+        self.app = open_app(&self.database, &self.root).await;
     }
 
     /// Posts to a run's own endpoint, such as `resume` or `discard`.
@@ -6689,9 +6710,33 @@ async fn a_restart_recovers_an_interrupted_run_the_graph_accepted() {
         .lock()
         .unwrap()
         .extend([first_node, second_node]);
+    // While the graph answers with another node's output, the Discard's graph Stop never
+    // records it as this run's result; it keeps settling until the canonical output reads.
+    fixture
+        .mismatched_outputs
+        .lock()
+        .unwrap()
+        .insert(second_node);
     let (status, discarded) = fixture.run_action(second, "discard").await;
     assert_eq!(status, StatusCode::OK, "{discarded}");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while fixture.mismatched_reads.load(Ordering::SeqCst) < 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the Stop never read the output"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let settling = fixture.interaction(second).await;
+    assert_eq!(settling["completionStatus"], "submitted", "{settling}");
+    assert!(settling["completionOutput"].is_null(), "{settling}");
+    fixture.mismatched_outputs.lock().unwrap().clear();
     fixture.settled(second, "accepted").await;
+    let accepted = fixture.interaction(second).await;
+    assert_eq!(
+        accepted["completionOutput"]["nodeId"], second_node,
+        "{accepted}"
+    );
     // A repeated Discard of it reports the accepted run as it stands.
     let (status, repeated) = fixture.run_action(second, "discard").await;
     assert_eq!(status, StatusCode::OK, "{repeated}");
@@ -6947,6 +6992,17 @@ async fn a_restart_without_the_graph_still_interrupts_a_plain_message() {
     assert_eq!(fixture.started(plain).await["graph"]["nodeId"], node);
     fixture.settle(plain, true);
     fixture.settled(plain, "accepted").await;
+
+    // Reopened without GraphComplete, a repeated Resume of the settled run still reports it
+    // as it stands, and a run that was never paused is still refused, from the stored runs.
+    fixture.reopen_without_graph().await;
+    let (status, repeated) = fixture.run_action(plain, "resume").await;
+    assert_eq!(status, StatusCode::OK, "{repeated}");
+    assert_eq!(repeated["interactions"][0]["completionStatus"], "accepted");
+    let source = fixture.source_interaction_id;
+    let (status, refused) = fixture.run_action(source, "resume").await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(refused["code"], "run_not_resumable");
     fixture.finish();
 }
 
@@ -6974,11 +7030,20 @@ async fn a_resume_whose_preparation_ends_ambiguously_waits_for_the_user_again() 
     assert!(summary.get("activity").is_none(), "{summary}");
 
     // Once the graph answers again, the chain resumes in order; its node was never left held.
+    // Two overlapping Resumes, as a retried delivery sends: both report the chain's head, and
+    // it starts once.
     fixture.garbled_actions.lock().unwrap().clear();
-    let (status, _) = fixture.run_action(head, "resume").await;
-    assert_eq!(status, StatusCode::OK);
+    let ((first_status, first), (repeat_status, repeat)) = tokio::join!(
+        fixture.run_action(head, "resume"),
+        fixture.run_action(head, "resume")
+    );
+    assert_eq!(first_status, StatusCode::OK, "{first}");
+    assert_eq!(repeat_status, StatusCode::OK, "{repeat}");
+    assert_eq!(first["interactions"][0]["id"], head);
+    assert_eq!(repeat["interactions"][0]["id"], head);
     fixture.started(head).await;
     fixture.waits_for(second, "node").await;
+    assert_eq!(fixture.started_runs(), [head]);
     fixture.settle(head, true);
     fixture.started(second).await;
     fixture.settle(second, true);

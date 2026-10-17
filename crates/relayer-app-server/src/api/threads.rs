@@ -3298,6 +3298,13 @@ async fn settle_queued_stop_once(
                     .await
                     .map_err(|read| format!("accepted output read failed: {read}"))?
                     .ok_or_else(|| "accepted output not yet readable".to_owned())?;
+                // Only this node's canonical output is its result, as at startup. Anything
+                // else is refused, and the Stop keeps settling.
+                if output.get("nodeId").and_then(Value::as_i64) != Some(graph_node_id) {
+                    return Err(format!(
+                        "accepted output does not belong to graph node {graph_node_id}"
+                    ));
+                }
                 if !state
                     .product
                     .recover_interaction_accepted(interaction_id, &output)
@@ -3365,7 +3372,9 @@ pub(super) async fn resume_interaction(
     Path((thread_id, interaction_id)): Path<(i64, i64)>,
 ) -> Result<Json<ResumedRunsResponse>, ApiError> {
     authorize_write(&state, &headers)?;
-    let thread = resumable_thread(&state, thread_id).await?;
+    // The stored run answers first: a repeated Resume of a run that already resumed needs no
+    // graph operation, so it is reported even while GraphComplete is unavailable.
+    let thread = thread_open_for_restart_runs(&state, thread_id).await?;
     let interaction_id = InteractionId::try_from(interaction_id)?;
     let interaction = state.product.get_interaction(interaction_id).await?;
     if interaction.thread_id != thread.id {
@@ -3396,6 +3405,7 @@ pub(super) async fn resume_interaction(
             "Only the agent that launched this child can run it.",
         ));
     }
+    require_runtime(&state)?;
     let runs = match state.product.restart_chain(interaction_id).await? {
         Some(chain) if chain.first() == Some(&interaction_id) => chain,
         Some(_) => {
@@ -3496,10 +3506,16 @@ pub(super) async fn discard_interaction(
 }
 
 async fn resumable_thread(state: &ApiState, thread_id: i64) -> Result<Thread, ApiError> {
+    require_runtime(state)?;
+    thread_open_for_restart_runs(state, thread_id).await
+}
+
+/// Starting a resumed run needs GraphComplete.
+fn require_runtime(state: &ApiState) -> Result<(), ApiError> {
     if state.runtime.is_none() {
         return Err(ApiError::invalid("GraphComplete runtime is unavailable"));
     }
-    thread_open_for_restart_runs(state, thread_id).await
+    Ok(())
 }
 
 /// A local, unarchived thread whose paused and interrupted runs the user may change.
@@ -3588,7 +3604,23 @@ async fn resume_runs(
         }
         None => std::collections::HashMap::new(),
     };
-    let claimed = state.product.claim_restart_runs(thread.id, runs).await?;
+    let claimed = match state.product.claim_restart_runs(thread.id, runs).await? {
+        crate::storage::RestartClaim::Claimed(claimed) => claimed,
+        // A concurrent duplicate Resume claimed it first: report the run as it stands, so an
+        // overlapping retry starts nothing twice.
+        crate::storage::RestartClaim::AlreadyResumed => {
+            drop(arrivals);
+            return Ok(vec![state.product.get_interaction(head).await?]);
+        }
+        // A Discard took it first, so nothing behind it starts.
+        crate::storage::RestartClaim::Changed => {
+            drop(arrivals);
+            return Err(ApiError::conflict(
+                "run_changed",
+                "This run changed before it could resume. Refresh to see it.",
+            ));
+        }
+    };
     let restore = |pending: Vec<InteractionId>| {
         let restored: Vec<(InteractionId, String, Option<String>)> = pending
             .into_iter()
@@ -3616,16 +3648,6 @@ async fn resume_runs(
             }
         }
     };
-    // The run the user resumed must be the one that starts. If a Discard or another Resume
-    // took it first, nothing behind it starts.
-    if claimed.first() != Some(&head) {
-        drop(arrivals);
-        restore(claimed).await;
-        return Err(ApiError::conflict(
-            "run_changed",
-            "This run changed before it could resume. Refresh to see it.",
-        ));
-    }
     let mut started = Vec::with_capacity(claimed.len());
     for (index, run) in claimed.iter().enumerate() {
         let outcome = async {
