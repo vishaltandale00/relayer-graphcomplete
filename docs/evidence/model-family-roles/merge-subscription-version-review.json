@@ -1,0 +1,150 @@
+{
+  "reviewer": "/root/repair_authority_review",
+  "reviewedAt": "2026-10-16T22:14:44.972342+00:00",
+  "headAtReview": "cc73f9cfa066e81b3d5ccec96dfccb91dc55303d",
+  "digestAlgorithm": "SHA256(sorted relative path UTF-8 + NUL + file bytes + NUL)",
+  "fiveFileDelta": {
+    "scope": [
+      "crates/relayer-app-server/src/conversation_export.rs",
+      "crates/relayer-app-server/src/product.rs",
+      "crates/relayer-app-server/src/product/catalog.rs",
+      "crates/relayer-app-server/src/runtime.rs",
+      "crates/relayer-app-server/tests/conversation_export_contract.rs"
+    ],
+    "scopeCount": 5,
+    "scopeSha256": "2fff7e0ebdf810887b501e984cd587f70f0412c4b8cc5fe7909c22e9f9e20e4c",
+    "fileSha256": {
+      "crates/relayer-app-server/src/conversation_export.rs": "9311e372be393d3534a888c0309825c5d5d9370e43486cf6e62523b16298211f",
+      "crates/relayer-app-server/src/product.rs": "ccb92c5b4caf21614582ec6e619918d0221e0f5a8f744e677f2a2aa91136a3b6",
+      "crates/relayer-app-server/src/product/catalog.rs": "8a5b4db0b604ceb8ad89b4dc68ee2a6de806f4091db6b3cd546b36ce3ea6ebbe",
+      "crates/relayer-app-server/src/runtime.rs": "d16a14604ef74d2cb74e6816b307bc8ee1f7aef1ef5412775c1334b05ebe426d",
+      "crates/relayer-app-server/tests/conversation_export_contract.rs": "630a93c5cfb7955a1fa52a8eb4d32acecd158451184ccd600bf6b5062ce4b690"
+    }
+  },
+  "integratedScope": {
+    "scope": [
+      "crates/relayer-app-server/src/api.rs",
+      "crates/relayer-app-server/src/api/state.rs",
+      "crates/relayer-app-server/src/api/threads.rs",
+      "crates/relayer-app-server/src/api/types.rs",
+      "crates/relayer-app-server/src/app_server.rs",
+      "crates/relayer-app-server/src/completion_broker.rs",
+      "crates/relayer-app-server/src/conversation_export.rs",
+      "crates/relayer-app-server/src/product.rs",
+      "crates/relayer-app-server/src/product/catalog.rs",
+      "crates/relayer-app-server/src/product/execution.rs",
+      "crates/relayer-app-server/src/product/service.rs",
+      "crates/relayer-app-server/src/runtime.rs",
+      "crates/relayer-app-server/src/storage/sqlite/approvals.rs",
+      "crates/relayer-app-server/src/storage/sqlite/completion_executions.rs",
+      "crates/relayer-app-server/src/storage/sqlite/threads.rs",
+      "crates/relayer-app-server/tests/conversation_export_contract.rs",
+      "crates/relayer-app-server/tests/support/completion_traces.rs",
+      "crates/relayer-graph-core/src/graph/completion/current.rs",
+      "crates/relayer-graph-core/tests/graph_database.rs",
+      "desktop/main/providers/provider-adapter-registry.mjs",
+      "desktop/main/providers/provider-definition-service.mjs",
+      "desktop/main/services/graphcomplete-runtime.mjs",
+      "desktop/renderer/src/approval-model.js",
+      "desktop/renderer/src/artifact-viewer.js",
+      "desktop/renderer/src/main.js",
+      "desktop/renderer/src/product-workspace/model.js",
+      "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+      "desktop/renderer/src/product-workspace/run-state.js",
+      "desktop/renderer/src/product-workspace/workspace.js",
+      "desktop/renderer/src/review-tools.js",
+      "desktop/renderer/src/threads.js",
+      "packages/harness-host/src/host.ts",
+      "packages/harness-host/src/implementations/claude-basic.ts",
+      "packages/harness-host/src/implementations/codex-basic.ts",
+      "packages/harness-host/src/implementations/model-family-guidance.ts",
+      "packages/harness-host/src/implementations/prime-agent.ts",
+      "packages/harness-host/test/claude-basic.test.ts",
+      "packages/harness-host/test/codex-basic.test.ts",
+      "packages/harness-host/test/prime-agent.test.ts",
+      "test/approval-model.test.mjs",
+      "test/node-detail-runtime.test.mjs",
+      "test/review-session.test.mjs",
+      "test/run-state.test.mjs"
+    ],
+    "scopeCount": 43,
+    "scopeSha256": "464e38fc91f3fd91d46a48d1bd7f44d2fde5d0ebd31e7fb021e9c7325375547c",
+    "fileSha256": {
+      "crates/relayer-app-server/src/api.rs": "f052e9c90062a5c73fbd3e8dee98a56ea8985b8d58bc65bcdf2e49692e79e33d",
+      "crates/relayer-app-server/src/api/state.rs": "9d3f7dc4354144095111bdd0a0a651a60229bc58d76bd4c96790209dfd390a43",
+      "crates/relayer-app-server/src/api/threads.rs": "a0ea11f4f49f4415355227ce18ecaab7cfeaea4c20bdee3d43581f78665cc0f6",
+      "crates/relayer-app-server/src/api/types.rs": "a912e3d272c1d9026b61a1be06628bf3133d9bb0479ac55792f54c17cfb9c7e6",
+      "crates/relayer-app-server/src/app_server.rs": "727302585d6404189769f980df10af76e8ac0fcbfe010708b5426a0096382873",
+      "crates/relayer-app-server/src/completion_broker.rs": "2b8e4a2a730ce0066f4f05ec23e6ed2491217db8b4816491a346f2c8dae8617c",
+      "crates/relayer-app-server/src/conversation_export.rs": "9311e372be393d3534a888c0309825c5d5d9370e43486cf6e62523b16298211f",
+      "crates/relayer-app-server/src/product.rs": "ccb92c5b4caf21614582ec6e619918d0221e0f5a8f744e677f2a2aa91136a3b6",
+      "crates/relayer-app-server/src/product/catalog.rs": "8a5b4db0b604ceb8ad89b4dc68ee2a6de806f4091db6b3cd546b36ce3ea6ebbe",
+      "crates/relayer-app-server/src/product/execution.rs": "0ac8b91021349e9e5a004de9ccfb21da982fa930590632bd30187eefd3629223",
+      "crates/relayer-app-server/src/product/service.rs": "ca94ca6334c8a3fd79788a37deda88e7b56a8c0c935d4f0c01c8992236569a53",
+      "crates/relayer-app-server/src/runtime.rs": "d16a14604ef74d2cb74e6816b307bc8ee1f7aef1ef5412775c1334b05ebe426d",
+      "crates/relayer-app-server/src/storage/sqlite/approvals.rs": "71d993e7c12dedf792902047bcfc1c504f8b1a0a2331dc546eea9a081d197091",
+      "crates/relayer-app-server/src/storage/sqlite/completion_executions.rs": "b72b1673e9b526e093b1faff63bb160ab6de4bc7d31a40494e31405411d34644",
+      "crates/relayer-app-server/src/storage/sqlite/threads.rs": "65d22bdcb5b39e5fdaa33201a6a7a0cd4b919155c1ed2ab955c211e7ff1860e9",
+      "crates/relayer-app-server/tests/conversation_export_contract.rs": "630a93c5cfb7955a1fa52a8eb4d32acecd158451184ccd600bf6b5062ce4b690",
+      "crates/relayer-app-server/tests/support/completion_traces.rs": "a9e279cdacf8f78b599b9da8a3d356c80dec13b28587fa699a6749b9346dd74b",
+      "crates/relayer-graph-core/src/graph/completion/current.rs": "37a35dedeaa823ebff1c28d70a886dac89c0715310e6d36d8d5f7b65690feced",
+      "crates/relayer-graph-core/tests/graph_database.rs": "9568db0be4f7fb6e276fe391d9ed132f4a2cef1ebe9c125e957f31e9e2d85ad8",
+      "desktop/main/providers/provider-adapter-registry.mjs": "708a5d2502f2fbd574d204da9482bbb8e53627e53fe9e4e188c3762b0d4f3be1",
+      "desktop/main/providers/provider-definition-service.mjs": "3f24593879a746d249653430cbf99586d3580e51186fe0c602b253b985de72a5",
+      "desktop/main/services/graphcomplete-runtime.mjs": "191e5222c39614af2197d71c03f5751b7ed3e5d07829e446cf76ccb4e02320de",
+      "desktop/renderer/src/approval-model.js": "1ffdf08269641173c42a47b7fe63d405a74f2f1c45ffe28b4fa37e6ec5539193",
+      "desktop/renderer/src/artifact-viewer.js": "c862b6d63546dfb9f85f9c7be28ca44413ee0f17fe3954c22624e5d515cbe065",
+      "desktop/renderer/src/main.js": "56ff85587190aedae81b8e993fa9af151097bc1861702c003673ac88ff64dffd",
+      "desktop/renderer/src/product-workspace/model.js": "7e61a86955eb3a694ba7b5193b1551bfba7a9cef145c04782e5e886578073603",
+      "desktop/renderer/src/product-workspace/node-detail-runtime.js": "f5e6f76c302e0bf3e2e4b6e6488344b5fe90ddb8bf414184b48e731427ffaa4c",
+      "desktop/renderer/src/product-workspace/run-state.js": "e7c52f169bfb3017ce812b03881c1e6d990e7f5e6f080b8e05140ce681238852",
+      "desktop/renderer/src/product-workspace/workspace.js": "a964f0ce003cbb188392e8bec2d6ac142337cc0235f35ed13adbb8d69214516c",
+      "desktop/renderer/src/review-tools.js": "76c73a9e810d36b340990eb5937298eb848a96fa6d5e85bf02f3eb944d1fb86d",
+      "desktop/renderer/src/threads.js": "ffa8bf2717af8fcedd677edb67704e88c5896d457551c52a0d80b06827de0fcb",
+      "packages/harness-host/src/host.ts": "8431444c8b03de154d59b52fb7d7402cb35c89d858711194ca1fc5efbf4bb844",
+      "packages/harness-host/src/implementations/claude-basic.ts": "768725fd6f101ace9abe62de08f08de6d907363df2475068aaf7f8187e4bcb2a",
+      "packages/harness-host/src/implementations/codex-basic.ts": "8d947f71741c2cc57ef2d04ad498dc4bfafcd4c1cdda895f7ed82d46668e5308",
+      "packages/harness-host/src/implementations/model-family-guidance.ts": "90869f57eae8c73d01dfaf95b0b2d909ff72aef9286a1ead720b374369a6add2",
+      "packages/harness-host/src/implementations/prime-agent.ts": "8da6424588f4fe2615d814fc856ade9a082cd26174f5991c2b62fce98e69392c",
+      "packages/harness-host/test/claude-basic.test.ts": "3d6ad36c312b7c348f2bac526fe615e4c2f89507fe01a8f28dda490bb41c4023",
+      "packages/harness-host/test/codex-basic.test.ts": "1c43af8f9456073399c05b819923c2659c112fefa9a017ab31549202e7c8cde7",
+      "packages/harness-host/test/prime-agent.test.ts": "3a083d53ae2babf2a493c26efea2e0c0203224dbfae6be633ba7e7a6ed27dd96",
+      "test/approval-model.test.mjs": "417098dbbf533780e4f47b9b4cd52dfa29d4cd812ba169478fe19b69fe297dad",
+      "test/node-detail-runtime.test.mjs": "f320efec2727a1d3ee8d985402de089ca494f821936b428d91de45b1c152dbca",
+      "test/review-session.test.mjs": "5bc90d665c78046890755b736e369d5030a8998c320f1124c3901dd83dedcb07",
+      "test/run-state.test.mjs": "8a838331a0b8af9424acd3aca935e3e8899a8503a2ea2c795e6e22828e25acfa"
+    }
+  },
+  "supersedes": "integration-review.json as a current-source assertion. Original receipt retained as historical evidence.",
+  "verdict": "No concrete blockers found in present-sensitive version repair or its integration with previously reviewed scope.",
+  "findings": [],
+  "authority": "FAM-005 / ADR0006 / model-family-roles producer contract: absent schemaVersion alone is historical v1; explicitly present version must be integer2.",
+  "checkpoints": [
+    "Shared deserializer applied to ExecutionModelPlan, AdmittedExecutionModelPlan and ExportAdmittedExecutionModelPlan; missing field retains default1, present null/0/1/3/string rejected.",
+    "Historical serialization, field order and digest domains unchanged. Valid omitted-v1 and present-v2 fixtures retain exact expected digest.",
+    "Unit fixture journey exercises all three deserialization consumers and valid requested/admitted/export versions.",
+    "Real JSONL decode rejects explicit1 added to a historical receipt with unchanged original v1 digest.",
+    "Existing typed malformed-plan validation tests retained because they protect programmatically constructed plans separately from serde ingress."
+  ],
+  "reviewerExecutedChecks": [
+    {
+      "check": "git diff --check for five-file delta",
+      "result": "passed"
+    }
+  ],
+  "parentReportedEvidence": [
+    {
+      "check": "conversation_export_contract",
+      "result": "50/50 passed"
+    }
+  ],
+  "pendingAtReview": [
+    "Internal unit fixture journey rerunning after test-only ExecutionModelPlan import repair.",
+    "Required full npm check/build and current-source CI still pending."
+  ],
+  "limitations": [
+    "No inference executed; no repository/source edits by reviewer.",
+    "Prior merged 39-file review is historical because product.rs changed; this union43 receipt binds the new source state.",
+    "Review is invalidated by any scoped file change; deterministic suite success must be recorded separately for exact tested source."
+  ]
+}

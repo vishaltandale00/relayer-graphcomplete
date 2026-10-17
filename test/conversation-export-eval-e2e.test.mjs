@@ -119,7 +119,7 @@ describe("conversation export to Eval end to end", () => {
       body: JSON.stringify({
         name: "Fixture models",
         enabled: true,
-        members: [{ providerId: "codex", modelId: "fixture-model" }],
+        members: [{ providerId: "codex", modelId: "fixture-model", roles: [{ name: "orchestrator" }] }],
       }),
     });
     const selection = {

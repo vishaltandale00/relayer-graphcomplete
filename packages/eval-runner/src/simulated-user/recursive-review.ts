@@ -548,7 +548,10 @@ function validateNodeReview(
     const expectedChoice = expected?.kind ?? "stop";
     const expectedActionId = expected?.subject.actionId ?? null;
     if (step.authoredChoice !== expectedChoice || step.authoredActionId !== expectedActionId) {
-      throw new Error(`Node ${review.nodeId} allocation step ${index} does not match authored action order`);
+      const required = expected === undefined
+        ? "authoredChoice must be stop and authoredActionId must be JSON null for implicit stop"
+        : `expected authoredChoice ${expectedChoice} and authoredActionId ${JSON.stringify(expectedActionId)}`;
+      throw new Error(`Node ${review.nodeId} allocation step ${index} does not match authored action order: ${required}`);
     }
     if (step.preferredChoice !== step.ranking.find(({ rank }) => rank === 1)?.choice) {
       throw new Error(`Node ${review.nodeId} allocation step ${index} preferred choice must be ranked first`);

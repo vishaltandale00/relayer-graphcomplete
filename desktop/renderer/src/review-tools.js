@@ -1,4 +1,4 @@
-import { compiledNodeDetailReviewControls } from "./product-workspace/node-detail-runtime.js";
+import { compiledNodeDetailReviewControls, compiledNodeDetailReviewCaptureRegions } from "./product-workspace/node-detail-runtime.js";
 import { controlActivationCompletionFor } from "./control-activation.js";
 
 const CONTROL_SELECTOR = [
@@ -79,7 +79,7 @@ export function isAccessibleControl(element, windowObject = window) {
 }
 
 export function visibleCaptureRegions(root = document, windowObject = window) {
-  return [...root.querySelectorAll("[data-review-capture]")]
+  return [...(root.matches?.("[data-review-capture]") ? [root] : []), ...root.querySelectorAll("[data-review-capture]")]
     .filter((element) => isVisibleElement(element, windowObject))
     .map((element) => ({
       elementRef: element.dataset.reviewCapture,
@@ -144,6 +144,7 @@ export function createReviewPresentationAdapter({
   navigateHistory,
   setInputOperatorCommitted = null,
   root = document,
+  getReviewRoot = () => root,
   windowObject = window,
 }) {
   if (!executionId) throw new Error("A review presentation adapter requires an execution ID.");
@@ -171,11 +172,12 @@ export function createReviewPresentationAdapter({
 
   function controls() {
     referencedElements.clear();
-    const authored = compiledNodeDetailReviewControls(root);
+    const shownRoot = getReviewRoot();
+    const authored = compiledNodeDetailReviewControls(shownRoot);
     for (const { element, kind, actionId } of authored) {
       authoredControlMetadata.set(element, { kind, actionId });
     }
-    return [...root.querySelectorAll(CONTROL_SELECTOR), ...authored.map(({ element }) => element)]
+    return [...shownRoot.querySelectorAll(CONTROL_SELECTOR), ...authored.map(({ element }) => element)]
       .filter((element) => isAccessibleControl(element, windowObject))
       .map((element) => {
         const elementRef = referenceFor(element);
@@ -190,6 +192,22 @@ export function createReviewPresentationAdapter({
             ? authoredControlMetadata.get(element).actionId : element.dataset.reviewActionId || null,
         };
       });
+  }
+
+  function compiledInputCaptures() {
+    const presentation = getPresentationState();
+    return compiledNodeDetailReviewCaptureRegions(getReviewRoot()).filter(region => {
+      const control = region.controlElement;
+      const style = windowObject.getComputedStyle(control);
+      const rect = control.getBoundingClientRect();
+      return String(region.occurrence.presentingInteractionNodeId) === String(presentation.presentingInteractionNodeId)
+        && String(region.occurrence.presentingLayerId) === String(presentation.layerId)
+        && region.sourceNodeId === String(presentation.selectedNodeId)
+        && isVisibleElement(region.element, windowObject)
+        && !control.hidden && style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity) !== 0
+        && (!control.checkVisibility || control.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }))
+        && rect.width > 0 && rect.height > 0;
+    });
   }
 
   function snapshot() {
@@ -216,7 +234,8 @@ export function createReviewPresentationAdapter({
         height: windowObject.innerHeight,
         deviceScaleFactor: windowObject.devicePixelRatio,
       },
-      controls: [...controls(), ...visibleCaptureRegions(root, windowObject)],
+      controls: [...controls(), ...visibleCaptureRegions(getReviewRoot(), windowObject),
+        ...compiledInputCaptures().map(({ element: _element, controlElement: _control, occurrence: _occurrence, sourceNodeId: _source, ...region }) => region)],
     };
   }
 
@@ -227,11 +246,13 @@ export function createReviewPresentationAdapter({
     }
     controls();
     const control = referencedElements.get(target.elementRef);
-    const captureTarget = [...root.querySelectorAll("[data-review-capture]")]
-      .find((element) => element.dataset.reviewCapture === target.elementRef);
+    const shownRoot = getReviewRoot();
+    const captureTarget = [...(shownRoot.matches?.("[data-review-capture]") ? [shownRoot] : []), ...shownRoot.querySelectorAll("[data-review-capture]")]
+      .find((element) => element.dataset.reviewCapture === target.elementRef)
+      ?? compiledInputCaptures().find(region => region.elementRef === target.elementRef)?.element;
     const element = control || captureTarget;
     if (!element) throw new Error(`Unknown review target: ${target.elementRef}`);
-    const revealableInput = captureTarget?.dataset.reviewCapture?.startsWith("input-action-");
+    const revealableInput = captureTarget && target.elementRef.startsWith("input-action-");
     if (!isVisibleElement(element, windowObject) && revealableInput && captureTarget.scrollIntoView) {
       captureTarget.scrollIntoView({ block: "nearest", inline: "nearest" });
       await nextFrame(windowObject);

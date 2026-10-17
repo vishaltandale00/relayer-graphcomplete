@@ -260,7 +260,7 @@ async function run() {
   await mkdir(projectDirectory);
   execFileSync('git', ['init', '--quiet', projectDirectory]);
   const project = await productRequest('/api/projects', { method: 'POST', body: JSON.stringify({ path: projectDirectory }) });
-  const family = await productRequest('/api/model-families', { method: 'POST', body: JSON.stringify({ name: 'Fixture models', enabled: true, members: [{ providerId: 'codex', modelId: 'fixture-model' }] }) });
+  const family = await productRequest('/api/model-families', { method: 'POST', body: JSON.stringify({ name: 'Fixture models', enabled: true, members: [{ providerId: 'codex', modelId: 'fixture-model', roles: [{ name: 'orchestrator' }] }] }) });
   const modelSelection = { familyId: family.id, providerId: 'codex', modelId: 'fixture-model' };
   const thread = await productRequest('/api/threads', { method: 'POST', body: JSON.stringify({ title: 'Follow-up node annotations', initialMessage: 'Show the deterministic task system.', projectId: project.id, harnessId: 'fixture-task-system', modelSelection }) });
   await waitForAcceptedInteractions(thread.id, 1);

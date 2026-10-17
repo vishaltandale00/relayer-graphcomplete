@@ -163,8 +163,16 @@ export class ReviewSession {
         const prepared = target.kind === "viewport"
           ? { index: tile.index, clip: plan.clip }
           : await this.#rendererCommand("prepareCaptureTile", tile);
+        if (presentationKey(await this.#snapshot()) !== presentationKey(state)) {
+          throw new Error("The production workspace changed presentation while capturing the screenshot.");
+        }
         const capture = this.transport ? await this.transport.capture(prepared.clip) : null;
         const image = capture ? null : await this.webContents.capturePage(prepared.clip);
+        // Graph/Esc or another navigation may win during the platform capture.
+        // Never persist its pixels under the presentation that preceded it.
+        if (presentationKey(await this.#snapshot()) !== presentationKey(state)) {
+          throw new Error("The production workspace changed presentation while capturing the screenshot.");
+        }
         const bytes = capture ? capture.bytes : image.toPNG();
         if (!bytes.length) throw new Error(`Review screenshot tile ${tile.index} is empty.`);
         const size = capture || image.getSize();

@@ -41,6 +41,7 @@ use sha2::{Digest, Sha256};
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct CreateThreadRequest {
+    required_provider_adapter_id: Option<String>,
     title: Option<String>,
     project_id: Option<i64>,
     initial_message: String,
@@ -84,8 +85,15 @@ pub(super) struct RetryInteractionRequest {
 #[serde(rename_all = "camelCase")]
 struct ModelSelectionRequest {
     family_id: i64,
+    // Compatibility inputs from older clients are never execution authority.
+    #[serde(default = "family_selection_placeholder")]
     provider_id: String,
+    #[serde(default)]
     model_id: String,
+}
+
+pub(super) fn family_selection_placeholder() -> String {
+    "family-selection".into()
 }
 
 #[derive(Serialize)]
@@ -381,6 +389,7 @@ pub(super) async fn create(
         .product
         .create_thread_with_expected_checkout(
             CreateThreadCommand {
+                required_provider_adapter_id: request.required_provider_adapter_id,
                 icon_selection_eligible: !state.eval_mode,
                 title: request.title,
                 project_id,
@@ -6641,6 +6650,7 @@ mod tests {
         let product = ProductService::new(storage, true);
         let thread = product
             .create_thread(CreateThreadCommand {
+                required_provider_adapter_id: None,
                 icon_selection_eligible: true,
                 title: None,
                 project_id: None,
@@ -7077,6 +7087,7 @@ mod tests {
                 State(state),
                 headers.clone(),
                 Json(CreateThreadRequest {
+                    required_provider_adapter_id: None,
                     title: None,
                     project_id: None,
                     initial_message: "Choose an icon".into(),

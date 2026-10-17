@@ -1,4 +1,5 @@
 import { actionReviewKind } from "../action-invocation-state.js";
+import { createInputOccurrence, inputActionReviewRef } from "../node-input-controls.js";
 
 // Only the trusted runtime can publish controls inside its isolated authored page.
 // Authored attributes and arbitrary shadow roots never grant review authority.
@@ -9,6 +10,12 @@ export function compiledNodeDetailReviewControls(root) {
     (reviewSurfaces.get(host) ?? []).filter(({ element }) => (
       element.isConnected && element.getRootNode() === host.shadowRoot
     ))
+  ));
+}
+
+export function compiledNodeDetailReviewCaptureRegions(root) {
+  return compiledNodeDetailReviewControls(root).flatMap(({ capture }) => (
+    capture?.element.isConnected && capture.element.contains(capture.controlElement.getRootNode().host) ? [capture] : []
   ));
 }
 
@@ -510,6 +517,7 @@ export async function mountCompiledNodeDetail({
   onInput = async () => undefined,
   onInputEdit = () => undefined,
   capabilityState = {},
+  inputReviewContext = null,
 }) {
   const assetReleases = [];
   const reviewControls = [];
@@ -587,7 +595,26 @@ img{max-inline-size:100%}
     const resetInputEdits = new Map();
     const capabilityRecords = new Map();
     const configuredCapabilities = new Set();
-    const adapters = { resolveAction, onNavigate, onInvoke, onInput, onInputEdit };
+    const adapters = { resolveAction, onNavigate, onInvoke, onInput, onInputEdit, inputReviewContext };
+    function inputCapture(element, action) {
+      const owner = adapters.inputReviewContext;
+      if (action.kind !== "input" || !owner
+        || ![owner.presentingInteractionNodeId, owner.presentingLayerId, owner.nodeId].every(value => Number.isSafeInteger(value) && value > 0)
+        || String(action.sourceNodeId) !== String(owner.nodeId)
+        || String(action.sourceLayerId) !== String(owner.presentingLayerId)) return null;
+      const occurrence = createInputOccurrence(owner.presentingInteractionNodeId, owner.presentingLayerId, action.id);
+      return {
+        // Capture the existing detail surface, including its authored prompt and
+        // choices. Do not wrap or replace the author's visual layout.
+        element: host.closest("#inspectorContent") ?? host.parentElement ?? host,
+        controlElement: element,
+        occurrence,
+        sourceNodeId: String(action.sourceNodeId),
+        elementRef: inputActionReviewRef(occurrence),
+        name: `Rendered input action ${action.id}`,
+        role: "region", disabled: false, kind: "capture-region", actionId: String(action.id),
+      };
+    }
     const configureCapability = (id, element, capability, action, resolveCurrentAction) => {
       if (configuredCapabilities.has(id)) return;
       const context = Object.freeze({ mountId: id, capability, actionReference: capability.action });
@@ -636,6 +663,7 @@ img{max-inline-size:100%}
         element,
         kind: actionReviewKind(action),
         actionId: String(action.id),
+        capture: inputCapture(element, action),
       });
       configuredCapabilities.add(id);
       const state = capabilityStates.get(id) ?? initialCapabilityState(capabilityState, id);
@@ -714,7 +742,9 @@ img{max-inline-size:100%}
       },
       async updateAdapters(next) {
         Object.assign(adapters, next);
+        for (const control of reviewControls) control.capture = null;
         for (const [id, record] of capabilityRecords) {
+          const reviewControl = reviewControls.find(({ element }) => element === record.element);
           const action = await record.resolveCurrentAction();
           try {
             assertResolvedAction(record.capability, action);
@@ -722,9 +752,9 @@ img{max-inline-size:100%}
             continue;
           }
           if (configuredCapabilities.has(id)) {
-            const reviewControl = reviewControls.find(({ element }) => element === record.element);
             reviewControl.kind = actionReviewKind(action);
             reviewControl.actionId = String(action.id);
+            reviewControl.capture = inputCapture(record.element, action);
             continue;
           }
           capabilityStates.set(id, {

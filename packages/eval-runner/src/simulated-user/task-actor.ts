@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Codex, type CodexOptions, type ModelReasoningEffort, type UserInput } from "@openai/codex-sdk";
 
+export const ACTOR_NATIVE_CALL_TIMEOUT_MS = 300_000;
+
 // Native Codex owns inference. Eval only supplies successive visible user states;
 // it does not schedule candidate agents or recursively execute graph work.
 export async function createRestrictedCodexActor({ runtime, config, prompt, outputSchema, createCodex = (options) => new Codex(options) }: {
@@ -27,18 +29,45 @@ export async function createRestrictedCodexActor({ runtime, config, prompt, outp
     let first = true;
     let capture = 0;
     async function run(observation: { screenshot?: string; [key: string]: unknown }, schema: Record<string, unknown>, instruction: string, signal?: AbortSignal) {
-      const { screenshot, ...visible } = observation;
-      const input: UserInput[] = [{ type: "text", text: `${first ? `${prompt}\n\n` : ""}${instruction}\n${JSON.stringify(visible)}` }];
-      if (screenshot) {
-        const path = join(cwd, `view-${++capture}.png`);
-        await writeFile(path, Buffer.from(screenshot, "base64"), { mode: 0o600 });
-        input.push({ type: "local_image", path });
-      }
-      signal?.throwIfAborted();
-      const result = await thread.run(input, { ...(signal ? { signal } : {}), outputSchema: schema });
-      first = false;
-      if (result.items?.some((item) => ["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(item.type))) throw new Error("Actor attempted a forbidden tool.");
-      return { result: JSON.parse(result.finalResponse), usage: result.usage ?? null };
+      let stage = "prepare";
+      let dispatch = "none";
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new AbortController();
+      try {
+        signal?.throwIfAborted();
+        const { screenshot, ...visible } = observation;
+        const input: UserInput[] = [{ type: "text", text: `${first ? `${prompt}\n\n` : ""}${instruction}\n${JSON.stringify(visible)}` }];
+        if (screenshot) {
+          const path = join(cwd, `view-${++capture}.png`);
+          await writeFile(path, Buffer.from(screenshot, "base64"), { mode: 0o600 });
+          input.push({ type: "local_image", path });
+        }
+        signal?.throwIfAborted();
+        const callSignal = AbortSignal.any([deadline.signal, ...(signal ? [signal] : [])]);
+        timer = setTimeout(() => deadline.abort(new DOMException("Actor native call timed out.", "TimeoutError")), ACTOR_NATIVE_CALL_TIMEOUT_MS);
+        timer.unref?.();
+        stage = "execute";
+        dispatch = "unknown";
+        // Await native cancellation and cleanup; never retry an unknown dispatch.
+        const result = await thread.run(input, { signal: callSignal, outputSchema: schema });
+        callSignal.throwIfAborted();
+        stage = "validate";
+        dispatch = "completed";
+        first = false;
+        if (result.items?.some((item) => ["command_execution", "file_change", "mcp_tool_call", "web_search"].includes(item.type))) throw new Error("Actor attempted a forbidden tool.");
+        return { result: JSON.parse(result.finalResponse), usage: result.usage ?? null };
+      } catch (error) {
+        const failure = deadline.signal.aborted && !signal?.aborted ? deadline.signal.reason : error;
+        // Only closed stage/dispatch values cross into saved actor evidence.
+        // Native error text remains internal to the service's safe classifier.
+        throw Object.assign(new Error(failure instanceof Error ? failure.message : "Actor native call failed.", { cause: failure }), {
+          name: failure instanceof Error ? failure.name : "Error",
+          ...(failure && typeof failure === "object" && "code" in failure ? { code: failure.code } : {}),
+          ...(failure && typeof failure === "object" && "status" in failure ? { status: failure.status } : {}),
+          ...(failure && typeof failure === "object" && "statusCode" in failure ? { statusCode: failure.statusCode } : {}),
+          actorFailureStage: stage, actorNativeDispatch: dispatch,
+        });
+      } finally { if (timer !== undefined) clearTimeout(timer); }
     }
     return {
       async observe(observation: { screenshot?: string; [key: string]: unknown }, signal?: AbortSignal, options?: { actionSchema: Record<string, unknown> }) {
