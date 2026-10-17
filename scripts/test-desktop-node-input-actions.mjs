@@ -933,7 +933,7 @@ async function run() {
     || originalAttempt.modelSelection?.familyId !== family.id
     || Object.keys(originalAttempt.modelSelection).some(key => key !== "familyId")
     || retainedSelection?.familyId !== family.id || retainedSelection?.providerId !== "codex"
-    || retainedSelection?.modelId !== "fixture-model") throw new Error("Lost response did not retain exact input/context/model submission.");
+    || retainedSelection?.modelId !== "fixture-model") throw new Error(`Lost response did not retain exact input/context/model submission: ${JSON.stringify({ submittedInputs: lostThread.interactions.at(-1).submittedInputs.length, originalAttempt, retainedSelection })}`);
   await clickNode("Input grammar");
   await waitFor("reconciliation exposes externally retained text", () => evaluate("Boolean(document.querySelector('[aria-label=\"Detach Name the governing constraint\"]'))"));
   await click("[aria-label='Detach Name the governing constraint']");
@@ -968,14 +968,13 @@ async function run() {
   }
   await waitFor("ready response preserves explicit browsing", () => evaluate(`!document.querySelector('#openReadyResult').classList.contains('hidden') && document.querySelector('#detailTitle').textContent === 'Selection guard'`));
   await click("#openReadyResult");
-  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1 && Boolean(document.querySelector('.interaction-input-history-disclosure'))"));
-  const disclosure = await evaluate(`(() => { const d = document.querySelector('.interaction-input-history-disclosure'); const summary = d?.querySelector('summary'); return { tag: d?.tagName, open: d?.open, summaryTag: summary?.tagName, summary: summary?.textContent, summaryName: summary?.getAttribute('aria-label'), summaryWidth: summary?.getBoundingClientRect().width, full: d?.querySelector('p')?.textContent }; })()`);
+  await waitFor("accepted Send clears composer inputs", () => evaluate("document.querySelectorAll('.composer-input-pill').length === 0 && document.querySelectorAll('#interactionInputHistory .interaction-input-history-item').length >= 1"));
+  const historyRow = `[...document.querySelectorAll('#interactionInputHistory .interaction-input-history-item')].find((row) => row.querySelector('summary>span:first-child')?.textContent === 'Name the governing constraint')`;
+  const disclosure = await evaluate(`(() => { const row = ${historyRow}; const summary = row?.querySelector('summary'); const [prompt, value] = summary ? summary.children : []; const list = row?.closest('.interaction-input-history-list'); return { tag: row?.tagName, open: row?.open, summaryTag: summary?.tagName, value: value?.textContent, valueOneLine: value ? getComputedStyle(value).whiteSpace === 'nowrap' && value.getBoundingClientRect().height < 1.5 * parseFloat(getComputedStyle(value).lineHeight) : false, listScrolls: list ? getComputedStyle(list).overflowY === 'auto' && getComputedStyle(list).maxHeight !== 'none' : false }; })()`);
   if (disclosure.tag !== "DETAILS" || disclosure.open || disclosure.summaryTag !== "SUMMARY"
-    || [...disclosure.summary].length !== 80 || disclosure.full !== submittedTextValue
-    || disclosure.summaryName !== "Show full submitted value for Name the governing constraint"
-    || disclosure.summaryWidth > 241) throw new Error(`Submitted long input disclosure is wrong: ${JSON.stringify(disclosure)}`);
-  await evaluate("document.querySelector('.interaction-input-history-disclosure>summary').click()");
-  await waitFor("submitted input full text opens", () => evaluate("document.querySelector('.interaction-input-history-disclosure').open"));
+    || [...disclosure.value].length !== 80 || !disclosure.value.endsWith("…") || !disclosure.valueOneLine || !disclosure.listScrolls) throw new Error(`Submitted long input history row is wrong: ${JSON.stringify(disclosure)}`);
+  await evaluate(`${historyRow}.querySelector('summary').click()`);
+  await waitFor("submitted input full text opens", () => evaluate(`(() => { const row = ${historyRow}; const full = row.querySelector(':scope>.interaction-input-history-full'); return row.open && full?.textContent === ${JSON.stringify(submittedTextValue)} && getComputedStyle(full).whiteSpace === 'pre-wrap' && [...row.querySelector('summary>span:last-child').textContent].length === 80; })()`));
 
   const authoredTurnId = acceptedThread.interactions[0].id;
   await window.loadURL(`${productSession.origin}/?threadId=${encodeURIComponent(thread.id)}&interactionId=${encodeURIComponent(authoredTurnId)}&review=1`);
