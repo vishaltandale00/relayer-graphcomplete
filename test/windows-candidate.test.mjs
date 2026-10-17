@@ -141,7 +141,12 @@ describe("independent Windows candidate", () => {
       await rm(resources, { recursive: true, force: true });
       signingPackager.signIf = async () => { throw Error("signing rejected"); };
       await expect(copyFiles(matchers, transformer)).rejects.toThrow("signing rejected");
-    } finally { await rm(f.repositoryRoot, { recursive: true, force: true }); }
+    } finally {
+      // copyFiles can reject through Promise.all before sibling copies settle.
+      // Allow only bounded filesystem cleanup retries; signing assertions above
+      // still observe the production copy/signing failure unchanged.
+      await rm(f.repositoryRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    }
   });
 
   it("dispatches CLI preparation and consumption through production release orchestration before assembly", async () => {

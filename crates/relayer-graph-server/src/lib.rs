@@ -345,6 +345,11 @@ pub fn router(state: ServerState) -> Router {
         )
         .route("/api/graph/nodes/{id}/neighbors", get(neighbors))
         .route("/api/graph/input", get(interaction_input))
+        .route("/api/graph/history", get(completion_history))
+        .route(
+            "/api/graph/nodes/{id}/input",
+            get(historical_interaction_input),
+        )
         .route("/api/graph/live-answers", get(graph_live_answers))
         .route(
             "/api/graph/personal-presentation",
@@ -2957,6 +2962,61 @@ async fn interaction_input(
             .writer_for_completion_authority(authority.node_id, authority.epoch)
             .await?
             .interaction_input()
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HistoryQuery {
+    before_node_id: Option<i64>,
+    limit: Option<usize>,
+}
+
+async fn completion_history(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Query(query): Query<HistoryQuery>,
+) -> Result<Json<relayer_graph_core::CompletionHistoryPage>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let before = query
+        .before_node_id
+        .map(|id| {
+            NodeId::new(id).ok_or_else(|| ApiError::invalid("Use a positive interaction ID."))
+        })
+        .transpose()?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .completion_history(before, query.limit.unwrap_or(20))
+            .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HistoricalInputQuery {
+    #[serde(default)]
+    after_answer_sequence: i64,
+}
+
+async fn historical_interaction_input(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+    Query(query): Query<HistoricalInputQuery>,
+) -> Result<Json<relayer_graph_core::HistoricalInteractionInput>, ApiError> {
+    let authority = session(&state, &headers)?;
+    let target =
+        NodeId::new(id).ok_or_else(|| ApiError::invalid("Use a positive interaction ID."))?;
+    Ok(Json(
+        state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .historical_interaction_input(target, query.after_answer_sequence)
             .await?,
     ))
 }

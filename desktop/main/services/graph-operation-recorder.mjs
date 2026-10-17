@@ -349,6 +349,8 @@ export async function startGraphOperationRecorder({
     const controller = new AbortController();
     requests.add(controller);
     let releaseActivity = () => {};
+    let attributedOperation;
+    let accounted = false;
     const abortUpstream = () => {
       if (!response.writableEnded) controller.abort(new Error("Graph operation downstream closed."));
     };
@@ -368,11 +370,16 @@ export async function startGraphOperationRecorder({
       if (requestToken !== undefined) knownSecrets.add(requestToken);
       const interactionNodeId = requestToken === undefined ? undefined : capabilityOwners.get(requestToken);
       if (requestUrl.pathname.startsWith("/api/graph/") && interactionNodeId !== undefined) {
+        if (requestUrl.pathname !== "/api/graph/authoring-errors") attributedOperation = {
+          interactionNodeId, method, path: scrubKnownSecrets(requestUrl.pathname, knownSecrets),
+        };
         const state = stateFor(interactionNodeId);
         const pending = requestUrl.pathname === "/api/graph/authoring-errors" ? state.pendingDiagnostics : state.pending;
         let resolveActivity;
         const activity = new Promise((resolve) => { resolveActivity = resolve; });
         pending.set(activity, () => {
+          // Export already accounts for this lost receipt in discardedEvents.
+          accounted = true;
           controller.abort(new Error("Graph operation export settlement timed out."));
           if (!request.complete) { request.destroy(); response.destroy(); }
         });
@@ -415,10 +422,12 @@ export async function startGraphOperationRecorder({
         ? Buffer.alloc(0)
         : await readBoundedBody(upstreamResponse.body, bodyLimit);
       const contentType = upstreamResponse.headers.get("content-type");
+      const responseValue = parseJsonObject(responseBytes);
+      if (attributedOperation && upstreamResponse.ok && method !== "HEAD" && responseValue === undefined) {
+        throw new Error("Graph operation returned invalid JSON.");
+      }
       response.writeHead(upstreamResponse.status, contentType === null ? {} : { "content-type": contentType });
       response.end(responseBytes);
-      const responseValue = parseJsonObject(responseBytes);
-
       if (method === "POST" && requestUrl.pathname === "/api/control/capabilities"
         && upstreamResponse.ok && positiveInteger(requestValue?.nodeId)
         && typeof requestValue?.graphToken === "string" && requestValue.graphToken !== "") {
@@ -443,8 +452,16 @@ export async function startGraphOperationRecorder({
           responseValue,
           knownSecrets,
         ));
+        accounted = true;
       }
     })().catch((error) => {
+      if (attributedOperation && !accounted) {
+        // A proxy failure is an observed attempt, not a server rejection. Never
+        // persist exception text or reprocess a request that failed sanitation.
+        const { interactionNodeId, method, path } = attributedOperation;
+        record(interactionNodeId, { schemaVersion: 1, method, path, status: 502, errorCodes: ["graph_operation_proxy_failed"] });
+        accounted = true;
+      }
       if (response.destroyed) return;
       if (response.headersSent) {
         response.destroy(error instanceof Error ? error : undefined);
