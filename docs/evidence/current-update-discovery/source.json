@@ -1,6 +1,6 @@
 {
   "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
-  "digest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
+  "digest": "f6934c3ddf1f1e157ce284082f463a9beb9b3de8903d08cbab5b8161c2d51f99",
   "algorithm": "sha256 sorted relative path + NUL + bytes + NUL",
   "excludedGeneratedEvidence": [
     "docs/evidence/current-update-discovery/review.json",
@@ -22,7 +22,7 @@
     },
     {
       "path": "desktop/eval-main/task-actor-browser.mjs",
-      "sha256": "5a540bd603709581bc71b10b3c34e5b1e3adfb4744480e3ffae9a3c1090d0a3e"
+      "sha256": "6dc4cd7c1b69de44ea5be9f05d80f5c7c35118186affbca7e8e8583fd75c3d22"
     },
     {
       "path": "desktop/eval-main/task-actor-service.mjs",
@@ -62,7 +62,7 @@
     },
     {
       "path": "docs/evidence/current-update-discovery/README.md",
-      "sha256": "6785d7b22e0b643b079d02b18ce6049bd78c733d1e934cc71c79e10dcb35448e"
+      "sha256": "1c63d1b66d0abdf5373a6cee7529870128a3d80d10074f830ed034dbed54d1e4"
     },
     {
       "path": "docs/evidence/current-update-discovery/live-20261018/after-publication.png",
@@ -138,7 +138,7 @@
     },
     {
       "path": "test/current-update-discovery.test.mjs",
-      "sha256": "ae9aa5410015d4e0addcdbc45f457af149396190fa67e00422c5a477e9f9b23b"
+      "sha256": "4357a104fe6be3ac7854e00003d86b3484f4200d22c9d85003b002dcd4c3855f"
     },
     {
       "path": "test/eval-human-task.test.mjs",

@@ -44,7 +44,9 @@ export function taskActorCurrentIdentity({ expected, presentation = globalThis.w
         const y = Math.max(0, rect.top) + Math.min(rect.height, document.defaultView.innerHeight - Math.max(0, rect.top)) / 2;
         const hit = element.getRootNode().elementFromPoint?.(x, y);
         if (rect.width > 0 && rect.height > 0 && (hit === element || element.contains(hit))) {
-          visibleUpdate = [element.dataset.currentUpdateScope, element.dataset.currentUpdateRevision, element.textContent, element.disabled];
+          // Revision and scope validate clicks, but cannot announce an unseen
+          // publication when the rendered cue itself has not changed.
+          visibleUpdate = [element.textContent, element.disabled];
         }
       }
       if (element.matches('[data-input-control-role="answer"]')) {

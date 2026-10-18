@@ -1,17 +1,17 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-10-18T21:46:27.007601+00:00",
+  "recordedAt": "2026-10-18T22:15:44.893872+00:00",
   "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
-  "sourceDigest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
+  "sourceDigest": "f6934c3ddf1f1e157ce284082f463a9beb9b3de8903d08cbab5b8161c2d51f99",
   "sourceManifest": "source.json",
-  "scopeQualification": "Final checks bind the repaired source bytes. Generated source/verification/review records are excluded from the digest. Historical CI/live evidence is qualified to its own snapshot; no current live model or exhaustive stability claim.",
+  "scopeQualification": "Final executable checks bind the repaired source bytes and explicitly selected runtime artifacts. Generated source/verification/review records are excluded from the digest. Prior visual/live evidence remains scoped to its recorded snapshot and inputs; no current live model, natural discovery-rate or exhaustive stability claim.",
   "checks": [
     {
       "command": "npm run check",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-a11y-20261018/check.log",
-        "sha256": "63004b48d14a78bdca45ab2ce6a7f853a22e7274a7cfa002fa9793afd87fbb5d"
+        "path": ".relayer/current-update-pr-dedup-20261018/check.log",
+        "sha256": "6034f572f622c6ec033b8f83318e960f1f1a784ec69fc9f3f05d8aaf039a54ec"
       },
       "results": {
         "vitest": {
@@ -34,39 +34,76 @@
       "command": "npm run build",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-a11y-20261018/build-final.log",
-        "sha256": "825244f64b6e5329ead34bb33c2e7ecb503c6a494237d76e397c154688518778"
+        "path": ".relayer/current-update-pr-dedup-20261018/build.log",
+        "sha256": "5bd98fdbad913327b001a3317509a65f71f17d80ef0db3e775ad8ccc94c4a9a0"
       },
-      "scope": "Warm native source build, TypeScript and workspace packages."
+      "scope": "Warm source build and workspace TypeScript packages. Runtime proof explicitly pins the private verified binaries; see runtimeEnvironmentCorrection."
     },
     {
-      "command": "focused five production-seam files",
+      "command": "focused Current discovery and actor production-seam files",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-a11y-20261018/focused-final.log",
-        "sha256": "ff1adbd975d3ab243dd8da6a49d00f46687de17f11a73c8ef685d5bee4c184d1"
+        "path": ".relayer/current-update-pr-dedup-20261018/focused.log",
+        "sha256": "0ba37bf73862afe7bf08622c73333f4ac2b1a40f670ac7fd42d6963655f1f499"
       },
-      "passed": 292
+      "passed": 96
     },
     {
       "command": "npm run test:eval-web",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-a11y-20261018/eval-web.log",
-        "sha256": "4306a9fb493c48395b69e8fa0f64b4eceddc236d8c59e2ef5c6fcfd960b53e87"
+        "path": ".relayer/current-update-pr-dedup-20261018/eval-web-pinned.log",
+        "sha256": "cbd62b9e820182e354af1c6ee89648651bf424166f302b08119118ba045714fd"
       },
-      "scope": "All assembled browser chapters, including native v12 publication, ID collision refusal, narrow scrolled rail hit testing/native Enter/following paint/no input submission, and actual actor click/Return/final-refresh/draft synchronization. Fixture inference only.",
-      "sourceInputQualification": "The final change after browser/capture execution only strengthened test/eval-task-actor.test.mjs setup to select and assert v12/v5. All production, renderer, browser-runner and capture inputs are byte-identical; final focused/full checks loaded that refined test. No production proof is reused across changed executable inputs."
+      "scope": "All original assembled browser chapters pass, including v12 publication, scoped latest-update activation, actual pinned pixels, Return/final-refresh/paint, keyboard navigation, live-answer and export paths. Fixture inference only.",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Volumes/2T-SSD/worktrees/vacation-live-main/relayer-graphcomplete/.relayer/current-update-pr-runtime"
+      },
+      "results": {
+        "native": {
+          "observedRevisions": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2
+          ],
+          "captureGaps": [
+            {
+              "reason": "presentation_changed_during_capture",
+              "revision": 1
+            }
+          ]
+        },
+        "authored": {
+          "observedRevisions": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2
+          ],
+          "captureGaps": []
+        },
+        "qualification": "Both chapters passed their declared predicates. The native capture gap remains explicit uncertainty, not a viewed-update or gap-free/exhaustive claim."
+      }
     },
     {
       "command": "npm run test:eval-compiled-runtime",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-a11y-20261018/compiled-isolated.log",
-        "sha256": "9774d369f3a0bb4ac74ab3308e01be18c9b907332eb1168163953b87d2b1bd5f"
+        "path": ".relayer/current-update-pr-dedup-20261018/compiled-pinned.log",
+        "sha256": "511825c7a9a03fe117620305ada0fd3e3202a1bbcf9203e8a147b2c1dbf9db18"
       },
       "passed": 12,
-      "scope": "Isolated after final build; no concurrent artifact generation."
+      "scope": "Isolated after browser proof, no concurrent package generation; same explicitly pinned runtime.",
+      "environment": {
+        "CARGO_TARGET_DIR": "/Volumes/2T-SSD/worktrees/vacation-live-main/relayer-graphcomplete/.relayer/current-update-pr-runtime"
+      }
     },
     {
       "command": "npm run evidence:share-preview",
@@ -75,7 +112,8 @@
         "path": ".relayer/current-update-pr-a11y-20261018/share-preview.log",
         "sha256": "efb7753486d45923d1d15b172c958a13dd5df92b2750542f50b963de077f10e9"
       },
-      "scope": "Actual inspected Electron light/dark captures with positive cleanup receipt."
+      "scope": "Actual inspected Electron light/dark captures with positive cleanup receipt.",
+      "sourceInputQualification": "Retained visual proof from previous source6d77997f and its recorded runtime. Renderer/capture executable source inputs are byte-identical; this supports the UI images, not current native runtime or dedup execution. Final browser/compiled proof above covers the explicitly pinned rebuilt runtime."
     },
     {
       "command": "documented follow-up annotation Electron capture",
@@ -84,7 +122,8 @@
         "path": ".relayer/current-update-pr-a11y-20261018/followup.log",
         "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2"
       },
-      "scope": "Actual A/B/C/D capture, context draft API, reload and positive cleanup; zero paid inference. Existing sidebar handler fixture warnings remain in log."
+      "scope": "Actual A/B/C/D capture, context draft API, reload and positive cleanup; zero paid inference. Existing sidebar handler fixture warnings remain in log.",
+      "sourceInputQualification": "Retained visual proof from previous source6d77997f and its recorded runtime. Renderer/capture executable source inputs are byte-identical; this supports the UI images, not current native runtime or dedup execution. Final browser/compiled proof above covers the explicitly pinned rebuilt runtime."
     }
   ],
   "nativeBuild": {
@@ -93,11 +132,11 @@
     "runtimeBinaries": [
       {
         "name": "relayer-app-server",
-        "sha256": "dfcde31a363ba6e8f7a06b6dd5dd972e8ff0495ca084d98bedf4f58549a8ac99"
+        "sha256": "414133f5a372195e28738eabff41929442194b0ca6c97978b19f2691ec20d85a"
       },
       {
         "name": "relayer-graph-server",
-        "sha256": "2fa13b554467c5de3858146a3a303fc87cb59572841917e03696cbfad8d4764b"
+        "sha256": "1e48bae93eb9fac88c7de586835eed247e00115380fb60876507fdf8834f61cd"
       }
     ]
   },
@@ -200,5 +239,98 @@
       "Narrow horizontally scrolled cue is hit-testable and native Enter follows Current without input or new admission."
     ],
     "fixtureQualification": "The native phase test supplies its completion-judge prerequisite so its registry actually selects v12/v5; persisted observation v5 is asserted. This fixture-only refinement happened while the full check was still running Rust, before JavaScript tests loaded. Rust and all other earlier inputs were unchanged."
+  },
+  "visibleDedupCorrection": {
+    "previousCommit": "c9f42a73c966ef9c31c949403dd2d37c18611df8",
+    "previousSourceDigest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
+    "previousHostedCi": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/39169368571",
+    "previousVerification": {
+      "path": ".relayer/current-update-pr-dedup-20261018/previous-head-verification.json",
+      "sha256": "e7e8f5cfd1dc93819e01aba577346103140be5beae73fad35f6ed224332191b5"
+    },
+    "redReproduction": {
+      "path": ".relayer/current-update-pr-dedup-20261018/red.log",
+      "sha256": "299708dec2566d6b30656343512e25a7ebb2f6368c8d98958cf77761f639b273"
+    },
+    "fixedBoundary": "Pinned observation dedup uses rendered cue text and disabled state, never hidden scope/revision. Repeated same-label publications remain deduplicated for known/legacy pins; visible label/disabled/occlusion changes remain observable. Exact scope/revision remains mandatory for click rebinding and preflight. No default or prior raw event changes."
+  },
+  "runtimeEnvironmentCorrection": {
+    "failure": "Original browser attempts timed out before artifact fixture acceptance; diagnostic fixture also reproduced. Host graph-history bootstrap received an empty404 and was categorized model_not_found before fixture/model execution.",
+    "cause": "Login shell inherited CARGO_TARGET_DIR=/Volumes/2T-SSD/cargo/relayer-graphcomplete. The runner and fixture prioritize it over target and selected incompatible serving binaries. The earlier binary inspections/refreshes and route smoke used a different private directory. No cache corruption or Cargo freshness defect established.",
+    "failedOriginalRuns": [
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-dedup-20261018/eval-web.log",
+          "sha256": "7baf9669369eb03e7f8dbcb25f520e00bfe0cd4037c74a2f0afc0fd9647a4dcf"
+        }
+      },
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-dedup-20261018/eval-web-final.log",
+          "sha256": "7baf9669369eb03e7f8dbcb25f520e00bfe0cd4037c74a2f0afc0fd9647a4dcf"
+        }
+      },
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-dedup-20261018/eval-web-relinked.log",
+          "sha256": "7baf9669369eb03e7f8dbcb25f520e00bfe0cd4037c74a2f0afc0fd9647a4dcf"
+        }
+      }
+    ],
+    "diagnosticLogs": [
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/browser-diagnostic.log",
+        "sha256": "ed77647cbafa951b80371222a611272f02905a663780bae6b4f98dfcd9634bf4"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca.log",
+        "sha256": "ff1bb43c4b37f2c43b38ab757175da00b885a294109469a8b5ee70bd5675f312"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-host.log",
+        "sha256": "145e25ea51c3da7d64142da87f48467d1cca5dcaf4f4d801f39ce2a68d4653a8"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-read.log",
+        "sha256": "64565b80a9bd4431275c648dd3cd0dc3bf2946d47a504cb750ad76a10a212cac"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-route.log",
+        "sha256": "9fa36b26aa54df8eab992f836259e7cebb2ef77b09c5add44db0738f4e3b33e8"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-http.log",
+        "sha256": "cabc3abdd4853b239a3bb108387146c07d8b931d4bb5da158b5eef11a0643386"
+      }
+    ],
+    "environmentAndHashes": {
+      "path": ".relayer/current-update-pr-dedup-20261018/runtime-environment.json",
+      "sha256": "2a241c8d1f04719387d46bee7d67e802585ef6bf7e21d2c90f610852b9be16ba"
+    },
+    "binaryRefresh": {
+      "path": ".relayer/current-update-pr-dedup-20261018/runtime-refresh.json",
+      "sha256": "6b182d5f6205d1eb1f84bb6a0095da3398ac5e22642e551fb562a9668760055e"
+    },
+    "warmGraphRelink": {
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-dedup-20261018/graph-rebuild.log",
+        "sha256": "295908e7a4204840b8ae775e553bd83f818f543a729b8361ecdd46c9809dfc45"
+      },
+      "qualification": "Source-byte-preserving graph-server warm rebuild; this alone did not correct the runner environment. Explicit target pinning did."
+    },
+    "routeSmoke": {
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-dedup-20261018/route-smoke.log",
+        "sha256": "9b84197378f74895e516c52906e05ad37e0bfe58958163a08b14191394d2f4de"
+      },
+      "outcome": "Private rebuilt server returns401 JSON for unauthenticated input and history routes."
+    },
+    "finalProof": "Unmodified browser suite and compiled suite explicitly pin the private runtime and pass; independent transport_prompt_review audited the corrected environment explanation and hashes.",
+    "failedLogQualification": "Three failure log paths contain byte-identical output. They document the same reproduced symptom; their bytes alone do not establish independent run identities."
   }
 }
