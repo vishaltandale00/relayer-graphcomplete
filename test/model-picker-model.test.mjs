@@ -5,6 +5,7 @@ import {
   defaultFamilySelection,
   defaultFamilySelectionForProvider,
   firstAvailableSelection,
+  familyModelSetup,
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
   modelPickerContextCandidate,
@@ -60,6 +61,28 @@ function settings() {
 }
 
 describe("composer model picker selection", () => {
+  it.each([
+    { compatibleProviderIds: ["future"] },
+    { modelCompatibility: [{ providerId: "codex", modelIds: ["two"] }] },
+    { modelRules: { allow: [{ adapterId: "claude-subscription", modelIdRegex: ".*" }], deny: [] } },
+    { modelRules: { allow: [], deny: [{ adapterId: "codex-subscription", modelIdExact: "one" }] } },
+  ])("explains a mismatch under the harness compatibility policy %j", policy => {
+    const catalog = settings();
+    catalog.providers[0].adapterId = "codex-subscription";
+    catalog.harnesses[0] = { id: "codex-basic", label: "Restricted harness", available: true, ...policy };
+    expect(familyModelSetup(catalog, 1)).toMatchObject({
+      reason: "harness-mismatch", label: "Harness mismatch", action: "family-settings", choiceName: null,
+    });
+    expect(familyModelSetup(catalog, 1).message).toContain("Codex cannot run with Restricted harness");
+    // Disconnection and model availability remain their own recovery boundary, even if
+    // this harness also refuses the model. A mismatch must not hide the underlying outage.
+    catalog.providers[0].connected = false;
+    expect(familyModelSetup(catalog, 1)).toMatchObject({ action: "settings", label: "Orchestrator unavailable" });
+    catalog.providers[0].connected = true;
+    catalog.providers[0].models[0].available = false;
+    expect(familyModelSetup(catalog, 1)).toMatchObject({ action: "family-settings", label: "Orchestrator unavailable" });
+  });
+
   it("requires an explicit model whenever a harness declares model rules", () => {
     const catalog = settings();
     const harness = catalog.harnesses.find((item) => item.id === "codex-basic");
@@ -198,7 +221,7 @@ describe("composer model picker selection", () => {
     expect(current).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
     expect(availablePickerFamilies(catalog, "prime-agent-basic").map(({ id }) => id)).toEqual([3]);
     expect(selectCandidateHarness(catalog, current, "prime-agent-basic")).toEqual({
-      selection: { harnessId: "prime-agent-basic", familyId: null, providerId: null, modelId: null },
+      selection: { ...current, harnessId: "prime-agent-basic" },
       error: null,
     });
   });

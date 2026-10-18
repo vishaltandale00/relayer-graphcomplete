@@ -93,6 +93,82 @@ function recoveringWithWorkDefault() {
 }
 
 describe("default family that needs model setup (PROV-008)", () => {
+  it("offers family Settings when a harness mismatch has no compatible family", () => {
+    const settings = restored();
+    settings.harnesses[0].modelCompatibility = [{ providerId: "codex", modelIds: ["unsupported"] }];
+    settings.harnesses[0].compatibleProviderIds = ["codex"];
+    const openSettings = vi.fn();
+    const { root, picker } = mountPicker(settings, { onOpenSettings: openSettings });
+    picker.open();
+    expect(picker.isReady()).toBe(false);
+    expect(root.querySelector(".model-picker-recovery").textContent).toContain("Harness mismatch");
+    expect(root.querySelector("[data-model-family]")).toBeNull();
+    expect(composerSendTitle({ ready: false, modelSetup: picker.modelSetup() }))
+      .toContain("in Settings to send.");
+    root.querySelector("[data-model-picker-settings]").click();
+    expect(openSettings).toHaveBeenCalledWith("models");
+    picker.dispose();
+  });
+
+  it.each([["new", "original"], ["new", "other"], ["new", "compatible"], ["ongoing", "original"]])("explains a harness mismatch in the %s composer with a %s default", async (mode, defaultKind) => {
+    const settings = restored();
+    settings.harnesses.push({
+      id: "claude-basic", label: "Claude Basic", available: true,
+      modelRules: { allow: [{ adapterId: "claude-subscription", modelIdExact: "sonnet" }], deny: [] },
+    });
+    settings.providers.push({
+      id: "claude", adapterId: "claude-subscription", connected: true,
+      models: [{ id: "sonnet", label: "Claude Sonnet", visible: true, available: true }],
+    });
+    settings.families.push({
+      id: 4, name: "Claude family", enabled: true, position: 3,
+      members: [{ providerId: "claude", modelId: "sonnet", position: 0, roles: [{ name: "orchestrator" }] }],
+    });
+    if (defaultKind !== "original") settings.defaults.familyId = defaultKind === "compatible" ? 4 : 2;
+    const original = { harnessId: "codex-basic", familyId: 1, providerId: "codex", modelId: "gpt-5.6-sol" };
+    const openSettings = vi.fn();
+    const changed = vi.fn();
+    const validateSelection = vi.fn();
+    const { root, picker, document } = mountPicker(settings, {
+      mode, selection: { ...original, harnessId: mode === "ongoing" ? "claude-basic" : original.harnessId },
+      pinnedHarnessId: mode === "ongoing" ? "claude-basic" : null,
+      onOpenSettings: openSettings,
+      onSelectionChange: changed,
+      validateSelection,
+    });
+    picker.open();
+    if (mode === "new") {
+      root.querySelector('[data-model-picker-tab="advanced"]').click();
+      root.querySelector('[data-harness-option="claude-basic"]').click();
+      await vi.waitFor(() => expect(root.querySelector('[data-harness-option="claude-basic"]').getAttribute("aria-checked")).toBe("true"));
+      root.querySelector('[data-model-picker-tab="model"]').click();
+    }
+    expect(picker.isReady()).toBe(false);
+    expect(picker.getSelection()).toBeNull();
+    expect(validateSelection).not.toHaveBeenCalled();
+    if (mode === "new") expect(changed).toHaveBeenLastCalledWith(null);
+    const recovery = root.querySelector(".model-picker-recovery");
+    expect(recovery.textContent).toContain("Harness mismatch");
+    expect(recovery.textContent).toContain("Codex defaults cannot run with Claude Basic");
+    expect(recovery.textContent).not.toMatch(/reconnect/i);
+    const select = root.querySelector('[aria-label="Compatible model family"]');
+    expect([...select.options].map(option => [option.value, option.textContent])).toEqual([
+      ["", "Choose a compatible family"], ["4", "Claude family"],
+    ]);
+    expect(root.querySelector("[data-model-picker-settings]")).toBeNull();
+    expect(composerSendTitle({ ready: false, modelSetup: picker.modelSetup(), readyTitle: "Send" }))
+      .toBe("Harness mismatch. Choose a compatible family for Claude Basic to send.");
+    select.value = "4";
+    select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    expect(picker.getSelection()).toEqual({ harnessId: "claude-basic", familyId: 4, providerId: "claude", modelId: "sonnet" });
+    expect(picker.isReady()).toBe(true);
+    expect(root.querySelector(".model-picker-recovery")).toBeNull();
+    expect(openSettings).not.toHaveBeenCalled();
+    expect(settings.defaults).toMatchObject({ harnessId: "codex-basic", familyId: defaultKind === "original" ? 1 : defaultKind === "compatible" ? 4 : 2 });
+    expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
+    picker.dispose();
+  });
+
   it.each(["new", "ongoing"])("cycles compatible families in place with focused arrows in the %s composer", (mode) => {
     const settings = restored();
     settings.families.push({

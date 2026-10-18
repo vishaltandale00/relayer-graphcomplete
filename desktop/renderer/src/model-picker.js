@@ -58,7 +58,7 @@ export function modelPickerFamilyPresentation(settings, harnessId, selection) {
 
 export function composerSendTitle({ ready, modelSetup = null, readyTitle }) {
   if (ready) return readyTitle;
-  if (modelSetup) return `${modelSetup.label}. ${modelSetup.actionName} to send.`;
+  if (modelSetup) return `${modelSetup.label}. ${modelSetup.choiceName ?? modelSetup.actionName} to send.`;
   return "Choose an available model in Settings before sending";
 }
 
@@ -266,16 +266,16 @@ export function createModelPicker({
     currentSelection = nextSelection;
     error = null;
     render();
-    onSelectionChange(currentSelection);
+    onSelectionChange(selectionReady() ? currentSelection : null);
   }
 
   function familyOptions(families, selectedFamily) {
     return families.map((family) => `<option value="${escapeHtmlAttribute(family.id)}" ${String(family.id) === String(selectedFamily?.id) ? "selected" : ""}>${escapeHtml(family.name)}</option>`).join("");
   }
 
-  function familyFieldMarkup(families, selectedFamily, setupName = null) {
-    return `<div class="model-family-field"><span>Family</span>
-      <select data-model-family aria-label="Model family">${setupName ? `<option value="" selected disabled>${escapeHtml(setupName)}</option>` : ""}${familyOptions(families, selectedFamily)}</select>
+  function familyFieldMarkup(families, selectedFamily, setupName = null, compatibleOnly = false) {
+    return `<div class="model-family-field"><span>${compatibleOnly ? "Compatible family" : "Family"}</span>
+      <select data-model-family aria-label="${compatibleOnly ? "Compatible model family" : "Model family"}">${setupName ? `<option value="" selected disabled>${escapeHtml(setupName)}</option>` : ""}${familyOptions(families, selectedFamily)}</select>
     </div>`;
   }
 
@@ -357,11 +357,12 @@ export function createModelPicker({
   }
 
   function renderModelSetupPanel(panel, families, modelSetup) {
-    const refresh = onRefreshModels && modelSetup.action === "refresh"
+    const canChooseCompatibleFamily = modelSetup.reason === "harness-mismatch" && families.length > 0;
+    const refresh = canChooseCompatibleFamily ? "" : onRefreshModels && modelSetup.action === "refresh"
       ? `<button type="button" class="secondary" data-model-picker-refresh aria-label="${escapeHtmlAttribute(refreshingModels ? modelSetup.busyName : modelSetup.actionName)}" aria-busy="${refreshingModels}" aria-disabled="${refreshingModels}">${refreshingModels ? "Refreshing…" : escapeHtml(modelSetup.actionLabel)}</button>`
       : `<button type="button" class="secondary" data-model-picker-settings${["settings", "family-settings"].includes(modelSetup.action) ? ` aria-label="${escapeHtmlAttribute(modelSetup.actionName)}"` : ""}>Open Settings</button>`;
     const otherFamilies = families.length
-      ? familyFieldMarkup(families, null, modelSetup.familyName)
+      ? familyFieldMarkup(families, null, canChooseCompatibleFamily ? "Choose a compatible family" : modelSetup.familyName, canChooseCompatibleFamily)
       : "";
     panel.innerHTML = `<div class="model-picker-empty model-picker-recovery"><strong>${escapeHtml(modelSetup.label)}</strong><span>${escapeHtml(modelSetup.message)}</span>${refresh}</div>${otherFamilies}${familyMembersMarkup(familyFor(currentSettings, modelSetup.familyId), families, null)}`;
     if (families.length) bindFamilyChange(panel, families);

@@ -39,11 +39,32 @@ export function familyModelSetup(settings, familyId, harnessId = settings?.defau
     if (!family || !family.enabled) return null;
     if (availableOrchestrator(settings, family, harnessId)) return null;
     const orchestrator = familyOrchestrator(family);
+    const provider = settings.providers?.find(item => item.id === orchestrator?.providerId);
+    const model = provider?.models?.find(item => item.id === orchestrator?.modelId);
+    const harness = harnessFor(settings, harnessId);
+    if (orchestrator && provider?.connected !== false && model
+      && model.visible !== false && model.available !== false
+      && harness && harness.available !== false
+      && !harnessSupportsModel(harness, provider, orchestrator.modelId)) {
+      return {
+        familyId: family.id,
+        familyName: family.name,
+        providerId: orchestrator.providerId,
+        reason: "harness-mismatch",
+        action: "family-settings",
+        label: "Harness mismatch",
+        message: `${family.name} cannot run with ${harness.label ?? harnessId}: its orchestrator, ${model.label ?? model.id}, is not supported by this harness. Choose a compatible family, or configure one in Settings.`,
+        choiceName: availablePickerFamilies(settings, harnessId).length
+          ? `Choose a compatible family for ${harness.label ?? harnessId}` : null,
+        actionLabel: "Open Settings",
+        actionName: `Configure a compatible family for ${harness.label ?? harnessId} in Settings`,
+      };
+    }
     return {
       familyId: family.id,
       familyName: family.name,
       providerId: orchestrator?.providerId,
-      action: settings.providers?.find(provider => provider.id === orchestrator?.providerId)?.connected === false ? "settings" : "family-settings",
+      action: provider?.connected === false ? "settings" : "family-settings",
       label: "Orchestrator unavailable",
       message: `${family.name} cannot run because its orchestrator is unavailable or incompatible. Reconnect its provider or choose an available orchestrator in Settings.`,
       actionLabel: "Open Settings",
@@ -328,7 +349,14 @@ export function selectCandidateHarness(settings, currentSelection, harnessId) {
     return { selection: { harnessId, familyId: null, providerId: null, modelId: null }, error: null };
   }
   if (availablePickerFamilies(settings, harnessId).length > 0) {
-    return { selection: { harnessId, familyId: null, providerId: null, modelId: null }, error: null };
+    // Keep the user's rejected family for recovery copy, not as an executable choice.
+    // Clearing it would make the picker diagnose the unrelated default family instead.
+    return { selection: {
+      harnessId,
+      familyId: currentSelection?.familyId ?? null,
+      providerId: currentSelection?.providerId ?? null,
+      modelId: currentSelection?.modelId ?? null,
+    }, error: null };
   }
   return { selection: currentSelection, error: NO_MODELS_FOR_HARNESS };
 }
@@ -341,7 +369,7 @@ export async function validateCandidateHarness(
 ) {
   const candidate = selectCandidateHarness(settings, currentSelection, harnessId);
   if (candidate.error) return candidate;
-  if (candidate.selection.familyId == null) return candidate;
+  if (candidate.selection.familyId == null || !pickerSelectionIsAvailable(settings, candidate.selection)) return candidate;
   try {
     await validateSelection(candidate.selection);
     return candidate;
