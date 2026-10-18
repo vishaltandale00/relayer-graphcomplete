@@ -185,7 +185,10 @@ describe("product workspace navigation controls", () => {
     expect(turnStatusPresentation("accepted")).toMatchObject({ hidden: true, label: "" });
     // Interaction-graph cards tell a capacity wait from a node wait (#720).
     expect(interactionGraphStatus({ completionStatus: "queued", queueReason: "capacity" })).toBe("Waiting for capacity");
-    expect(interactionGraphStatus({ completionStatus: "queued", queueReason: "node" })).toBe("queued");
+    expect(interactionGraphStatus({ completionStatus: "queued", queueReason: "node" })).toBe("Queued");
+    // After a restart a card says, without hover, which runs wait for the user (#722).
+    expect(interactionGraphStatus({ completionStatus: "paused" })).toBe("Paused");
+    expect(interactionGraphStatus({ completionStatus: "interrupted" })).toBe("Interrupted by restart");
     // A review capture taken before a run moved to the capacity wait is not current after it.
     const queuedTurn = { id: 5, threadId: 4, sequence: 2, completionStatus: "queued", queueReason: "node" };
     expect(presentationInteractionRevision([queuedTurn], 4))

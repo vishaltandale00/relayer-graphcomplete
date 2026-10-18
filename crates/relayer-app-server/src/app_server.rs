@@ -68,6 +68,12 @@ async fn reconcile_interrupted_interaction(
     {
         return Ok(());
     }
+    // A run an earlier startup interrupted (#722) waits for the user's Resume, which prepares
+    // and binds it. Startup only checks a bound one against its graph interaction again, so a
+    // result the graph accepted after all is still recovered.
+    if interaction.completion_status == "interrupted" && interaction.graph_node_id.is_none() {
+        return Ok(());
+    }
     // An agent's child is recovered from its own invoke occurrence whatever its parent's
     // status: its parent may already have failed, and it still has to end.
     let agent_child = storage
@@ -80,6 +86,7 @@ async fn reconcile_interrupted_interaction(
         storage.invocation_graph_source(interaction.id).await
     }
     .map_err(StartupReconciliationError::retryable)?;
+    let has_invocation = invocation.is_some();
     let durable_input = storage
         .interaction_input(interaction.id)
         .await
@@ -320,6 +327,12 @@ async fn reconcile_interrupted_interaction(
                             "accepted output not yet readable"
                         ))
                     })?;
+                if output.get("nodeId").and_then(serde_json::Value::as_i64) != Some(graph_node_id) {
+                    return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                        "canonical output node mismatch for interaction {}",
+                        interaction.id
+                    )));
+                }
                 if !storage
                     .recover_interaction_accepted(interaction.id, &output)
                     .await
@@ -357,10 +370,15 @@ async fn reconcile_interrupted_interaction(
                 .map_err(StartupReconciliationError::retryable)?;
         } else if let Some(durable_input) = durable_input.as_ref() {
             if durable_input.submitted_inputs.is_empty() {
-                storage.recover_identified_interaction_submitted(
-                    interaction.id,
-                    "Identified interaction input was recovered after restart and is ready to resume.",
-                ).await.map_err(StartupReconciliationError::retryable)?;
+                // Its input identity lets it run again on this graph interaction, but nothing
+                // runs it on its own: it waits, interrupted, for the user's Resume (#722).
+                storage
+                    .interrupt_identified_interaction(
+                        interaction.id,
+                        crate::storage::RESTART_INTERRUPTED,
+                    )
+                    .await
+                    .map_err(StartupReconciliationError::retryable)?;
             } else {
                 let harness = interaction
                     .harness_configuration_name
@@ -381,7 +399,78 @@ async fn reconcile_interrupted_interaction(
                     )));
                 }
             }
+        } else if !has_invocation {
+            // A message with no input identity, such as a thread's first message, reruns on
+            // this same graph interaction when the user resumes it (#722). Only an active
+            // current can run again; one the graph already ended keeps its canonical outcome.
+            // A graph without the temporal schema has no current to read, so its message
+            // waits for Resume as before.
+            let current = if runtime.temporal_features().schema_read {
+                Some(
+                    runtime
+                        .completion_current(graph_node_id)
+                        .await
+                        .map_err(StartupReconciliationError::from_runtime)?,
+                )
+            } else {
+                None
+            };
+            let lifecycle = current
+                .as_ref()
+                .map_or(relayer_graph_core::CompletionLifecycle::Active, |current| {
+                    current.lifecycle
+                });
+            match lifecycle {
+                relayer_graph_core::CompletionLifecycle::Active => {
+                    storage
+                        .interrupt_unidentified_message(
+                            interaction.id,
+                            crate::storage::RESTART_INTERRUPTED,
+                        )
+                        .await
+                        .map_err(StartupReconciliationError::retryable)?;
+                }
+                relayer_graph_core::CompletionLifecycle::Stopped => {
+                    if !storage
+                        .finish_restart_stopped(interaction.id, &startup_timestamp())
+                        .await
+                        .map_err(StartupReconciliationError::retryable)?
+                    {
+                        return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                            "stopped message {} could not be projected",
+                            interaction.id
+                        )));
+                    }
+                }
+                relayer_graph_core::CompletionLifecycle::Failed => {
+                    let reason = current
+                        .and_then(|current| current.safe_reason)
+                        .unwrap_or_else(|| "application_restart".into());
+                    let harness = thread_harness(storage, &interaction).await?;
+                    storage
+                        .fail_interaction_completion(
+                            interaction.id,
+                            &harness,
+                            &format!("The graph ended this run as failed ({reason})."),
+                        )
+                        .await
+                        .map_err(StartupReconciliationError::retryable)?;
+                }
+                // Its output was read as absent above, so its acceptance is not yet readable.
+                relayer_graph_core::CompletionLifecycle::Succeeded => {
+                    return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                        "message {} succeeded in the graph without a readable output",
+                        interaction.id
+                    )));
+                }
+            }
         }
+    } else if !has_invocation && durable_input.is_none() && !agent_child {
+        // Not bound yet: Resume prepares it, as its first start would have.
+        storage
+            .interrupt_unidentified_message(interaction.id, crate::storage::RESTART_INTERRUPTED)
+            .await
+            .map_err(StartupReconciliationError::retryable)?;
     }
     Ok(())
 }
@@ -716,16 +805,15 @@ pub(crate) async fn reconcile_interrupted_recursive_completion_executions(
     Ok(reconciled)
 }
 
-/// No run holds a capacity slot after a restart (#720), so no run stays queued for one. A
-/// message turn that waited fails, unless it already has a graph interaction, which is
-/// reconciled with it. An invoked run that waited is recovered with the runs queued behind
-/// their nodes.
-pub(crate) async fn interrupt_capacity_waits(storage: &SqliteProductStore) -> anyhow::Result<()> {
-    let waited = storage
-        .interrupt_capacity_waits(crate::storage::CAPACITY_WAIT_INTERRUPTED)
+/// No run holds a node or a capacity slot after a restart, so no run stays queued (#718,
+/// #720). Every queued run is paused instead (#722): it keeps its node, its text and the
+/// inputs it snapshotted, and nothing starts it until the user resumes it.
+pub(crate) async fn pause_queued_runs(storage: &SqliteProductStore) -> anyhow::Result<()> {
+    let paused = storage
+        .pause_queued_runs(crate::storage::RESTART_PAUSED)
         .await?;
-    if waited > 0 {
-        eprintln!("interrupted {waited} run(s) that waited for capacity");
+    if paused > 0 {
+        eprintln!("paused {paused} queued run(s) until the user resumes them");
     }
     Ok(())
 }
@@ -738,9 +826,9 @@ pub(crate) async fn reconcile_interrupted_work(
     runtime: Option<&RuntimeClient>,
     permission_catalog: &PermissionCatalog,
 ) -> anyhow::Result<()> {
-    // No run stays queued for capacity (#720). Startup interrupts those waits before harness
-    // retirement; this repeats it for callers that reconcile without opening the server.
-    interrupt_capacity_waits(storage).await?;
+    // No run stays queued (#722). Startup pauses queued runs before harness retirement; this
+    // repeats it for callers that reconcile without opening the server.
+    pause_queued_runs(storage).await?;
     // Agent children an older build left unmarked are marked first, so they are failed
     // below rather than held for a user's invoke.
     let marked = storage.mark_unrecorded_agent_children().await?;
@@ -765,10 +853,40 @@ pub(crate) async fn reconcile_interrupted_work(
             )
             .await
             {
+                // A run an earlier startup interrupted keeps waiting for the user's Resume;
+                // its next start reconciles it with the graph (#722).
+                // A failure that may clear keeps it interrupted for the user's Resume. A
+                // deterministic integrity failure is quarantined below like any other run.
+                if interaction.completion_status == "interrupted" && error.is_retryable() {
+                    eprintln!(
+                        "keeping interrupted run {} for the user's Resume after startup reconciliation failed: {error}",
+                        interaction.id
+                    );
+                    continue;
+                }
                 let graph_lease_recoverable = storage
                     .invocation_requires_graph_lease(interaction.id)
                     .await?;
                 let durable_input = storage.interaction_input(interaction.id).await?;
+                // A message with no input identity keeps waiting, interrupted, for the user's
+                // Resume, even when the graph could not be reached (#722). Its next start
+                // prepares it on its graph interaction again.
+                if !interaction.stop_requested
+                    && error.is_retryable()
+                    && durable_input.is_none()
+                    && storage
+                        .interrupt_unidentified_message(
+                            interaction.id,
+                            crate::storage::RESTART_INTERRUPTED,
+                        )
+                        .await?
+                {
+                    eprintln!(
+                        "keeping interrupted message {} for the user's Resume after a transient startup reconciliation failure: {error}",
+                        interaction.id
+                    );
+                    continue;
+                }
                 let has_submitted_inputs = durable_input
                     .as_ref()
                     .is_some_and(|input| !input.submitted_inputs.is_empty());
@@ -781,10 +899,12 @@ pub(crate) async fn reconcile_interrupted_work(
                     && (graph_lease_recoverable || context_only_identified)
                 {
                     if context_only_identified {
+                        // It waits, interrupted, for the user's Resume (#722); its next start
+                        // reconciles it with its graph interaction.
                         storage
-                            .recover_identified_interaction_submitted(
+                            .interrupt_identified_interaction(
                                 interaction.id,
-                                "Identified interaction startup reconciliation was interrupted transiently and is ready to resume.",
+                                crate::storage::RESTART_INTERRUPTED,
                             )
                             .await?;
                     }
@@ -932,7 +1052,7 @@ pub(crate) async fn reconcile_interrupted_work(
         .await?;
     if interrupted > 0 {
         eprintln!(
-            "marked {interrupted} interrupted ordinary interaction(s) failed during backend startup"
+            "recovered {interrupted} interrupted ordinary interaction(s) during backend startup"
         );
     }
     if let Some(runtime) = runtime
@@ -1324,10 +1444,9 @@ impl RelayerAppServer {
             .as_ref()
             .map(RuntimeClient::product_harnesses)
             .unwrap_or_default();
-        // No run holds a capacity slot after a restart (#720). Runs that waited for one are
-        // interrupted before harness retirement may rebind them, so a waiting turn that already
-        // has a graph interaction is still recognized as bound and reconciled with it.
-        interrupt_capacity_waits(&storage).await?;
+        // No run holds a node or a capacity slot after a restart. Queued runs are paused
+        // before harness retirement rebinds them, so a paused run keeps its status (#722).
+        pause_queued_runs(&storage).await?;
         storage
             .initialize_model_catalog(&default_harness_configuration, &runtime_harnesses)
             .await?;

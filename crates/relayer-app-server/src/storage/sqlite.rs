@@ -26,6 +26,8 @@ mod interaction_contexts;
 mod interactions;
 mod migrations;
 mod node_runs;
+mod paused_runs;
+pub(crate) use paused_runs::{RestartClaim, RestartDiscard};
 mod personal_presentation;
 mod product_state;
 mod projects;
@@ -50,9 +52,23 @@ const LATEST_HUMAN_TURN_MODEL: &str = "SELECT turn.model_provider_id,turn.provid
 /// The error of a queued run a Stop removed before it started (#718, #720).
 pub(crate) const QUEUED_RUN_STOPPED: &str = "Stopped before it started.";
 
-/// The error of a message turn that waited for capacity when Relayer stopped (#720).
+/// The error an older build gave a message turn that waited for capacity when Relayer stopped
+/// (#720). Since #722 such a turn is paused instead; rows an older build failed keep it.
 pub(crate) const CAPACITY_WAIT_INTERRUPTED: &str =
     "Relayer stopped before this message had capacity to start. Send it again to run it.";
+
+/// The note on a run that was queued, behind its node or for capacity, when Relayer stopped
+/// (#722). It is paused: nothing starts it until the user resumes it.
+pub(crate) const RESTART_PAUSED: &str =
+    "Relayer restarted before this run started. Resume starts it.";
+
+/// The note on a human-started run that was executing when Relayer stopped and that can run
+/// again on its own interaction (#722). Nothing reruns it until the user resumes it.
+pub(crate) const RESTART_INTERRUPTED: &str =
+    "Relayer restarted while this run was in progress. Resume runs it again.";
+
+/// The error of a paused or interrupted run the user discarded (#722). Its text is kept.
+pub(crate) const RESTART_DISCARDED: &str = "Discarded after Relayer restarted.";
 
 /// The error of a message a model failure returned to unsent after a later message was sent.
 pub(crate) const STALE_RETURNED_MESSAGE: &str = "This message could not run, and a later message was sent before it was retried. Send it again to run it.";

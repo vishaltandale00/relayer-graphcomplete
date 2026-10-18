@@ -1972,13 +1972,6 @@ impl ProductService {
             .map_err(Into::into)
     }
 
-    pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, ProductError> {
-        self.storage
-            .interrupted_interactions()
-            .await
-            .map_err(Into::into)
-    }
-
     pub(crate) async fn restore_identified_interaction_submitted(
         &self,
         interaction_id: InteractionId,
@@ -2885,6 +2878,16 @@ impl ProductService {
             .map_err(Into::into)
     }
 
+    pub(crate) async fn rebind_message_receipts(
+        &self,
+        binding: PreparedInteractionBinding<'_>,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .rebind_message_receipts(binding)
+            .await
+            .map_err(Into::into)
+    }
+
     pub(crate) async fn record_node_run(
         &self,
         run: InteractionId,
@@ -2901,6 +2904,76 @@ impl ProductService {
         run: InteractionId,
     ) -> Result<Option<super::NodeRunKey>, ProductError> {
         self.storage.node_run_key(run).await.map_err(Into::into)
+    }
+
+    /// The paused and interrupted runs on `run`'s node in creation order (#722), or `None`
+    /// when `run` is not a node run.
+    pub(crate) async fn restart_chain(
+        &self,
+        run: InteractionId,
+    ) -> Result<Option<Vec<InteractionId>>, ProductError> {
+        self.storage.restart_chain(run).await.map_err(Into::into)
+    }
+
+    /// The runs Resume all starts in a thread (#722), in creation order.
+    pub(crate) async fn restart_heads(
+        &self,
+        thread: ThreadId,
+    ) -> Result<Vec<InteractionId>, ProductError> {
+        self.storage.restart_heads(thread).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn claim_restart_runs(
+        &self,
+        thread: ThreadId,
+        runs: &[InteractionId],
+    ) -> Result<crate::storage::RestartClaim, ProductError> {
+        self.storage
+            .claim_restart_runs(thread, runs)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn was_resumed(&self, run: InteractionId) -> Result<bool, ProductError> {
+        self.storage.was_resumed(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn was_discarded(&self, run: InteractionId) -> Result<bool, ProductError> {
+        self.storage.was_discarded(run).await.map_err(Into::into)
+    }
+
+    pub(crate) async fn restore_restart_run(
+        &self,
+        run: InteractionId,
+        status: &str,
+        note: Option<&str>,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .restore_restart_run(run, status, note)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn mark_restart_discarded(
+        &self,
+        run: InteractionId,
+    ) -> Result<bool, ProductError> {
+        self.storage
+            .mark_restart_discarded(run)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub(crate) async fn discard_restart_run(
+        &self,
+        thread: ThreadId,
+        run: InteractionId,
+        graph_available: bool,
+    ) -> Result<crate::storage::RestartDiscard, ProductError> {
+        self.storage
+            .discard_restart_run(thread, run, graph_available)
+            .await
+            .map_err(Into::into)
     }
 
     pub(crate) async fn queue_node_run(&self, run: InteractionId) -> Result<bool, ProductError> {
