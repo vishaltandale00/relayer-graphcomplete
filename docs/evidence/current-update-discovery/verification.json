@@ -1,24 +1,23 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-10-18T21:18:32.328976+00:00",
+  "recordedAt": "2026-10-18T21:46:27.007601+00:00",
   "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
-  "sourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+  "sourceDigest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
   "sourceManifest": "source.json",
-  "scopeQualification": "Checks ran against these frozen source bytes after rebasing onto main. Generated source/verification/review records are excluded from the source digest; no live model rerun is claimed for this snapshot.",
+  "scopeQualification": "Final checks bind the repaired source bytes. Generated source/verification/review records are excluded from the digest. Historical CI/live evidence is qualified to its own snapshot; no current live model or exhaustive stability claim.",
   "checks": [
     {
       "command": "npm run check",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/check.log",
-        "sha256": "115ad3f01157b9e10d2a2ede6489078145da2832412d34cba7c83f5e5f101f37"
+        "path": ".relayer/current-update-pr-a11y-20261018/check.log",
+        "sha256": "63004b48d14a78bdca45ab2ce6a7f853a22e7274a7cfa002fa9793afd87fbb5d"
       },
-      "scope": "Full deterministic repository pipeline; aggregate process exit 0, native groups and Vitest/Python/doc gates verified in the log.",
       "results": {
         "vitest": {
           "filesPassed": 340,
           "filesSkipped": 1,
-          "testsPassed": 4565,
+          "testsPassed": 4566,
           "testsSkipped": 3
         },
         "separateCodexSecretBoundary": {
@@ -27,7 +26,7 @@
         "python": {
           "testsPassed": 100
         },
-        "nativeAndCrashRecovery": "Every reported group passed; aggregate exit0.",
+        "nativeAndCrashRecovery": "All reported groups passed; aggregate exit0.",
         "receiptsAndReadability": "passed"
       }
     },
@@ -35,55 +34,57 @@
       "command": "npm run build",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/build-final.log",
-        "sha256": "add943042a9e2a06e12a0d9c5ea19319362dd8e909f5e5c9b61a6d66fd92ddc6"
+        "path": ".relayer/current-update-pr-a11y-20261018/build-final.log",
+        "sha256": "825244f64b6e5329ead34bb33c2e7ecb503c6a494237d76e397c154688518778"
       },
       "scope": "Warm native source build, TypeScript and workspace packages."
     },
     {
-      "command": "focused four production-seam test files",
+      "command": "focused five production-seam files",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/focused-final.log",
-        "sha256": "715818e484d7a9dc6b13879d103b35c1642e331fffa9434a1fe0a12fcabf8e8a"
+        "path": ".relayer/current-update-pr-a11y-20261018/focused-final.log",
+        "sha256": "ff1adbd975d3ab243dd8da6a49d00f46687de17f11a73c8ef685d5bee4c184d1"
       },
-      "passed": 197
+      "passed": 292
     },
     {
       "command": "npm run test:eval-web",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/eval-web.log",
-        "sha256": "5260e12bbad5ddec9300f02fc52a19c0bf6aba68f01287b67936a470db1f2a9b"
+        "path": ".relayer/current-update-pr-a11y-20261018/eval-web.log",
+        "sha256": "4306a9fb493c48395b69e8fa0f64b4eceddc236d8c59e2ef5c6fcfd960b53e87"
       },
-      "scope": "All assembled browser chapters pass, including explicit native v12 publication; native/authored live-answer fixture paths; trusted chrome and authored ID collision; delayed latest-navigation/Return/final-refresh/paint and unsent draft preservation. Fixture inference only."
+      "scope": "All assembled browser chapters, including native v12 publication, ID collision refusal, narrow scrolled rail hit testing/native Enter/following paint/no input submission, and actual actor click/Return/final-refresh/draft synchronization. Fixture inference only.",
+      "sourceInputQualification": "The final change after browser/capture execution only strengthened test/eval-task-actor.test.mjs setup to select and assert v12/v5. All production, renderer, browser-runner and capture inputs are byte-identical; final focused/full checks loaded that refined test. No production proof is reused across changed executable inputs."
     },
     {
       "command": "npm run test:eval-compiled-runtime",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/compiled-isolated.log",
-        "sha256": "b0ecaa9b14be28d7c625d5bb00a91f0b83ae8a6273b144a5f30f81272f293667"
+        "path": ".relayer/current-update-pr-a11y-20261018/compiled-isolated.log",
+        "sha256": "9774d369f3a0bb4ac74ab3308e01be18c9b907332eb1168163953b87d2b1bd5f"
       },
-      "passed": 12
+      "passed": 12,
+      "scope": "Isolated after final build; no concurrent artifact generation."
     },
     {
       "command": "npm run evidence:share-preview",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/share-preview.log",
-        "sha256": "dc948ef80a8978401ea5a2c1824f75c86ee39f38de022e5d622fc74846d91d57"
+        "path": ".relayer/current-update-pr-a11y-20261018/share-preview.log",
+        "sha256": "efb7753486d45923d1d15b172c958a13dd5df92b2750542f50b963de077f10e9"
       },
-      "scope": "Actual Electron light/dark capture; positive passed receipt with cleanup."
+      "scope": "Actual inspected Electron light/dark captures with positive cleanup receipt."
     },
     {
-      "command": "documented Follow-up annotation Electron capture",
+      "command": "documented follow-up annotation Electron capture",
       "exitCode": 0,
       "evidence": {
-        "path": ".relayer/current-update-pr-review-20261018/followup.log",
+        "path": ".relayer/current-update-pr-a11y-20261018/followup.log",
         "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2"
       },
-      "scope": "Actual A/B/C/D capture, context-draft API, reload and positive cleanup result; zero paid inference. Existing project-sidebar-read fixture warnings remain in the log."
+      "scope": "Actual A/B/C/D capture, context draft API, reload and positive cleanup; zero paid inference. Existing sidebar handler fixture warnings remain in log."
     }
   ],
   "nativeBuild": {
@@ -173,5 +174,31 @@
       "qualification": "Initial concurrent run failed recipe cases before useful harness diagnostics. Package artifact timestamps overlapped the run. Root cause is not proven; the failure is retained. Final proof is a separately isolated run after the final build, with no source edits."
     }
   },
-  "review": "review.json; source review assertions and independent execution qualifications remain separate."
+  "review": "review.json; source review assertions and independent execution qualifications remain separate.",
+  "additionalReviewCorrections": {
+    "previousCommit": "4bc2f6944e0aeeac8be80cbc3f398a700333bf85",
+    "previousSourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+    "previousHostedCi": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/39167340322",
+    "previousVerification": {
+      "path": ".relayer/current-update-pr-a11y-20261018/previous-head-verification.json",
+      "sha256": "4183954812479300f5fcda60169c15b37a0d546ac56f752dac27c695a8f3b2d9"
+    },
+    "redReproductions": [
+      {
+        "path": ".relayer/current-update-pr-a11y-20261018/red.log",
+        "sha256": "71d37e7dafe39c056f0f3f32dba537ba04bf635f3314896a07f1e55aa184ffe3"
+      },
+      {
+        "path": ".relayer/current-update-pr-a11y-20261018/root-rail-red.log",
+        "sha256": "a6153459ea525498dd73a179ec39ea3233a8080df78c950592595f22f2bd93fa"
+      }
+    ],
+    "fixedBoundaries": [
+      "Working action phase and exact observation link persist through reopen/export and bounded judge evidence. Projection corrects old mismatched phase using its linked immutable observation; raw events and prior judge evidence stay unchanged.",
+      "Accessible cue name matches generic/new visible status; a status change invalidates old control identity.",
+      "Root-history with annotations and an update cue uses the full normal rail; annotation-only layout returns without the cue.",
+      "Narrow horizontally scrolled cue is hit-testable and native Enter follows Current without input or new admission."
+    ],
+    "fixtureQualification": "The native phase test supplies its completion-judge prerequisite so its registry actually selects v12/v5; persisted observation v5 is asserted. This fixture-only refinement happened while the full check was still running Rust, before JavaScript tests loaded. Rust and all other earlier inputs were unchanged."
+  }
 }

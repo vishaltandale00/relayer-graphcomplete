@@ -5321,7 +5321,7 @@ export function createProductWorkspace({
     const items = workspaceBreadcrumbItems(state, thread, selection);
     const update = onOpenLatestCurrent && currentUpdateNotice(state, thread, selection);
     const visible = workspaceBreadcrumbShouldRender(items) || Boolean(update);
-    const rootAnnotationOnly = workspaceRootAnnotationShouldRender(items, annotationEnabled);
+    const rootAnnotationOnly = !visible && workspaceRootAnnotationShouldRender(items, annotationEnabled);
     breadcrumb.classList.toggle("hidden", !visible && !rootAnnotationOnly);
     breadcrumb.classList.toggle("root-annotation-only", rootAnnotationOnly);
     if (!visible && !rootAnnotationOnly) {
@@ -5334,10 +5334,10 @@ export function createProductWorkspace({
       button.id = "viewLatestUpdate";
       button.type = "button";
       button.className = "breadcrumb-segment current-update-control";
-      button.setAttribute("aria-label", "View latest update");
       button.dataset.currentUpdateScope = JSON.stringify([update.threadId, update.turnId, update.completionId, update.attemptId]);
       button.dataset.currentUpdateRevision = String(update.revision);
       button.textContent = update.newUpdate ? "New update available · View latest update" : "View latest update";
+      button.setAttribute("aria-label", button.textContent);
       button.onclick = async () => {
         if (breadcrumb.getAttribute("aria-busy") === "true") return;
         breadcrumb.setAttribute("aria-busy", "true");

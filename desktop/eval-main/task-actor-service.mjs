@@ -175,7 +175,7 @@ export class TaskActorService {
           if (!captured.observation.availableActions.includes(reaction.action.kind)
             || actionsUsed >= task.actor.maxActions) throw Object.assign(new Error("Unavailable working action."), { code: "actor_invalid_action" });
           actionsUsed++;
-          const intent = await this.tasks.actorEvent(id, "actor_action", { phase: "current", observationEventId: observed.id, action: reaction.action, usage: reaction.usage ?? null });
+          const intent = await this.tasks.actorEvent(id, "actor_action", { phase: observed.phase, observationEventId: observed.id, action: reaction.action, usage: reaction.usage ?? null });
           signal.throwIfAborted();
           phase = "act_current";
           try {

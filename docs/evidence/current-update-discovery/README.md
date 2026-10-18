@@ -10,6 +10,8 @@ Actor prompt v12 / behavior v9 / observation v5 can observe the actual pinned wo
 
 | Promise or boundary | Smallest production-seam proof |
 | --- | --- |
+| Accessible cue name reflects the visible new-update status; root-history with annotations uses the normal rail; compact annotation-only mode returns without the cue | `test/current-update-discovery.test.mjs`: real workspace DOM and status/name/old-identity checks |
+| Pinned and Current actions retain exact observation links through reopening/export and judge projection; old mislabeled raw actions stay immutable | `test/eval-task-actor.test.mjs`: actual navigation/scroll decisions; `test/eval-human-task.test.mjs`: observation-derived phase, intent-only evidence and legacy exclusion |
 | Scoped visible cue; old view and composer preserved; pending navigation clears on failure | `test/current-update-discovery.test.mjs`: real workspace rendering and actual error toast |
 | Explicit latest navigation follows the newest head and preserves Back history | `test/workspace-navigation-integration.test.mjs`: active, stopped, failed and returned Current |
 | Newer head, navigation or attempt supersedes an old read; failed load retains the old view | Same controller test file: four separate race/failure boundaries |
@@ -50,3 +52,5 @@ The change was rebased onto main's paused-run recovery change. Production code m
 Final adversarial assertions are recorded in `review.json` and the PR, bound to the exact source digest/commit. Earlier source reviews and live evidence remain qualified to their own snapshots. Hosted `check` and freshness statuses remain required before merging.
 
 Automated PR review found two missing secondary seams: v5 completion-judge receipt inclusion and fresh pin baselines outside layer navigation. Both were reproduced before correction. Final source review and verification supersede the initial PR snapshot for these boundaries; the passing original CI remains historical evidence of that earlier snapshot.
+
+The final review also corrected working-action phase propagation, accessible update names and root-history rail layout. Historical raw action phase tags predate that fix and remain unchanged. Judge projection can derive phase from the linked immutable observation; actual Current viewing in the historical live proof is established by its later screenshot, not by an action phase tag. The assembled browser proof additionally exercises narrow scrolled breadcrumbs and native Enter activation without submitting input.

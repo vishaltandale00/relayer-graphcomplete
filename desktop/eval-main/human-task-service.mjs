@@ -609,6 +609,8 @@ export class HumanTaskService {
       const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4", "task-actor-observation-v5"].includes(session.actorSetup?.behaviorContract?.observationContract?.id);
       const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind)
         || (currentNative && (event.kind === "live_answer_reconciled" || (event.kind === "product_action" && event.path?.endsWith("/live-answers")))));
+      const observedPhases = new Map(session.events.filter(event => event.kind === "actor_observation"
+        && ["current", "pinned"].includes(event.phase)).map(event => [event.id, event.phase]));
       const projected = candidates.slice(-80).map(event => {
         const item = { id: event.id, kind: event.kind, at: event.at };
         if (event.kind === "submission") {
@@ -635,7 +637,11 @@ export class HumanTaskService {
               ? { value: clone(answer.value) } : { valueText: text(serialized), truncated: true }) };
         }
         const action = event.action ?? {};
-        return { ...item, ...(event.phase === "current" ? { phase: "current", delivery: "intent_only" } : {}), action: { kind: text(action.kind, 100), value: text(action.value), comment: text(action.comment), reason: text(action.reason, 100), endpointStatus: text(action.endpointStatus, 100), remainingWork: text(action.remainingWork), satisfaction: [1, 2, 3, 4].includes(action.satisfaction) ? action.satisfaction : null } };
+        // The linked observation is authoritative for older mislabeled actions;
+        // raw stored events remain immutable.
+        const phase = observedPhases.get(event.observationEventId) ?? event.phase;
+        return { ...item, ...(["current", "pinned"].includes(phase) ? { phase, delivery: "intent_only",
+          observationEventId: text(event.observationEventId, 200) || null } : {}), action: { kind: text(action.kind, 100), value: text(action.value), comment: text(action.comment), reason: text(action.reason, 100), endpointStatus: text(action.endpointStatus, 100), remainingWork: text(action.remainingWork), satisfaction: [1, 2, 3, 4].includes(action.satisfaction) ? action.satisfaction : null } };
       });
       const trajectory = [];
       let bytes = 0;

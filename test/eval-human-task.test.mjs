@@ -889,3 +889,25 @@ it("keeps v12 gateway Answer receipts in stopping evidence after Current advance
   expect(posts).toBe(1);
   expect(f.tasks.get(session.id)).toMatchObject({ completions: 1, status: "active" });
 });
+
+it("keeps pinned navigation intents distinct in judge evidence, including old mislabeled actions", async () => {
+  const f = await gatedTask();
+  const id = f.session.id;
+  f.tasks.find(id).actorSetup = (await import("../desktop/eval-main/setup-registry.mjs")).updateAwareActorSetup();
+  f.options.evalService.completionJudgeArtifactEvidence = async () => ({ files: [] });
+  const pinned = await f.tasks.actorEvent(id, "actor_observation", { phase: "pinned", observation: { text: "Earlier material" } });
+  const historical = await f.tasks.actorEvent(id, "actor_action", {
+    phase: "current", observationEventId: pinned.id, action: { kind: "click", value: "View latest update" } });
+  const current = await f.tasks.actorEvent(id, "actor_observation", { phase: "current", observation: { text: "Actual Current" } });
+  const viewed = await f.tasks.actorEvent(id, "actor_action", { phase: "current",
+    observationEventId: current.id, action: { kind: "scroll" } });
+  const legacy = await f.tasks.actorEvent(id, "actor_action", { action: { kind: "scroll" } });
+  const trajectory = (await f.tasks.completionJudgeEvidence(id)).trajectory;
+  expect(trajectory.find(e => e.id === historical.id)).toMatchObject({
+    phase: "pinned", observationEventId: pinned.id, delivery: "intent_only" });
+  expect(trajectory.find(e => e.id === viewed.id)).toMatchObject({
+    phase: "current", observationEventId: current.id, delivery: "intent_only" });
+  expect(trajectory.find(e => e.id === historical.id)).not.toHaveProperty("incorporation");
+  expect(trajectory.find(e => e.id === legacy.id)).not.toHaveProperty("phase");
+  expect(f.tasks.find(id).events.find(e => e.id === historical.id).phase).toBe("current");
+});

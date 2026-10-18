@@ -1,6 +1,6 @@
 {
   "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
-  "digest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+  "digest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
   "algorithm": "sha256 sorted relative path + NUL + bytes + NUL",
   "excludedGeneratedEvidence": [
     "docs/evidence/current-update-discovery/review.json",
@@ -14,7 +14,7 @@
     },
     {
       "path": "desktop/eval-main/human-task-service.mjs",
-      "sha256": "3a942bb0414bba1ec24733b78dd54890176300b58677f869a107cee7f387288c"
+      "sha256": "b92890e03c1485a857b36a2c4b3e47040dab3d4202353f0c714badd0a6b519fc"
     },
     {
       "path": "desktop/eval-main/setup-registry.mjs",
@@ -26,7 +26,7 @@
     },
     {
       "path": "desktop/eval-main/task-actor-service.mjs",
-      "sha256": "c28b6bfded0deea38574d2a6056c1789999ecba8efa1559642957a126126fd0d"
+      "sha256": "d6d8c0f3f6bf73cc96cf041bd1977313b7b75e32ebd38b1aa6f0a40c005319fd"
     },
     {
       "path": "desktop/eval-main/task-actor.mjs",
@@ -50,7 +50,7 @@
     },
     {
       "path": "desktop/renderer/src/product-workspace/workspace.js",
-      "sha256": "929a7a07fa0525d75dd125b9d646c9ef6794ec39139cde2034d1b985c10c5c3f"
+      "sha256": "7e191502039bd7c6f1003af9447c1d1efb777da8dfee4c6e0d0a268f883b9d1d"
     },
     {
       "path": "desktop/renderer/src/threads.js",
@@ -62,7 +62,7 @@
     },
     {
       "path": "docs/evidence/current-update-discovery/README.md",
-      "sha256": "d2385b036e42e4063c109a403d8b7e96230946a2c89058e92040755f42e25a77"
+      "sha256": "6785d7b22e0b643b079d02b18ce6049bd78c733d1e934cc71c79e10dcb35448e"
     },
     {
       "path": "docs/evidence/current-update-discovery/live-20261018/after-publication.png",
@@ -94,27 +94,27 @@
     },
     {
       "path": "docs/evidence/desktop-social-preview/receipt.json",
-      "sha256": "fcbb5f91f704b51d4a37548600082626638bf996693b6e042bd5ff16f01ac13d"
+      "sha256": "ddc9679b109a5fa846ab1c64d6f3f99035d56c30c74d1ab72bb124399f0b01f1"
     },
     {
       "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
-      "sha256": "d09c78f5ac2e460e7f9e925365b95d61d3e054d2e53234398556f3a8b867f7d6"
+      "sha256": "f1252ee780119c4734be2fd7bf539b02e7107f495d6fa0ddd08a23cda9f1e257"
     },
     {
       "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
-      "sha256": "e0287f2151847037f61cdea8cb46b0d0e097fd44aa18b03a7db082a9b1d6d1cc"
+      "sha256": "d742e7d4914fb043b71bb72a6c402f323ac229c138a8aa991a73ff79216804ee"
     },
     {
       "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
-      "sha256": "608fb56f5079f143ead0702d914e67c3e129e9830e3148e605728e7457a1408f"
+      "sha256": "db03f32f65baaa3fe064aded38227aa5b49cf3546a07a58fc9323ad22a5252b8"
     },
     {
       "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
-      "sha256": "1e059f06b8e887d82e68387262b36961ed89e0ad4f5240f5ac867ee1ee8e028f"
+      "sha256": "3eb1b7399d4515e4f89c11e258ee9fe13cbb15b823bcec44be08b773ef1b8410"
     },
     {
       "path": "docs/evidence/followup-node-annotations/receipt.json",
-      "sha256": "e142a6d59fe22613e8463758d302bd883efba45b45354d8eac55335ee28b5c7f"
+      "sha256": "b2c1ffa87305d17438643905c28b383aa18067f4e7e6291a83dab7436c18a13c"
     },
     {
       "path": "docs/prd/index.html",
@@ -126,7 +126,7 @@
     },
     {
       "path": "scripts/eval-current-actor-proof.mjs",
-      "sha256": "0f95bb9a5e9b1e6b29f6b7c9419e5503372a1b1b93960ab8efe5f7743d0e9f48"
+      "sha256": "0eefb44c5eecbaa767d6a3e3557d5a7c9e6e98ec863b600e6bfc89e89caf4484"
     },
     {
       "path": "scripts/test-eval-web.mjs",
@@ -138,11 +138,11 @@
     },
     {
       "path": "test/current-update-discovery.test.mjs",
-      "sha256": "523aa49435b61189103f6fcc983944487405064b37d192c768c7dcd5cd2a236b"
+      "sha256": "ae9aa5410015d4e0addcdbc45f457af149396190fa67e00422c5a477e9f9b23b"
     },
     {
       "path": "test/eval-human-task.test.mjs",
-      "sha256": "66bcc2bbdd90d95449b5fca38f193e9f9fae03a2ab65cc3bb06e909848c874d4"
+      "sha256": "097e498e9ca7669fad00b682410a750ae7a80ae47979f1eab150f889c38523b9"
     },
     {
       "path": "test/eval-setup-registry.test.mjs",
@@ -150,7 +150,7 @@
     },
     {
       "path": "test/eval-task-actor.test.mjs",
-      "sha256": "867253600a99fd2590b19e5533c9f43a77a883a08410c73985dad72a255ac1d0"
+      "sha256": "576b777fb06551c89f3a377465e144fbe348cbb09e0021ba0be69f732f900321"
     },
     {
       "path": "test/navigation-history.test.mjs",

@@ -55,7 +55,7 @@ async function fixture({ decide, observe, observeCurrent, promptVersion, maxActi
   const browser = {
     observeCurrent: vi.fn(async (...args) => observeCurrent ? observeCurrent(...args, turns) : null),
     observe: vi.fn(async () => ({ text: turns.length > 1 ? "A trip plan based on your reply" : "Where do you want to go?", controls: [{ ref: "visible", name: "Send" }], ...(availableActions ? { availableActions: [...availableActions] } : {}) })),
-    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click") await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, completionPath ?? (invoke ? "/api/threads/1/interactions/1/actions/11/invoke" : retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions"), "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
+    act: vi.fn(async (chosen, correlation) => { const controlError = controlErrors.shift(); if (controlError) throw controlError; if (correlation?.current) { if (chosen.kind === "click" && !navigateOnly) await tasks.write(id, "/api/threads/1/interactions/1/live-answers", "POST", { attemptId: 10, operationKey: "answer-1" }, { signal: browserSignal }); return; } if (navigateOnly) return; await tasks.write(id, completionPath ?? (invoke ? "/api/threads/1/interactions/1/actions/11/invoke" : retry ? "/api/threads/1/interactions/1/retry" : "/api/threads/1/interactions"), "POST", { text: "Somewhere warm", ...(retry ? { attemptId: 91 } : {}) }, { signal: browserSignal }); }),
     nextStep: vi.fn(),
     close: vi.fn(),
   };
@@ -1139,15 +1139,25 @@ it("derives fill capability from actual editable DOM types without expanding wor
 
 it('keeps pinned observations distinct from actually viewed Current and then captures the selected latest update', async () => {
   let count = 0;
-  const f = await fixture({ busy: true, actorSetup: setupDefinitions.updateAwareActorSetup(),
-    observeCurrent: async () => { const capture = currentCapture(++count); return count === 1 ? { ...capture, pointer: { ...capture.pointer, viewingCurrent: false }, observation: { ...capture.observation, text: 'Earlier view with visible latest-update cue' } } : { ...capture, pointer: { ...capture.pointer, viewingCurrent: true } }; },
+  const f = await fixture({ busy: true, navigateOnly: true, completionJudge: COMPLETION_JUDGE_SPEC, actorSetup: setupDefinitions.updateAwareActorSetup(),
+    observeCurrent: async () => { const capture = currentCapture(++count); return count === 1 ? { ...capture, pointer: { ...capture.pointer, viewingCurrent: false }, observation: { ...capture.observation, text: 'Earlier view with visible latest-update cue', availableActions: ['click'] } } : { ...capture, pointer: { ...capture.pointer, viewingCurrent: true }, observation: { ...capture.observation, availableActions: ['scroll'] } }; },
     observe: async (_observation, _signal, turns) => { if (count === 2)
-      turns[0].completionStatus = 'accepted'; return { comment: 'Observed actual displayed pixels' }; },
+      turns[0].completionStatus = 'accepted'; return { comment: 'Observed actual displayed pixels', action: action(count === 1 ? 'click' : 'scroll') }; },
     decide: async () => action('finish', { reason: 'satisfied', satisfaction: 3 }) });
   await f.done;
+  expect(f.tasks.get(f.id).actorSetup.behaviorContract.observationContract.id).toBe("task-actor-observation-v5");
   const events = f.tasks.get(f.id).events;
   expect(events.filter(e => e.kind === 'actor_observation' && e.phase === 'pinned')).toHaveLength(1);
   expect(events.filter(e => e.kind === 'actor_observation' && e.phase === 'current')).toHaveLength(1);
   expect(events.find(e => e.kind === 'actor_current_not_viewed')).toMatchObject({ reason: 'pinned_navigation' });
   expect(events.find(e => e.kind === 'actor_current_gap')).toMatchObject({ missingRevisions: 1 });
+  const observations = events.filter(e => e.kind === 'actor_observation' && ['pinned', 'current'].includes(e.phase));
+  const choices = events.filter(e => e.kind === 'actor_action' && ['pinned', 'current'].includes(e.phase));
+  expect(choices.map(e => [e.phase, e.observationEventId])).toEqual(observations.map(e => [e.phase, e.id]));
+  expect(events.indexOf(choices[0])).toBeGreaterThan(events.indexOf(observations[0]));
+  expect(f.dispatches).toEqual([]);
+  const reopened = await new HumanTaskService(f.options).open();
+  const exported = (await reopened.export(f.id)).bundle.session.events;
+  expect(exported.filter(e => choices.some(choice => choice.id === e.id)).map(e => [e.phase, e.observationEventId]))
+    .toEqual(choices.map(e => [e.phase, e.observationEventId]));
 });

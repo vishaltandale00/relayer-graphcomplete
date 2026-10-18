@@ -309,6 +309,25 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               await navPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true }).waitFor();
               assert.equal(await navPage.evaluate(() => window.__taskActorPresentation.currentPointer.mode), "pinned", "registered authored navigation follows the accepted reference");
               console.log("CURRENT_AUTHORED_NAV_STAGE", "historical_delivered");
+              // Native keyboard navigation remains usable on a narrow,
+              // horizontally scrolled breadcrumb rail and never submits input.
+              await navPage.setViewportSize({ width: 800, height: 900 });
+              const keyboardCue = navPage.getByRole("button", { name: /View latest update$/ });
+              await keyboardCue.waitFor();
+              await navPage.locator("#workspaceBreadcrumb").evaluate(element => { element.scrollLeft = element.scrollWidth; });
+              assert.equal(await keyboardCue.evaluate(element => {
+                const r = element.getBoundingClientRect();
+                const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                return r.left >= 0 && r.right <= innerWidth && (hit === element || element.contains(hit));
+              }), true, "narrow sticky latest cue is visible and hit-testable after breadcrumb scrolling");
+              await keyboardCue.focus();
+              await keyboardCue.press("Enter");
+              await navPage.waitForFunction(() => window.__taskActorPresentation?.currentPointer?.mode === "following"
+                && String(window.__taskActorPresentation.layerId) === String(window.__taskActorPresentation.currentPointer.layerId)
+                && !document.querySelector("#workspaceBreadcrumb")?.hasAttribute("aria-busy"));
+              assert.equal(answerRequests, 1);
+              assert.equal(tasks.get(sessionId).completions, 1);
+              console.log("PASS latest-update keyboard: narrow scrolled rail, native Enter, following paint and no input submission");
               // New revision sees actual pinned pixels and the production cue.
               // Return races its pending layer GET; activation must select the
               // newest published head without submitting an unsent draft.
@@ -320,7 +339,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               let held = false;
               try {
                 await discoveryPage.getByRole("button", { name: "Earlier finding", exact: true }).click();
-                await discoveryPage.getByRole("button", { name: "View latest update", exact: true }).waitFor();
+                await discoveryPage.getByRole("button", { name: /View latest update$/ }).waitFor();
                 const cueStyle = await discoveryPage.locator(".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate").evaluate(element => {
                   const style = getComputedStyle(element);
                   return { border: parseFloat(style.borderLeftWidth), background: style.backgroundColor };
@@ -333,7 +352,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
                 assert.equal(historical.pointer.viewingCurrent, false);
                 assert.equal(historical.observation.displayedView, "historical");
                 assert.equal(historical.observation.currentUpdate, undefined);
-                const latestControl = historical.observation.controls.find(control => control.name === "View latest update");
+                const latestControl = historical.observation.controls.find(control => control.name.endsWith("View latest update"));
                 assert.ok(latestControl, "pinned actor can select the real visible latest-update control");
                 await discoveryPage.route(`**/layers/${layers[1].ref.id}`, async route => {
                   if (!held) { held = true; loading.resolve(); await release.promise; }

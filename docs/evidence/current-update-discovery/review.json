@@ -2,34 +2,41 @@
   "schemaVersion": 1,
   "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
   "sourceManifest": "source.json",
-  "sourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
-  "verificationSha256": "4183954812479300f5fcda60169c15b37a0d546ac56f752dac27c695a8f3b2d9",
+  "sourceDigest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
+  "verificationSha256": "e7e8f5cfd1dc93819e01aba577346103140be5beae73fad35f6ed224332191b5",
+  "supersedes": [
+    {
+      "sourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
+      "reason": "Missing v5 judge-receipt inclusion and fresh pin transitions were reproduced and corrected."
+    },
+    {
+      "sourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+      "reason": "Working-action phase/linkage, accessible cue naming and root-history rail layout were reproduced and corrected."
+    }
+  ],
   "assertions": [
     {
       "reviewer": "design_authority_review",
-      "scope": "Rebased UI semantics, authority and checkpoint mapping; paused/interrupted Resume attempt replacement; all six fresh social/annotation images and receipt bindings; historical live qualification; final execution evidence/hash audit. Fresh turn/history/Invoke pin conversions, legacy unknown preservation and completion-scoped inheritance. Reinspected recaptured images and all final evidence.",
-      "verdict": "PASS for exact-source mapping and qualified local evidence",
+      "scope": "Rebased UI/controller authority and checkpoint mapping, all fresh/legacy pin paths, root annotation versus full rail, accessible status/identity, narrow keyboard browser proof, six fresh social/annotation images and bindings; qualified final local results.",
+      "verdict": "PASS",
       "unresolvedFindings": [],
-      "executionQualification": "Independently audited all referenced log hashes and inner results; did not execute tests or inference independently."
+      "executionQualification": "Independently inspected source, images and recorded inner results/log hashes; did not execute tests or inference."
     },
     {
       "reviewer": "actor_renderer_review",
-      "scope": "Native v12/v9/v5 and predecessor/default immutability, visible pinned/current separation, trusted chrome recognition/rebind, authored collision exclusion, navigation wait, service recording, setup UI, production CI mapping; promoted historical live evidence fidelity. Final full-check/build/focused/browser/compiled log hashes and inner results. Corrected v5 judge-evidence receipt boundary with authenticated gateway delivery and accepted/unknown/reconciled projection coverage.",
-      "verdict": "PASS for corrected source, mapping and qualified recorded evidence",
+      "scope": "Versioned native v12/v9/v5 publication and predecessor/default immutability; visible pinned/current capture; trusted chrome and authored collision; exact observation/action/dispatch links and phase; bounded legacy phase projection without raw mutation; delivery versus intent/incorporation; source/checkpoint mapping and historical live fidelity.",
+      "verdict": "PASS for source, mapping and qualified recorded local evidence",
       "unresolvedFindings": [],
-      "executionQualification": "Independently verified 38 source entries, 12 log hashes and 119 receipt/source/image references; read inner results including initial compiled failure and separately isolated pass. Did not execute tests or inference independently."
+      "executionQualification": "Independently verified 38 source entries, 15 log/retained-record hashes and 119 capture references; inspected actual inner results and bounded reuse. Did not execute tests or inference."
     }
   ],
-  "hostedQualification": "Exact-head hosted check and merge-freshness-status required after publication. Local results do not imply hosted success.",
-  "liveQualification": "One controlled historical live opportunity on base24de17f2. Not live proof of the rebased source, natural discovery rate, calibrated quality, causal improvement, exhaustive observation or release readiness.",
+  "snapshotQualification": "Only the native-unit-test registry prerequisite/assertion changed after the final browser and capture runs. All of their executable source inputs stayed identical; final focused/full tests loaded the refined file. Rust inputs were unchanged during that test-only refinement.",
+  "compiledQualification": "An earlier concurrent compiled run failed 8 and passed 4; cause remains unproven. Failed log retained. Final isolated post-build run passed all 12 on this source; no general stability or proven root-cause claim.",
+  "liveQualification": "Controlled historical live proof is bound to base24de17f2/source07895847, not this snapshot. No natural discovery-rate, calibrated quality, causal improvement, exhaustive observation or release claim.",
+  "hostedQualification": "Required exact-head check and merge-freshness-status must pass after publication. PR statuses report the hosted outcome; local proof does not imply it.",
   "excludedGeneratedEvidence": [
     "docs/evidence/current-update-discovery/review.json",
     "docs/evidence/current-update-discovery/source.json",
     "docs/evidence/current-update-discovery/verification.json"
-  ],
-  "supersedes": {
-    "initialSourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
-    "reason": "Automated review exposed v5 judge-receipt omission and incomplete fresh-pin transition coverage. Earlier completeness assertions are superseded by these fixes and expanded checkpoint mapping."
-  },
-  "compiledQualification": "Initial concurrent compiled run failed 8 recipe cases and passed 4, cause unproven. Isolated post-build run passed all 12 without source edits. The failed log remains hashed in verification.json; no stability or proven root-cause claim."
+  ]
 }

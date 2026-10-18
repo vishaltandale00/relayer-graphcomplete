@@ -18,14 +18,14 @@ it('paints an explicit latest-update control, keeps the historical view and comp
   const selection = { currentThreadId: 3, currentInteractionId: 5, selectedNodeId: null, nodeDetailsClosed: true, layerPath: [{ layerId: 18, label: 'Original update' }, { layerId: 19, label: 'Comparison' }], temporalCurrent: { completionId: 50, revision: 2, pinnedAtRevision: 1, mode: 'pinned' } };
   let finishNavigation;
   const open = vi.fn(() => new Promise(resolve => { finishNavigation = resolve; }));
-  const ws = createProductWorkspace({ root: w.document, getState: () => state, getThread: () => thread, selection, onOpenLatestCurrent: open, showThread() { }, showEmpty() { } });
+  const ws = createProductWorkspace({ root: w.document, getState: () => state, getThread: () => thread, selection, onOpenLatestCurrent: open, annotationApi: { list: async () => ({ annotations: [] }) }, showThread() { }, showEmpty() { } });
   try {
     ws.render();
     const draft = w.document.querySelector('#threadPrompt');
     draft.value = 'Unsent clarification';
     const cue = w.document.querySelector('#viewLatestUpdate');
     expect(cue.textContent).toContain('New update available');
-    expect(cue.getAttribute('aria-label')).toBe('View latest update');
+    expect(cue.getAttribute('aria-label')).toBe(cue.textContent);
     expect(state.visibleLayer.layer.id).toBe(19);
     cue.click();
     await vi.waitFor(() => expect(open).toHaveBeenCalledOnce());
@@ -44,10 +44,16 @@ it('paints an explicit latest-update control, keeps the historical view and comp
     delete selection.temporalCurrent.pinnedAtRevision;
     ws.render();
     expect(w.document.querySelector('#viewLatestUpdate').textContent).toBe('View latest update');
+    expect(w.document.querySelector('#viewLatestUpdate').getAttribute('aria-label')).toBe('View latest update');
+    selection.layerPath = [{ layerId: 19, label: 'Response' }];
+    ws.render();
+    expect(breadcrumb.querySelectorAll('.breadcrumb-label')).toHaveLength(1);
+    expect(breadcrumb.classList.contains('root-annotation-only')).toBe(false);
     projection.completionId = 99;
     state.currentProjections = new Map([['99', projection]]);
     ws.render();
     expect(w.document.querySelector('#viewLatestUpdate')).toBeNull();
+    expect(breadcrumb.classList.contains('root-annotation-only')).toBe(true);
   }
   finally {
     ws.dispose();
@@ -86,6 +92,10 @@ it('new actor observes historical pixels and a visible scoped cue without granti
   cue.dataset.currentUpdateRevision = '3';
   expect(taskActorCurrentUnchanged(capture(), first)).toBe(false);
   expect(taskActorWorkingControlAllowed(cue, 'click')).toBe(true);
+  const announcementIdentity = taskActorControlIdentity(cue);
+  cue.textContent = 'View latest update';
+  cue.setAttribute('aria-label', cue.textContent);
+  expect(taskActorRebindControl(announcementIdentity, w.document)).toBeNull();
   const identity = taskActorControlIdentity(cue);
   expect(identity.kind).toBe('current-update');
   cue.remove();
