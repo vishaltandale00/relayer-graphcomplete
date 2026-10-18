@@ -710,6 +710,37 @@ describe("workspace navigation integration", () => {
     expect(controller.appState.threads[0]).toMatchObject({ activity: null, archiveBlocked: false });
   });
 
+  it("resumes, resumes all and discards runs a restart stopped, then refreshes the thread (#722)", async () => {
+    const paused = (id, completionStatus) => ({ ...interaction(id, 10, rootLayer(100 + id, 10 + id)), completionStatus });
+    const before = productState([{ id: 10, title: "Restarted", pausedRuns: 3 }], [paused(1, "interrupted"), paused(2, "paused"), paused(3, "paused")]);
+    const calls = [];
+    let pausedRuns = 3;
+    requestImplementation = vi.fn(async (path, options = {}) => {
+      if (!path.startsWith("/api/state")) calls.push([options.method, path]);
+      if (path.endsWith("/interactions/1/resume")) { pausedRuns = 1; return { interactions: [{ ...paused(1, "running") }, { ...paused(2, "queued"), queueReason: "node" }] }; }
+      if (path.endsWith("/interactions/3/discard")) { pausedRuns = 0; return { ...paused(3, "stopped") }; }
+      if (path.endsWith("/threads/10/resume")) return { interactions: [] };
+      if (path.startsWith("/api/state?threadId=10")) {
+        const state = structuredClone(before);
+        state.threads[0].pausedRuns = pausedRuns;
+        return state;
+      }
+      throw new Error(`Unexpected request: ${path}`);
+    });
+    const controller = await loadModules();
+    await controller.loadThread(10);
+    await controller.resumeInteraction(10, 1);
+    expect(controller.appState.threads[0].pausedRuns).toBe(1);
+    await controller.discardInteraction(10, 3);
+    expect(controller.appState.threads[0].pausedRuns).toBe(0);
+    await controller.resumeAllRuns(10);
+    expect(calls).toEqual([
+      ["POST", "/api/threads/10/interactions/1/resume"],
+      ["POST", "/api/threads/10/interactions/3/discard"],
+      ["POST", "/api/threads/10/resume"],
+    ]);
+  });
+
   it("keeps Stop pending when a pre-Stop poll arrives late and continues terminal polling", async () => {
     vi.useFakeTimers();
     try {
