@@ -68,12 +68,21 @@ describe("composer model picker selection", () => {
     });
     catalog.harnesses.push(
       { id: "aaa-unavailable", available: false, compatibleProviderIds: ["future"] },
+      { id: "aaa-configured", available: true, modelCompatibility: [] },
       { id: "both", available: true, compatibleProviderIds: ["codex", "future"] },
     );
     catalog.defaults.harnessId = "cooked";
     const routes = () => routablePickerFamilies(catalog, "codex-basic", { allowHarnessChange: true });
     expect(routes().map(family => [family.id, family.harnessId])).toEqual([[1, "codex-basic"], [3, "cooked"]]);
     expect(routablePickerFamilies(catalog, "both", { allowHarnessChange: true }).every(family => family.harnessId === "both")).toBe(true);
+    catalog.harnesses.find(harness => harness.id === "cooked").permissionAvailable = false;
+    expect(routes().find(family => family.id === 3).harnessId).toBe("both");
+    catalog.harnesses.find(harness => harness.id === "cooked").permissionAvailable = true;
+    catalog.harnesses.find(harness => harness.id === "codex-basic").permissionAvailable = false;
+    expect(routes().find(family => family.id === 1).harnessId).toBe("both");
+    catalog.harnesses.find(harness => harness.id === "codex-basic").permissionAvailable = true;
+    catalog.harnesses.find(harness => harness.id === "aaa-unavailable").available = true;
+    catalog.harnesses.find(harness => harness.id === "aaa-unavailable").permissionAvailable = false;
     catalog.harnesses.find(harness => harness.id === "cooked").available = false;
     expect(routes().find(family => family.id === 3).harnessId).toBe("both");
     expect(routablePickerFamilies(catalog, "codex-basic").map(family => family.id)).toEqual([1]);

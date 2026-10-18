@@ -46,6 +46,9 @@ function restored() {
   const settings = recovering();
   settings.defaultFamilyRecovery = null;
   settings.familiesNeedingModelSetup = [];
+  // Restoration includes permission setup and the server's refreshed route projection.
+  settings.harnesses[0].permissionAvailable = true;
+  settings.harnesses[0].usableFamilyIds = [1, 2];
   const codex = settings.providers.find((provider) => provider.id === "codex");
   codex.unavailableReason = null;
   settings.families.unshift({
@@ -205,6 +208,88 @@ describe("default family that needs model setup (PROV-008)", () => {
     expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(false);
     expect(root.querySelector(".model-family-members").textContent).toContain("Claude Sonnet");
     picker.dispose();
+  });
+
+  it.each([true, false])("keeps a ready harness-default route family-less with explicit provider metadata = %s", async explicitMetadata => {
+    const settings = withClaude();settings.families = settings.families.filter(family => family.id === 4);
+    settings.harnesses.push({ id: "configured", label: "Configured", available: true, ...(explicitMetadata ? { compatibleProviderIds: [] } : {}), modelCompatibility: [] });
+    settings.defaults = { ...settings.defaults, harnessId: "configured", familyId: 4 };
+    const validateSelection = vi.fn(async () => {});const apply = vi.fn();
+    const { root, picker, document } = mountPicker(settings, { selection: { harnessId: "configured" }, validateSelection, prepareHarnessChange: async () => apply });
+    picker.setContext({ settings: structuredClone(settings) });
+    picker.open();
+    expect(picker.isReady()).toBe(true);expect(picker.getSelection()).toEqual({ harnessId: "configured" });
+    const select = root.querySelector("[data-model-family]");expect(select.value).toBe("");
+    expect([...root.querySelectorAll("[data-family-cycle]")].every(button => !button.disabled)).toBe(true);
+    expect(validateSelection).not.toHaveBeenCalled();
+    select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(picker.getSelection()).toMatchObject({ harnessId: "claude-basic", familyId: 4 }));
+    expect(validateSelection).toHaveBeenCalledOnce();expect(apply).toHaveBeenCalledOnce();
+    expect(settings.defaults.harnessId).toBe("configured");picker.dispose();
+  });
+
+  it("selects a permission-ready alternative instead of a model-compatible harness without profiles", async () => {
+    const settings = withClaude();const unavailable = settings.harnesses.find(harness => harness.id === "claude-basic");
+    unavailable.permissionAvailable = false;
+    settings.harnesses.push({ ...unavailable, id: "claude-ready", label: "Claude ready", permissionAvailable: true });
+    const validateSelection = vi.fn(async () => {});const prepareHarnessChange = vi.fn(async harnessId => {
+      if (harnessId === "claude-basic") throw new Error("No available permission profile");
+      return () => {};
+    });
+    const { root, picker, document } = mountPicker(settings, { validateSelection, prepareHarnessChange });picker.open();
+    const select = root.querySelector("[data-model-family]");select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(picker.getSelection()).toMatchObject({ harnessId: "claude-ready", familyId: 4 }));
+    expect(prepareHarnessChange).toHaveBeenCalledExactlyOnceWith("claude-ready");
+    expect(validateSelection).toHaveBeenCalledWith({ harnessId: "claude-ready", familyId: 4, providerId: "claude", modelId: "sonnet" });
+    expect(settings.defaults.harnessId).toBe("codex-basic");picker.dispose();
+  });
+
+  it("skips access-contract-incompatible routes before deduplicating a family", async () => {
+    const settings = withClaude();
+    const incompatible = settings.harnesses.find(harness => harness.id === "claude-basic");
+    Object.assign(incompatible, { permissionAvailable: true, executionAccessContracts: ["managed-runtime@1"], usableFamilyIds: [] });
+    settings.harnesses.push({ ...incompatible, id: "claude-ready", executionAccessContracts: ["secret@1"], usableFamilyIds: [4] });
+    const validateSelection = vi.fn(async selection => {
+      if (selection.harnessId === "claude-basic") throw new Error("harness_access_contract_incompatible");
+    });
+    const prepareHarnessChange = vi.fn(async () => () => {});
+    const { root, picker, document } = mountPicker(settings, { validateSelection, prepareHarnessChange });
+    picker.open();
+    const select = root.querySelector("[data-model-family]");
+    select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(picker.getSelection()).toMatchObject({ harnessId: "claude-ready", familyId: 4 }));
+    expect(validateSelection).toHaveBeenCalledExactlyOnceWith({ harnessId: "claude-ready", familyId: 4, providerId: "claude", modelId: "sonnet" });
+    expect(prepareHarnessChange).toHaveBeenCalledExactlyOnceWith("claude-ready");
+    expect(settings.defaults.harnessId).toBe("codex-basic");picker.dispose();
+  });
+
+  it.each(["initial", "refresh"])("blocks an authoritative route rejection on %s until explicit alternate routing", async phase => {
+    const settings = withClaude();
+    settings.defaults = { ...settings.defaults, harnessId: "claude-basic", familyId: 4 };
+    const current = settings.harnesses.find(harness => harness.id === "claude-basic");
+    Object.assign(current, { permissionAvailable: true, usableFamilyIds: phase === "initial" ? [] : [4] });
+    settings.harnesses.push({ ...current, id: "claude-ready", usableFamilyIds: [4] });
+    const validation = deferred();const preparation = deferred();const apply = vi.fn();
+    const validateSelection = vi.fn(() => validation.promise);
+    const prepareHarnessChange = vi.fn(() => preparation.promise);
+    const { root, picker, document } = mountPicker(settings, { validateSelection, prepareHarnessChange });
+    if (phase === "refresh") {
+      expect(picker.isReady()).toBe(true);
+      current.usableFamilyIds = [];
+      picker.setContext({ settings });
+    }
+    expect(picker.isReady()).toBe(false);expect(picker.getSelection()).toBeNull();
+    expect(picker.modelSetup()?.reason).toBe("family-choice");
+    picker.open();const select = root.querySelector("[data-model-family]");
+    expect(select.value).toBe("");select.value = "4";
+    select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    expect(validateSelection).toHaveBeenCalledExactlyOnceWith({ harnessId: "claude-ready", familyId: 4, providerId: "claude", modelId: "sonnet" });
+    expect(picker.isReady()).toBe(false);expect(prepareHarnessChange).not.toHaveBeenCalled();
+    validation.resolve();
+    await vi.waitFor(() => expect(prepareHarnessChange).toHaveBeenCalledExactlyOnceWith("claude-ready"));
+    expect(picker.isReady()).toBe(false);preparation.resolve(apply);
+    await vi.waitFor(() => expect(picker.getSelection()).toMatchObject({ harnessId: "claude-ready", familyId: 4 }));
+    expect(apply).toHaveBeenCalledOnce();expect(settings.defaults.harnessId).toBe("claude-basic");picker.dispose();
   });
 
   it("requires an explicit choice for a lone uncommitted cross-harness route", async () => {
@@ -368,7 +453,9 @@ describe("default family that needs model setup (PROV-008)", () => {
   });
 
   it("cycles explicitly out of recovery into the only usable family and keeps keyboard focus", () => {
-    const { root, picker, document } = mountPicker(recovering());
+    const settings = recovering();
+    settings.harnesses[0].permissionAvailable = true;
+    const { root, picker, document } = mountPicker(settings);
     picker.open();
     expect(picker.isReady()).toBe(false);
     expect([...root.querySelectorAll("[data-family-cycle]")].every((button) => !button.disabled)).toBe(true);
@@ -1055,6 +1142,7 @@ describe("family selection dismissal", () => {
   ])("closes the %s picker when already-selected=%s", (mode, alreadySelected) => {
     const settings = restored();
     settings.families.push({ ...structuredClone(settings.families[0]), id: 3, name: "Another family", position: 2 });
+    settings.harnesses[0].usableFamilyIds.push(3);
     const { root, picker, document } = mountPicker(settings, { mode, pinnedHarnessId: settings.defaults.harnessId });
     root.querySelector("[data-model-picker-trigger]").click();
     const select = root.querySelector("[data-model-family]");

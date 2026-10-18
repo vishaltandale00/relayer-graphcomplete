@@ -219,7 +219,14 @@ export function routablePickerFamilies(settings, harnessId, { allowHarnessChange
     : [harnessId];
   const routes = new Map();
   for (const id of harnessIds) {
+    // A configured model is a family-less route. Cross-harness choices also need
+    // an available permission profile before they can displace a usable alternative.
+    if (harnessUsesConfigurationModel(settings, id)
+      || (allowHarnessChange && harnessFor(settings, id)?.permissionAvailable === false)) continue;
     for (const family of availablePickerFamilies(settings, id)) {
+      const usable = harnessFor(settings, id)?.usableFamilyIds;
+      if (allowHarnessChange && Array.isArray(usable)
+        && !usable.some(familyId => String(familyId) === String(family.id))) continue;
       if (!routes.has(family.id)) routes.set(family.id, { ...family, harnessId: id });
     }
   }
@@ -246,10 +253,9 @@ export function firstAvailableSelection(settings, harnessId) {
 
 export function normalizePickerSelection(settings, candidate) {
   const harnessId = candidate?.harnessId ?? settings.defaults.harnessId;
+  if (harnessUsesConfigurationModel(settings, harnessId)) return { harnessId };
   const families = availablePickerFamilies(settings, harnessId);
-  if (families.length === 0) {
-    return harnessUsesConfigurationModel(settings, harnessId) ? { harnessId } : null;
-  }
+  if (families.length === 0) return null;
   const requestedFamilyId = candidate?.familyId ?? settings.defaults?.familyId;
   const requestedFamily = requestedFamilyId == null
     ? null

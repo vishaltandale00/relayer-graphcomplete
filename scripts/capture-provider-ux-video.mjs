@@ -944,7 +944,7 @@ const modelSettings = (scene) => ({
       },
       usableNow: true,
       usableProviderIds: ["openai-work", "codex"],
-      usableFamilyIds: [11, 12],
+      usableFamilyIds: [11, 12, ...(scene === "flow" && flowState.family ? [flowState.family.id] : [])],
     },
     {
       id: "claude-basic",

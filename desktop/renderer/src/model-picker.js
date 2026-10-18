@@ -45,7 +45,11 @@ export function modelPickerFamilyPresentation(settings, harnessId, selection, op
     String(family.id) === String(selection?.familyId)
     && family.harnessId === (selection?.harnessId ?? harnessId)
   )) ?? (modelSetup ? null : families[0] ?? null);
-  const requiresExplicitSelection = Boolean(selectedFamily) && !pickerSelectionIsAvailable(settings, selection);
+  const requiresExplicitSelection = Boolean(selectedFamily) && !(
+    pickerSelectionIsAvailable(settings, selection)
+    && String(selectedFamily.id) === String(selection?.familyId)
+    && selectedFamily.harnessId === (selection?.harnessId ?? harnessId)
+  );
   return {
     families,
     selectedFamily,
@@ -230,7 +234,11 @@ export function createModelPicker({
   }
 
   function selectionReady() {
-    return !validatingHarness && pickerSelectionIsAvailable(currentSettings, currentSelection);
+    if (validatingHarness || !pickerSelectionIsAvailable(currentSettings, currentSelection)) return false;
+    if (mode !== "new" || currentSelection.familyId == null) return true;
+    return familyPresentation().families.some(family =>
+      String(family.id) === String(currentSelection.familyId)
+      && family.harnessId === currentSelection.harnessId);
   }
 
   function selectedHarnessId() {
