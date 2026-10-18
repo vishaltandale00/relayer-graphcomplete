@@ -359,6 +359,32 @@ impl SqliteProductStore {
         Ok(outcome)
     }
 
+    /// Projects a message whose graph current a Stop already ended before a restart (#722).
+    /// It ends stopped, as a settled Stop does, and is never offered for Resume. Returns
+    /// whether it changed; a run that already ended is left alone.
+    pub(crate) async fn finish_restart_stopped(
+        &self,
+        run: InteractionId,
+        timestamp: &str,
+    ) -> Result<bool, StorageError> {
+        let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
+        let changed = sqlx::query("UPDATE interactions SET completion_status='stopped',completion_error='Stopped. Send a follow-up to continue.' WHERE id=?1 AND completion_status IN ('submitted','running','waiting_for_approval','interrupted')")
+            .bind(run.value())
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+            == 1;
+        if changed {
+            sqlx::query("UPDATE interaction_attempts SET outcome='cancelled',finished_at=?2,failure_category='cancelled_by_user',effect_boundary='unknown' WHERE interaction_id=?1 AND outcome='running'")
+                .bind(run.value())
+                .bind(timestamp)
+                .execute(&mut *transaction)
+                .await?;
+        }
+        transaction.commit().await?;
+        Ok(changed)
+    }
+
     /// Whether the user discarded this run after a restart (#722).
     pub(crate) async fn was_discarded(&self, run: InteractionId) -> Result<bool, StorageError> {
         Ok(

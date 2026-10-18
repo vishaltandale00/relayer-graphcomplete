@@ -401,11 +401,56 @@ async fn reconcile_interrupted_interaction(
             }
         } else if !has_invocation {
             // A message with no input identity, such as a thread's first message, reruns on
-            // this same graph interaction when the user resumes it (#722).
-            storage
-                .interrupt_unidentified_message(interaction.id, crate::storage::RESTART_INTERRUPTED)
+            // this same graph interaction when the user resumes it (#722). Only an active
+            // current can run again; one the graph already ended keeps its canonical outcome.
+            let current = runtime
+                .completion_current(graph_node_id)
                 .await
-                .map_err(StartupReconciliationError::retryable)?;
+                .map_err(StartupReconciliationError::from_runtime)?;
+            match current.lifecycle {
+                relayer_graph_core::CompletionLifecycle::Active => {
+                    storage
+                        .interrupt_unidentified_message(
+                            interaction.id,
+                            crate::storage::RESTART_INTERRUPTED,
+                        )
+                        .await
+                        .map_err(StartupReconciliationError::retryable)?;
+                }
+                relayer_graph_core::CompletionLifecycle::Stopped => {
+                    if !storage
+                        .finish_restart_stopped(interaction.id, &startup_timestamp())
+                        .await
+                        .map_err(StartupReconciliationError::retryable)?
+                    {
+                        return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                            "stopped message {} could not be projected",
+                            interaction.id
+                        )));
+                    }
+                }
+                relayer_graph_core::CompletionLifecycle::Failed => {
+                    let reason = current
+                        .safe_reason
+                        .unwrap_or_else(|| "application_restart".into());
+                    let harness = thread_harness(storage, &interaction).await?;
+                    storage
+                        .fail_interaction_completion(
+                            interaction.id,
+                            &harness,
+                            &format!("The graph ended this run as failed ({reason})."),
+                        )
+                        .await
+                        .map_err(StartupReconciliationError::retryable)?;
+                }
+                // Its output was read as absent above, so its acceptance is not yet readable.
+                relayer_graph_core::CompletionLifecycle::Succeeded => {
+                    return Err(StartupReconciliationError::deterministic(anyhow::anyhow!(
+                        "message {} succeeded in the graph without a readable output",
+                        interaction.id
+                    )));
+                }
+            }
         }
     } else if !has_invocation && durable_input.is_none() && !agent_child {
         // Not bound yet: Resume prepares it, as its first start would have.

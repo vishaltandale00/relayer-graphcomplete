@@ -185,11 +185,17 @@ impl NodeRunQueue {
         sequence: i64,
     ) -> Arrival {
         let mut nodes = self.nodes.lock().await;
-        Self::arrive_locked(nodes.entry(key).or_default(), run, sequence)
+        Self::arrive_locked(
+            nodes.entry(key).or_default(),
+            run,
+            NodeState::position(run, sequence),
+        )
     }
 
     /// Joins several runs of one node to its queue in one step, in the order given, so no run
-    /// arriving meanwhile comes between them (#722: a resumed chain).
+    /// arriving meanwhile comes between them (#722: a resumed chain). They queue behind every
+    /// run already waiting (owner decision 4: runs created after the restart go first), yet
+    /// ahead of any run that arrives later, since a later run's sequence is greater.
     pub(crate) async fn arrive_all(
         &self,
         key: NodeRunKey,
@@ -198,11 +204,21 @@ impl NodeRunQueue {
         let mut nodes = self.nodes.lock().await;
         let node = nodes.entry(key).or_default();
         runs.iter()
-            .map(|(run, sequence)| Self::arrive_locked(node, *run, *sequence))
+            .map(|(run, sequence)| {
+                let mut position = NodeState::position(*run, *sequence);
+                // Sequences are unique in a thread, so a place just after the last waiter,
+                // at that waiter's sequence, is free and still before any later run.
+                if let Some(&(last_sequence, last_id)) = node.waiting.keys().next_back()
+                    && position <= (last_sequence, last_id)
+                {
+                    position = (last_sequence, last_id + 1);
+                }
+                Self::arrive_locked(node, *run, position)
+            })
             .collect()
     }
 
-    fn arrive_locked(node: &mut NodeState, run: InteractionId, sequence: i64) -> Arrival {
+    fn arrive_locked(node: &mut NodeState, run: InteractionId, position: (i64, i64)) -> Arrival {
         let waits = node.waits(run);
         match &mut node.holder {
             Some(holder) if holder.run == run => {
@@ -211,10 +227,7 @@ impl NodeRunQueue {
             }
             Some(_) if waits => Arrival::Joined,
             Some(_) => {
-                node.waiting.insert(
-                    NodeState::position(run, sequence),
-                    Waiter { run, ready: false },
-                );
+                node.waiting.insert(position, Waiter { run, ready: false });
                 Arrival::Waiting
             }
             None => {
@@ -617,6 +630,69 @@ mod tests {
         assert_eq!(store.completion_status_for_test(runs[2]).await, "stopped");
         assert_eq!(queue.release(&product, node, runs[3]).await.unwrap(), None);
         assert_eq!(queue.holder(node).await, None);
+    }
+
+    /// PAUSE-003 (#722, owner decision 4): a resumed chain queues behind the runs created
+    /// after the restart that already hold or wait for its node, in its own order, and ahead
+    /// of any run that arrives after the Resume.
+    #[tokio::test]
+    async fn a_resumed_chain_queues_behind_live_waiters_and_ahead_of_later_runs() {
+        let (_directory, store, product, runs) = fixture(&[7, 7, 7, 7, 7]).await;
+        let queue = NodeRunQueue::default();
+        let node = product.node_run_key(runs[0]).await.unwrap().unwrap();
+        // runs[0] and runs[1] are the older, paused chain; runs[2] and runs[3] were created
+        // after the restart, and runs[4] after the Resume.
+        let (holder, waiter, later) = (runs[2], runs[3], runs[4]);
+        assert_eq!(
+            queue
+                .admit(&product, node, holder, sequence(holder), None)
+                .await
+                .unwrap(),
+            NodeAdmission::Start
+        );
+        assert_eq!(
+            queue
+                .admit(&product, node, waiter, sequence(waiter), None)
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        let chain = [(runs[0], sequence(runs[0])), (runs[1], sequence(runs[1]))];
+        assert_eq!(
+            queue.arrive_all(node, &chain).await,
+            [Arrival::Waiting, Arrival::Waiting]
+        );
+        for (run, place) in chain {
+            assert_eq!(
+                queue
+                    .admit(&product, node, run, place, Some(Arrival::Waiting))
+                    .await
+                    .unwrap(),
+                NodeAdmission::Waiting
+            );
+        }
+        assert_eq!(
+            queue
+                .admit(&product, node, later, sequence(later), None)
+                .await
+                .unwrap(),
+            NodeAdmission::Waiting
+        );
+        // The node passes on as each run settles: the live waiter, the chain in its order,
+        // then the later run.
+        let mut order = vec![holder];
+        while let Some(next) = queue
+            .release(&product, node, *order.last().unwrap())
+            .await
+            .unwrap()
+        {
+            store
+                .fail_interaction_completion(next, "codex-basic", "Settled")
+                .await
+                .unwrap();
+            order.push(next);
+        }
+        assert_eq!(order, [holder, waiter, runs[0], runs[1], later]);
     }
 
     /// PAR-007 (#718 review): runs start in the order they were created. A run created first

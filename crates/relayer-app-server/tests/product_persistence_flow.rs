@@ -4912,6 +4912,8 @@ struct HeldRunsFixture {
     frozen: Vec<(i64, Value, Option<tokio::sync::oneshot::Sender<bool>>)>,
     /// Each graph current a Stop or a Discard stopped, by node.
     stopped_currents: Arc<Mutex<Vec<i64>>>,
+    /// Graph currents the graph failed, by node.
+    failed_currents: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// The graph interactions whose result the graph accepted.
     accepted_nodes: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// Invoke actions whose graph preparation the graph refuses.
@@ -5069,6 +5071,8 @@ impl HeldRunsFixture {
         let metadata_down = metadata_unavailable.clone();
         let stopped_currents = Arc::new(Mutex::new(Vec::<i64>::new()));
         let read_stopped = stopped_currents.clone();
+        let failed_currents = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
+        let read_failed = failed_currents.clone();
         let recorded_stops = stopped_currents.clone();
         let graph = axum::Router::new()
             .route(
@@ -5076,12 +5080,13 @@ impl HeldRunsFixture {
                 axum::routing::get(move |axum::extract::Path(id): axum::extract::Path<i64>| {
                     let stopped = read_stopped.lock().unwrap().contains(&id);
                     let accepted = current_accepted.lock().unwrap().contains(&id);
+                    let failed = read_failed.lock().unwrap().contains(&id);
                     async move {
                         axum::Json(json!({
                             "completionId": id,
-                            "lifecycle": if accepted { "succeeded" } else if stopped { "stopped" } else { "active" },
-                            "headRevision": if stopped || accepted { 2 } else { 1 }, "currentLayerId": null,
-                            "finalLayerId": null, "safeReason": null,
+                            "lifecycle": if accepted { "succeeded" } else if stopped { "stopped" } else if failed { "failed" } else { "active" },
+                            "headRevision": if stopped || accepted || failed { 2 } else { 1 }, "currentLayerId": null,
+                            "finalLayerId": null, "safeReason": if failed { json!("provider_failed") } else { Value::Null },
                             "temporalFeatures": {"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true,
                                 "projectionUi": false, "invokeResolution": false, "providerRecursion": false}
                         }))
@@ -5370,6 +5375,7 @@ impl HeldRunsFixture {
             held,
             frozen: Vec::new(),
             stopped_currents,
+            failed_currents,
             accepted_nodes,
             refused_actions,
             garbled_actions,
@@ -7003,6 +7009,58 @@ async fn a_restart_without_the_graph_still_interrupts_a_plain_message() {
     let (status, refused) = fixture.run_action(source, "resume").await;
     assert_eq!(status, StatusCode::CONFLICT, "{refused}");
     assert_eq!(refused["code"], "run_not_resumable");
+    fixture.finish();
+}
+
+/// PAUSE-002 (#722): a restart offers Resume only for a plain message whose graph current is
+/// still active. One the graph already failed or stopped, before the product recorded it,
+/// keeps that canonical outcome and is never rerun.
+#[tokio::test]
+async fn a_restart_keeps_the_graph_outcome_of_a_plain_message_that_already_ended() {
+    const ACTIONS: &[(i64, i64)] = &[(41, 7)];
+    let mut fixture = HeldRunsFixture::open(ACTIONS, None).await;
+    let mut runs = Vec::new();
+    for text in [
+        "Failed in the graph",
+        "Stopped in the graph",
+        "Still running",
+    ] {
+        let run = fixture.send(text).await["id"].as_i64().unwrap();
+        let node = fixture.started(run).await["graph"]["nodeId"]
+            .as_i64()
+            .unwrap();
+        runs.push((run, node));
+    }
+    let [(failed, failed_node), (stopped, stopped_node), (active, _)] = runs[..] else {
+        unreachable!()
+    };
+    fixture.failed_currents.lock().unwrap().insert(failed_node);
+    fixture.stopped_currents.lock().unwrap().push(stopped_node);
+    fixture.restart().await;
+
+    let ended = fixture.interaction(failed).await;
+    assert_eq!(ended["completionStatus"], "failed", "{ended}");
+    assert!(
+        ended["completionError"]
+            .as_str()
+            .unwrap()
+            .contains("provider_failed"),
+        "{ended}"
+    );
+    assert_eq!(fixture.status_of(stopped).await, "stopped");
+    assert_eq!(fixture.status_of(active).await, "interrupted");
+    for run in [failed, stopped] {
+        let (status, refused) = fixture.run_action(run, "resume").await;
+        assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+        assert_eq!(refused["code"], "run_not_resumable");
+    }
+    assert_eq!(fixture.thread_summary().await["pausedRuns"], 1);
+    let (status, _) = fixture.run_action(active, "resume").await;
+    assert_eq!(status, StatusCode::OK);
+    fixture.started(active).await;
+    assert!(fixture.started_runs().iter().all(|run| *run == active));
+    fixture.settle(active, true);
+    fixture.settled(active, "accepted").await;
     fixture.finish();
 }
 
