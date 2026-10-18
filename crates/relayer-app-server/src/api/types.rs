@@ -174,6 +174,8 @@ pub(crate) struct ThreadResponse {
     archive_blocked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     activity: Option<String>,
+    /// Paused and interrupted runs waiting for the user (#722): the thread list's "N paused".
+    paused_runs: i64,
 }
 
 impl ThreadResponse {
@@ -207,6 +209,7 @@ impl From<Thread> for ThreadResponse {
             archived_at: thread.archived_at,
             archive_blocked: thread.archive_blocked,
             activity: thread.activity,
+            paused_runs: thread.resumable_runs,
         }
     }
 }
@@ -227,6 +230,10 @@ pub(crate) struct InteractionResponse {
     /// for a free slot under the app's limit on human-started runs. Absent otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     queue_reason: Option<&'static str>,
+    /// The node a user's run belongs to, for runs started from a node's action (#718). Runs on
+    /// one node run in order, and a restart's paused runs on it resume in order (#722).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_node_id: Option<i64>,
     stop_requested: bool,
     stop_error: Option<String>,
     harness_configuration_name: Option<String>,
@@ -261,6 +268,7 @@ impl From<Interaction> for InteractionResponse {
                 },
             ),
             completion_status: interaction.completion_status,
+            run_node_id: None,
             stop_requested: interaction.stop_requested,
             stop_error: interaction.stop_error,
             harness_configuration_name: interaction.harness_configuration_name,
@@ -288,6 +296,9 @@ impl InteractionResponse {
     }
     pub(crate) fn set_interaction_graph(&mut self, graph: serde_json::Value) {
         self.interaction_graph = Some(graph);
+    }
+    pub(crate) fn set_run_node_id(&mut self, node_id: Option<i64>) {
+        self.run_node_id = node_id;
     }
     pub(crate) fn mark_projection_stale(&mut self) {
         self.projection_fresh = false;

@@ -157,7 +157,7 @@ impl SqliteProductStore {
 
     pub(crate) async fn interrupted_interactions(&self) -> Result<Vec<Interaction>, StorageError> {
         let rows = sqlx::query(
-            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval') ORDER BY i.id",
+            "SELECT i.id,i.thread_id,i.sequence,i.text,i.created_at,i.graph_node_id,i.completion_status,i.harness_configuration_name,i.harness_configuration_digest,i.completion_output_json,i.completion_error,i.permission_profile_id,i.effective_execution_digest,i.effective_permission_receipt_json,i.model_provider_id,i.provider_model_id,i.model_family_id,a.id,a.attempt_number,a.started_at,a.finished_at,a.family_id,a.family_revision,a.harness_configuration_name,a.harness_configuration_revision,a.harness_configuration_digest,a.provider_id,a.adapter_id,a.adapter_implementation_version,a.model_id,a.access_contract,a.outcome,a.failure_category,a.effect_boundary,a.attempt_admission_id,a.admitted_plan_json,a.admitted_plan_digest,EXISTS(SELECT 1 FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id), (SELECT error FROM interaction_stop_requests stop WHERE stop.interaction_id=i.id),EXISTS(SELECT 1 FROM run_capacity_waits wait WHERE wait.interaction_id=i.id AND i.completion_status='queued') FROM interactions i LEFT JOIN interaction_attempts a ON a.id=(SELECT latest.id FROM interaction_attempts latest WHERE latest.interaction_id=i.id ORDER BY latest.attempt_number DESC LIMIT 1) WHERE i.completion_status IN ('not_started','running','submitted','waiting_for_approval','interrupted') ORDER BY i.id",
         )
         .fetch_all(&self.pool)
         .await?;
@@ -175,7 +175,7 @@ impl SqliteProductStore {
         let output = serde_json::to_string(output)
             .map_err(|error| StorageError::Serialization(error.to_string()))?;
         let mut transaction = self.pool.begin_with("BEGIN IMMEDIATE").await?;
-        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted','waiting_for_approval') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
+        let result = sqlx::query("UPDATE interactions SET completion_status='accepted',completion_output_json=?1,completion_error=NULL WHERE id=?2 AND graph_node_id IS NOT NULL AND harness_configuration_name IS NOT NULL AND harness_configuration_digest IS NOT NULL AND effective_execution_digest IS NOT NULL AND effective_permission_receipt_json IS NOT NULL AND (completion_status IN ('not_started','running','submitted','waiting_for_approval','interrupted') OR (completion_status='failed' AND completion_error LIKE 'Canonical reconciliation pending:%'))")
             .bind(output)
             .bind(interaction_id.value())
             .execute(&mut *transaction)
@@ -225,33 +225,44 @@ impl SqliteProductStore {
         &self,
         error: &str,
     ) -> Result<u64, StorageError> {
-        // The graph lease is durable and keyed by the immutable source pair. Preserve the result
-        // as submitted so invoking the same action can remint authority for that exact graph node
-        // and resume it rather than terminalizing the only interaction allowed to consume it.
-        // An agent's child left here is not resumed by a user's invoke; startup's background
-        // retry ends it, and its message says so. A run that waited in its node's queue
-        // (#718) is interrupted like one that had started: nothing starts it on its own, and
-        // invoking its action again resumes it.
-        let result = sqlx::query(
+        // The graph lease is durable and keyed by the immutable source pair, so a user's run
+        // can run again on that exact graph node. A run that was executing is interrupted
+        // (#722): nothing reruns it until the user resumes it, and it is not active work. A
+        // preparation that never ran keeps waiting for its action's Retry. An agent's child
+        // left here is not resumed by a user; startup's background retry ends it, and its
+        // message says so. Queued runs were paused before this (#722); one still queued, which
+        // only an agent's child could be, is recovered like a running one.
+        let result = sqlx::query(concat!(
             "UPDATE interactions
              SET completion_status=CASE
                    WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE prepared_graph_node_id IS NULL AND invocation_key!='legacy' AND authoritative=1)
                      THEN 'not_started'
-                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1 AND agent_invoked=1)
                      THEN 'submitted'
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1) AND ",
+            recoverable_user_preparation!("interactions.id"),
+            "      THEN 'submitted'
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
+                     THEN 'interrupted'
                    ELSE 'failed'
                  END,
                  completion_error=CASE
                    WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1 AND agent_invoked=1)
                      THEN 'Delegated work was interrupted when Relayer stopped. It ends as soon as the graph can be reached.'
-                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE prepared_graph_node_id IS NULL AND invocation_key!='legacy' AND authoritative=1)
                      THEN ?1
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1) AND ",
+            recoverable_user_preparation!("interactions.id"),
+            "      THEN ?1
+                   WHEN id IN (SELECT result_interaction_id FROM action_invocations WHERE graph_lease_required=1 AND authoritative=1)
+                     THEN ?2
                    ELSE 'Legacy action invocation was interrupted before graph acceptance. Its action remains unresolved.'
                  END
              WHERE id IN (SELECT result_interaction_id FROM action_invocations WHERE authoritative=1)
-               AND completion_status IN ('not_started','queued','running','submitted')",
-        )
+               AND completion_status IN ('not_started','queued','running','submitted')"
+        ))
         .bind(error)
+        .bind(super::RESTART_INTERRUPTED)
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
@@ -1970,8 +1981,10 @@ mod tests {
                 .unwrap(),
             1
         );
+        // It was executing, so it is interrupted (#722): nothing reruns it until the user
+        // resumes it, and its exact binding is kept for that.
         let recovered = store.get_interaction(result.id).await.unwrap().unwrap();
-        assert_eq!(recovered.completion_status, "submitted");
+        assert_eq!(recovered.completion_status, "interrupted");
         assert_eq!(recovered.graph_node_id, Some(901));
         assert_eq!(
             recovered.harness_configuration_digest.as_deref(),
@@ -1979,7 +1992,7 @@ mod tests {
         );
         assert_eq!(
             recovered.completion_error.as_deref(),
-            Some("Invoke again to resume.")
+            Some(super::super::RESTART_INTERRUPTED)
         );
         let replay = store
             .insert_action_invocation(thread.root_interaction_id, 41, "Ignored")
@@ -1988,7 +2001,7 @@ mod tests {
         match replay {
             ActionInvocationInsertOutcome::Existing { interaction, .. } => {
                 assert_eq!(interaction.id, result.id);
-                assert_eq!(interaction.completion_status, "submitted");
+                assert_eq!(interaction.completion_status, "interrupted");
             }
             ActionInvocationInsertOutcome::Created { .. } => {
                 panic!("recovery created a second product result")

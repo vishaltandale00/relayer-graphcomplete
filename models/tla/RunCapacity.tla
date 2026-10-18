@@ -13,6 +13,7 @@
 (*   SRC = crates/relayer-app-server/src/storage/sqlite/run_capacity.rs    *)
 (*   STP = crates/relayer-app-server/src/storage/sqlite/stops.rs           *)
 (*   APP = crates/relayer-app-server/src/app_server.rs                     *)
+(*   PR  = crates/relayer-app-server/src/storage/sqlite/paused_runs.rs     *)
 (*                                                                         *)
 (* Human runs 1..SameNode are invoked on node 1, in that order. The other  *)
 (* human runs each have a node of their own, like a message turn or an     *)
@@ -35,8 +36,8 @@ CONSTANTS
   WaitBehindWaiting,  \* decision (#720): a new run never takes a slot while a run
                       \* waits (RC admit checks that no run waits)
   ChildrenUncounted,  \* decision 5 (#716): a child never asks for a slot
-  StartupInterruptsWaits \* fix: startup ends every wait for capacity (SRC
-                      \* interrupt_capacity_waits)
+  StartupPausesWaits  \* fix: startup ends every wait for capacity by pausing the
+                      \* waiting run (PR pause_queued_runs, #722)
 
 Humans == 1..(SameNode + OwnNode)
 Kids == (SameNode + OwnNode + 1)..(SameNode + OwnNode + Children)
@@ -48,9 +49,10 @@ Nodes == {NodeOf(r) : r \in Humans}
 \* holds its node and asks for a slot next (THR start_held_action_interaction).
 \* checked: admission saw a slot free but has not taken it (only without
 \* AtomicAdmission). capQueued: queued for capacity, holding its node.
-\* interrupted: a restart ended it; the user starts it again.
+\* interrupted: a restart ended it while it executed. paused: a restart ended
+\* its wait (#722). The user resumes either, and it asks for its node again.
 Statuses == {"unsent", "nodeQueued", "holding", "checked", "capQueued", "running",
-             "accepted", "failed", "stopped", "interrupted"}
+             "accepted", "failed", "stopped", "interrupted", "paused"}
 Settled == {"accepted", "failed", "stopped"}
 
 VARIABLES
@@ -106,12 +108,13 @@ AskForSlot(r) ==
        /\ UNCHANGED slots
 
 -----------------------------------------------------------------------------
-(* A person starts a run, or starts an interrupted one again (THR           *)
-(* start_interaction, claim_and_start_action_interaction, retry).           *)
+(* A person starts a run, or resumes one a restart paused or interrupted    *)
+(* (THR start_interaction, claim_and_start_action_interaction, retry,       *)
+(* resume_runs).                                                            *)
 
 \* NQ admit, then RC admit. A run on a busy node waits behind it first.
 Send(r) ==
-  /\ appUp /\ r \in Humans /\ status[r] \in {"unsent", "interrupted"}
+  /\ appUp /\ r \in Humans /\ status[r] \in {"unsent", "interrupted", "paused"}
   /\ IF holder[NodeOf(r)] = 0
      THEN /\ holder' = [holder EXCEPT ![NodeOf(r)] = r]
           /\ status' = [status EXCEPT ![r] = "holding"]
@@ -214,7 +217,8 @@ Grant ==
 
 -----------------------------------------------------------------------------
 (* Crash and startup. A crash loses every live slot, hold and wait. Startup *)
-(* interrupts executing and queued runs; nothing starts on its own.         *)
+(* interrupts executing runs and pauses waiting ones (#722); nothing starts *)
+(* on its own.                                                              *)
 
 Crash ==
   /\ appUp /\ restarts < MaxRestarts
@@ -227,9 +231,10 @@ Crash ==
 Startup ==
   /\ ~appUp
   /\ status' = [r \in Runs |->
-       IF status[r] \in {"running", "checked", "holding", "nodeQueued"}
-          \/ (StartupInterruptsWaits /\ status[r] = "capQueued")
-       THEN "interrupted" ELSE status[r]]
+       IF status[r] \in {"running", "checked", "holding"} THEN "interrupted"
+       ELSE IF status[r] = "nodeQueued"
+          \/ (StartupPausesWaits /\ status[r] = "capQueued")
+       THEN "paused" ELSE status[r]]
   /\ appUp' = TRUE /\ restarts' = restarts + 1
   /\ before' = Leave(before, status')
   /\ UNCHANGED <<holder, slots, waitq, waitedNode>>
@@ -305,6 +310,12 @@ NeverWaitsForBoth == \A r \in waitedNode : status[r] /= "capQueued"
 \* Without a restart, every run waiting for capacity that is not removed starts.
 WaitingRunsStart ==
   \A r \in Runs : (status[r] = "capQueued") ~> (status[r] \in {"running"} \cup Settled)
+
+\* #722: a paused run holds no slot, no node and no place in the wait, so it never
+\* starts until the user resumes it, and the limit counts only runs that execute.
+PausedHoldsNothing ==
+  appUp => \A r \in Runs : status[r] = "paused"
+    => (r \notin slots /\ ~InQueue(r) /\ \A n \in Nodes : holder[n] /= r)
 
 \* Across a restart, every run waiting for capacity leaves the wait.
 WaitingRunsLeaveTheWait ==

@@ -42,7 +42,10 @@ const THREAD_COLUMNS: &str = concat!(
   -- provider made after the child's graph settled. Another run's request is answerable only
   -- while that run waits for approval, which the archive activity already counts.
   ((SELECT busy FROM thread_archive_activity WHERE id=t.id)
-   OR EXISTS(SELECT 1 FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE i.thread_id=t.id AND resolution.request_id IS NULL AND EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1)))
+   OR EXISTS(SELECT 1 FROM approval_requests request JOIN interactions i ON i.id=request.interaction_id LEFT JOIN approval_resolutions resolution ON resolution.request_id=request.request_id WHERE i.thread_id=t.id AND resolution.request_id IS NULL AND EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1))),
+           -- Runs a restart left for the user to resume or discard (#722). Neither is active.
+           (SELECT COUNT(*) FROM interactions i WHERE i.thread_id=t.id AND i.completion_status IN ('paused','interrupted')
+              AND NOT EXISTS(SELECT 1 FROM action_invocations child WHERE child.result_interaction_id=i.id AND child.agent_invoked=1))
     FROM threads t
 "#
 );
@@ -348,6 +351,7 @@ fn thread_from_row(row: &SqliteRow) -> Result<Thread, StorageError> {
         activity: row.try_get(14)?,
         archived_at: row.try_get(15)?,
         archive_blocked: row.try_get::<i64, _>(16)? != 0,
+        resumable_runs: row.try_get(17)?,
     })
 }
 

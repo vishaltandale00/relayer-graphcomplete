@@ -3005,8 +3005,10 @@ fn ensure_accepted(
 
 fn completion_status(value: &str) -> Result<ExportCompletionStatus, ConversationExportBuildError> {
     match value {
-        // A run queued behind another on its node (#718) has not started.
-        "not_started" | "queued" => Ok(ExportCompletionStatus::NotStarted),
+        // A run queued behind another on its node (#718), or paused by a restart (#722), has
+        // not started. A run a restart interrupted (#722) did not finish.
+        "not_started" | "queued" | "paused" => Ok(ExportCompletionStatus::NotStarted),
+        "interrupted" => Ok(ExportCompletionStatus::Failed),
         "running" => Ok(ExportCompletionStatus::Running),
         "submitted" => Ok(ExportCompletionStatus::Submitted),
         "waiting_for_approval" => Ok(ExportCompletionStatus::WaitingForApproval),

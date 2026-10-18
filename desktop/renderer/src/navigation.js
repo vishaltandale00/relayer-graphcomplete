@@ -81,11 +81,20 @@ export async function returnFromSettings(refreshThread) {
 const THREAD_ACTIVITY_POLL_MS = 2000;
 let threadActivityTimer = null;
 
+// Runs a restart paused or interrupted wait for the user (#722). The list says how many, apart
+// from the activity symbol, which shows only active runs.
+export function threadPausedLabel(thread) {
+  const count = Number(thread?.pausedRuns) || 0;
+  return count > 0 ? `${count} paused` : null;
+}
+
 function threadEntry(thread) {
   const activity = THREAD_ACTIVITY[thread.activity];
-  const name = activity ? `${thread.title}, ${activity.label}` : thread.title;
-  const tooltip = activity ? `${thread.title} · ${activity.label}` : thread.title;
-  return `<div class="thread-entry-row"><button class="entry ${String(thread.id) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(thread.id)}"${activity ? ` data-activity="${escapeHtmlAttribute(thread.activity)}"` : ""} data-review-ref="thread-${escapeHtml(thread.id)}" data-review-kind="thread" aria-label="${escapeHtmlAttribute(name)}" title="${escapeHtmlAttribute(tooltip)}"><span class="entry-icon thread-topic-icon" aria-hidden="true">${threadIconMarkup(thread.icon)}</span><span class="thread-entry-title">${escapeHtml(thread.title)}</span><span class="entry-icon thread-activity" aria-hidden="true"></span></button>${sidebarArchiveButton(thread)}</div>`;
+  const paused = threadPausedLabel(thread);
+  const states = [activity?.label, paused].filter(Boolean);
+  const name = states.length ? `${thread.title}, ${states.join(", ")}` : thread.title;
+  const tooltip = states.length ? `${thread.title} · ${states.join(" · ")}` : thread.title;
+  return `<div class="thread-entry-row"><button class="entry ${String(thread.id) === String(viewState.currentThreadId) ? "active" : ""}" data-thread="${escapeHtml(thread.id)}"${activity ? ` data-activity="${escapeHtmlAttribute(thread.activity)}"` : ""} data-review-ref="thread-${escapeHtml(thread.id)}" data-review-kind="thread" aria-label="${escapeHtmlAttribute(name)}" title="${escapeHtmlAttribute(tooltip)}"><span class="entry-icon thread-topic-icon" aria-hidden="true">${threadIconMarkup(thread.icon)}</span><span class="thread-entry-title">${escapeHtml(thread.title)}</span>${paused ? `<span class="thread-paused-badge" aria-hidden="true">${escapeHtml(paused)}</span>` : ""}<span class="entry-icon thread-activity" aria-hidden="true"></span></button>${sidebarArchiveButton(thread)}</div>`;
 }
 
 function renderThreadActivity() {
@@ -117,9 +126,10 @@ async function refreshThreadActivity() {
     let changed = false;
     appState.threads = appState.threads.map((thread) => {
       const next = activityById.get(String(thread.id));
-      if (!next || (next.activity === thread.activity && next.archiveBlocked === thread.archiveBlocked)) return thread;
+      if (!next || (next.activity === thread.activity && next.archiveBlocked === thread.archiveBlocked
+        && (next.pausedRuns ?? 0) === (thread.pausedRuns ?? 0))) return thread;
       changed = true;
-      return { ...thread, activity: next.activity, archiveBlocked: next.archiveBlocked };
+      return { ...thread, activity: next.activity, archiveBlocked: next.archiveBlocked, pausedRuns: next.pausedRuns ?? 0 };
     });
     if (changed) renderSidebar();
     else renderThreadActivity();
