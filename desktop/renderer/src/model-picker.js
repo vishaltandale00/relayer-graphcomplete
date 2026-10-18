@@ -37,20 +37,30 @@ export function modelPickerModelSetup(settings, selection) {
 
 export function modelPickerFamilyPresentation(settings, harnessId, selection, options = {}) {
   const families = settings ? routablePickerFamilies(settings, harnessId, options) : [];
-  const modelSetup = modelPickerModelSetup(settings, selection);
+  const setup = modelPickerModelSetup(settings, selection);
+  const modelSetup = setup?.reason === "harness-mismatch" && options.allowHarnessChange
+    ? { ...setup, choiceName: families.length ? "Choose a compatible family" : null }
+    : setup;
   const selectedFamily = families.find((family) => (
     String(family.id) === String(selection?.familyId)
+    && family.harnessId === (selection?.harnessId ?? harnessId)
   )) ?? (modelSetup ? null : families[0] ?? null);
+  const requiresExplicitSelection = Boolean(selectedFamily) && !pickerSelectionIsAvailable(settings, selection);
   return {
     families,
     selectedFamily,
-    modelSetup,
-    requiresExplicitSelection: Boolean(selectedFamily) && !pickerSelectionIsAvailable(settings, selection),
+    modelSetup: modelSetup ?? (requiresExplicitSelection && options.allowHarnessChange ? {
+      reason: "family-choice",
+      label: "Choose family",
+      message: "Choose an available model family before sending.",
+    } : null),
+    requiresExplicitSelection,
   };
 }
 
 export function composerSendTitle({ ready, modelSetup = null, readyTitle }) {
   if (ready) return readyTitle;
+  if (modelSetup?.reason === "family-choice") return modelSetup.message;
   if (modelSetup) return `${modelSetup.label}. ${modelSetup.choiceName ?? modelSetup.actionName} to send.`;
   return "Choose an available model in Settings before sending";
 }
@@ -295,8 +305,8 @@ export function createModelPicker({
   }
 
   function cycleFamily(direction, { focus = true } = {}) {
-    const { families, selectedFamily } = familyPresentation();
-    if (!families.length || (families.length === 1 && selectedFamily)) return;
+    const { families, selectedFamily, requiresExplicitSelection } = familyPresentation();
+    if (!families.length || (families.length === 1 && selectedFamily && !requiresExplicitSelection)) return;
     const currentIndex = families.findIndex((family) => String(family.id) === String(currentSelection?.familyId));
     const nextIndex = currentIndex < 0
       ? (direction === "next" ? 0 : families.length - 1)
@@ -393,7 +403,7 @@ export function createModelPicker({
 
   function renderModelPanel() {
     const panel = root.querySelector('[data-model-picker-panel="model"]');
-    const { families, selectedFamily, modelSetup } = familyPresentation();
+    const { families, selectedFamily, modelSetup, requiresExplicitSelection } = familyPresentation();
     if (!selectedFamily && modelSetup) {
       renderModelSetupPanel(panel, families, modelSetup);
       return;
@@ -415,8 +425,9 @@ export function createModelPicker({
       };
       return;
     }
-    panel.innerHTML = `${familyFieldMarkup(families, selectedFamily)}
-      ${familyMembersMarkup(selectedFamily, families, selectedFamily)}`;
+    const committedFamily = requiresExplicitSelection ? null : selectedFamily;
+    panel.innerHTML = `${familyFieldMarkup(families, committedFamily, requiresExplicitSelection ? "Choose a model family" : null)}
+      ${familyMembersMarkup(selectedFamily, families, committedFamily)}`;
     bindFamilyChange(panel, families);
   }
 
@@ -459,7 +470,7 @@ export function createModelPicker({
     const hasAvailableModels = currentSettings
       ? familyPresentation().families.length > 0
       : false;
-    const modelSetup = ready ? null : modelPickerModelSetup(currentSettings, currentSelection);
+    const modelSetup = ready ? null : familyPresentation().modelSetup;
     triggerLabel.textContent = labels?.compact
       ?? (configurationOwnedModel ? "Harness default" : modelSetup?.label ?? (hasAvailableModels ? "Choose family" : "Set up models"));
     trigger.title = labels
@@ -534,8 +545,8 @@ export function createModelPicker({
       }
       return;
     }
-    const { families, selectedFamily } = familyPresentation();
-    if (!families.length || (families.length === 1 && selectedFamily)) return;
+    const { families, selectedFamily, requiresExplicitSelection } = familyPresentation();
+    if (!families.length || (families.length === 1 && selectedFamily && !requiresExplicitSelection)) return;
     event.preventDefault();
     const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? popover.clientWidth || 300 : 1;
     const delta = event.deltaX * scale;
@@ -577,7 +588,7 @@ export function createModelPicker({
     },
     getSelection: () => selectionReady() ? { ...currentSelection } : null,
     isReady: selectionReady,
-    modelSetup: () => selectionReady() ? null : modelPickerModelSetup(currentSettings, currentSelection),
+    modelSetup: () => selectionReady() ? null : familyPresentation().modelSetup,
     open,
     setDisabled(nextDisabled) {
       disabled = Boolean(nextDisabled);
@@ -595,7 +606,7 @@ export function createModelPicker({
       validatingHarness = false;
       const recoveringFamilyId = selectionReady()
         ? null
-        : modelPickerModelSetup(currentSettings, currentSelection)?.familyId ?? null;
+        : familyPresentation().modelSetup?.familyId ?? null;
       currentSettings = nextSettings;
       currentPinnedHarnessId = nextPinnedHarnessId;
       currentSelection = currentSettings
@@ -616,7 +627,7 @@ export function createModelPicker({
         && currentSettings
         && !selectionReady()
         && String(currentSelection?.familyId) === String(recoveringFamilyId)
-        && !modelPickerModelSetup(currentSettings, currentSelection)
+        && !familyPresentation().modelSetup
       ) {
         const restored = resolveUnsentModelIntent(currentSettings, {
           ...currentSelection,

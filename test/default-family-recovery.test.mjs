@@ -207,6 +207,65 @@ describe("default family that needs model setup (PROV-008)", () => {
     picker.dispose();
   });
 
+  it("requires an explicit choice for a lone uncommitted cross-harness route", async () => {
+    const settings = withClaude();settings.families = settings.families.filter(family => family.id === 4);
+    const expected = { harnessId: "claude-basic", familyId: 4, providerId: "claude", modelId: "sonnet" };
+    const validateSelection = vi.fn(async () => {});const apply = vi.fn();
+    const prepareHarnessChange = vi.fn(async () => apply);
+    const { root, picker, document } = mountPicker(settings, {
+      selection: { ...expected, harnessId: "codex-basic" }, validateSelection, prepareHarnessChange,
+    });
+    picker.open();
+    expect(picker.isReady()).toBe(false);
+    const select = root.querySelector("[data-model-family]");
+    expect(select.value).toBe("");
+    expect([...select.options].map(option => option.value)).toEqual(["", "4"]);
+    expect([...root.querySelectorAll("[data-family-cycle]")].every(button => !button.disabled)).toBe(true);
+    expect(validateSelection).not.toHaveBeenCalled();
+    select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
+    await vi.waitFor(() => expect(picker.getSelection()).toEqual(expected));
+    expect(validateSelection).toHaveBeenCalledWith(expected);
+    expect(prepareHarnessChange).toHaveBeenCalledWith("claude-basic");expect(apply).toHaveBeenCalledOnce();
+    expect(settings.defaults).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
+    picker.dispose();
+  });
+
+  it("lets a missing default choose a lone cross-harness family through its cycle control", async () => {
+    const settings = withClaude();settings.families = settings.families.filter(family => family.id === 4);
+    settings.defaults.familyId = 99;
+    const validateSelection = vi.fn(async () => {});const apply = vi.fn();
+    const { root, picker } = mountPicker(settings, { validateSelection, prepareHarnessChange: async () => apply });
+    picker.open();
+    expect(picker.getSelection()).toBeNull();
+    expect(root.querySelector("[data-model-family]").value).toBe("");
+    expect(composerSendTitle({ ready: false, modelSetup: picker.modelSetup() }))
+      .toBe("Choose an available model family before sending.");
+    const next = root.querySelector('[data-family-cycle="next"]');expect(next.disabled).toBe(false);next.click();
+    await vi.waitFor(() => expect(picker.getSelection()).toMatchObject({ harnessId: "claude-basic", familyId: 4 }));
+    expect(validateSelection).toHaveBeenCalledOnce();expect(apply).toHaveBeenCalledOnce();
+    expect(settings.defaults).toMatchObject({ harnessId: "codex-basic", familyId: 99 });
+    picker.dispose();
+  });
+
+  it("advertises a cross-harness family recovery in New Chat without offering it in a pinned chat", () => {
+    const settings = withClaude();settings.families = settings.families.filter(family => [1, 4].includes(family.id));
+    settings.harnesses[0].modelCompatibility = [{ providerId: "codex", modelIds: ["unsupported"] }];
+    settings.harnesses[0].compatibleProviderIds = ["codex"];
+    for (const mode of ["new", "ongoing"]) {
+      const { root, picker } = mountPicker(settings, { mode, pinnedHarnessId: mode === "ongoing" ? "codex-basic" : null });
+      picker.open();
+      const title = composerSendTitle({ ready: false, modelSetup: picker.modelSetup() });
+      if (mode === "new") {
+        expect([...root.querySelector("[data-model-family]").options].map(option => option.value)).toEqual(["", "4"]);
+        expect(title).toBe("Harness mismatch. Choose a compatible family to send.");
+      } else {
+        expect(root.querySelector("[data-model-family]")).toBeNull();
+        expect(title).toContain("in Settings to send.");
+      }
+      picker.dispose();
+    }
+  });
+
   it("offers family Settings when a harness mismatch has no compatible family", () => {
     const settings = restored();
     settings.harnesses[0].modelCompatibility = [{ providerId: "codex", modelIds: ["unsupported"] }];
