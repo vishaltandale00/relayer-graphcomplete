@@ -308,7 +308,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         if (harnessRepairState.attempts !== 2) throw new Error("Repair did not use one refresh per click.");
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#settingsBackButton').click()" });
         await waitFor("document.querySelector('#settingsView').classList.contains('hidden')");
-        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#newModelControl [data-model-picker-tab=model]').click()" });
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click()" });
         await waitFor("Array.from(document.querySelector('#newModelControl [data-model-family]')?.options ?? []).some(option => option.value === '13')");
         await cdp.call("Runtime.evaluate", { expression: "const family=document.querySelector('#newModelControl [data-model-family]');family.value='13';family.dispatchEvent(new Event('change',{bubbles:true}))" });
         await waitFor("document.querySelector('#newModelControl [data-model-picker-label]')?.textContent === 'Router coding'");
@@ -319,8 +319,8 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         if (selection.result.value?.harnessId !== "prime-agent-basic" || selection.result.value?.modelSelection?.familyId !== 13) {
           throw new Error("Choosing the repaired family did not automatically select Prime.");
         }
-        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#newModelControl [data-model-picker-tab=advanced]').click()" });
-        await waitFor("document.querySelector('#newModelControl [data-harness-option=prime-agent-basic]')?.getAttribute('aria-checked') === 'true' && !document.querySelector('#newModelControl [data-model-picker-panel=advanced]').classList.contains('hidden')");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click()" });
+        await waitFor("document.querySelector('#newModelControl [data-model-family]')?.value === '13' && !document.querySelector('#newModelControl [data-harness-option]')");
         await record("composer");
         // Return to the Harness Settings surface for the existing scene audit.
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#settingsButton').click()" });

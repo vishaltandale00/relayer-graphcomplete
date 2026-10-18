@@ -1,4 +1,3 @@
-export const NO_MODELS_FOR_HARNESS = "No available models for this harness";
 
 // A refresh that finds no eligible models tombstones the provider's managed family. The
 // app server keeps it as the default and refuses Send with this code (PROV-008).
@@ -356,42 +355,6 @@ export function resolveUnsentModelIntent(settings, candidate) {
     },
     blockedFamilyId: null,
   };
-}
-
-export function selectCandidateHarness(settings, currentSelection, harnessId) {
-  const selection = normalizePickerSelection(settings, { ...currentSelection, harnessId });
-  if (selection) return { selection, error: null };
-  if (harnessUsesConfigurationModel(settings, harnessId)) {
-    return { selection: { harnessId, familyId: null, providerId: null, modelId: null }, error: null };
-  }
-  if (availablePickerFamilies(settings, harnessId).length > 0) {
-    // Keep the user's rejected family for recovery copy, not as an executable choice.
-    // Clearing it would make the picker diagnose the unrelated default family instead.
-    return { selection: {
-      harnessId,
-      familyId: currentSelection?.familyId ?? null,
-      providerId: currentSelection?.providerId ?? null,
-      modelId: currentSelection?.modelId ?? null,
-    }, error: null };
-  }
-  return { selection: currentSelection, error: NO_MODELS_FOR_HARNESS };
-}
-
-export async function validateCandidateHarness(
-  settings,
-  currentSelection,
-  harnessId,
-  validateSelection,
-) {
-  const candidate = selectCandidateHarness(settings, currentSelection, harnessId);
-  if (candidate.error) return candidate;
-  if (candidate.selection.familyId == null || !pickerSelectionIsAvailable(settings, candidate.selection)) return candidate;
-  try {
-    await validateSelection(candidate.selection);
-    return candidate;
-  } catch {
-    return { selection: currentSelection, error: NO_MODELS_FOR_HARNESS };
-  }
 }
 
 export function pickerSelectionPayload(selection) {

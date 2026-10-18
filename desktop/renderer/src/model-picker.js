@@ -1,6 +1,5 @@
 import {
   availableFamilyMembers,
-  availablePickerFamilies,
   familyModelSetup,
   harnessUsesConfigurationModel,
   modelPickerContextCandidate,
@@ -8,11 +7,8 @@ import {
   reconcilePickerSelection,
   resolveUnsentModelIntent,
   routablePickerFamilies,
-  validateCandidateHarness,
 } from "./model-picker-model.js";
 import { escapeHtml, escapeHtmlAttribute } from "./ui.js";
-
-const TABS = ["model", "advanced"];
 
 function modelFor(settings, providerId, modelId) {
   return settings?.providers
@@ -22,10 +18,6 @@ function modelFor(settings, providerId, modelId) {
 
 function familyFor(settings, familyId) {
   return settings?.families?.find((family) => String(family.id) === String(familyId));
-}
-
-function harnessFor(settings, harnessId) {
-  return settings?.harnesses?.find((harness) => harness.id === harnessId);
 }
 
 // A family that needs model setup stays the selection (PROV-008), whether it is the default or a
@@ -73,34 +65,11 @@ export function modelPickerMarkup({ mode = "new" } = {}) {
   const safeMode = mode === "ongoing" ? "ongoing" : "new";
   return `<div class="model-control model-control-${safeMode}" data-model-picker="${safeMode}">
     <button type="button" class="model-button" data-model-picker-trigger aria-haspopup="dialog" aria-expanded="false" title="Choose model family"><span aria-hidden="true">✦</span><span data-model-picker-label>Model</span><span aria-hidden="true">⌄</span></button>
-    <div class="model-picker-popover hidden" data-model-picker-popover role="dialog" aria-label="Model and harness picker">
-      <div class="model-picker-tabs" role="tablist" aria-label="Model picker sections">
-        <button type="button" role="tab" data-model-picker-tab="model" aria-selected="true">Family</button>
-        <button type="button" role="tab" data-model-picker-tab="advanced" aria-selected="false">Advanced</button>
-      </div>
-      <section class="model-picker-panel" data-model-picker-panel="model" role="tabpanel"></section>
-      <section class="model-picker-panel hidden" data-model-picker-panel="advanced" role="tabpanel"></section>
+    <div class="model-picker-popover hidden" data-model-picker-popover role="dialog" aria-label="Model family picker">
+      <section class="model-picker-panel" data-model-picker-panel="model" aria-label="Model families"></section>
       <p class="model-picker-error hidden" data-model-picker-error role="alert"></p>
     </div>
   </div>`;
-}
-
-export function modelPickerKeyIntent(event, activeTab = "model") {
-  if (event.key === "Escape") return "close";
-  if (!event.target?.matches?.('[role="tab"]')) return null;
-  if (event.key === "ArrowRight") return TABS[(TABS.indexOf(activeTab) + 1) % TABS.length];
-  if (event.key === "ArrowLeft") return TABS[(TABS.indexOf(activeTab) + TABS.length - 1) % TABS.length];
-  if (event.key === "Home") return TABS[0];
-  if (event.key === "End") return TABS.at(-1);
-  return null;
-}
-
-export function modelPickerCycleIndex(currentIndex, itemCount, key) {
-  if (itemCount <= 0 || !["ArrowDown", "ArrowUp", "ArrowLeft", "ArrowRight"].includes(key)) {
-    return null;
-  }
-  const direction = key === "ArrowDown" || key === "ArrowRight" ? 1 : -1;
-  return (currentIndex + direction + itemCount) % itemCount;
 }
 
 export function modelPickerClickIsOutside(root, target) {
@@ -207,7 +176,6 @@ export function createModelPicker({
       harnessId: currentPinnedHarnessId ?? currentSettings.defaults?.harnessId,
     })
     : null;
-  let activeTab = "model";
   let error = null;
   let disabled = false;
   let validatingHarness = false;
@@ -402,7 +370,7 @@ export function createModelPicker({
       (root.querySelector("[data-model-picker-refresh]")
         ?? root.querySelector("[data-model-option]")
         ?? root.querySelector("[data-model-family]")
-        ?? root.querySelector('[data-model-picker-tab="model"]'))?.focus();
+        ?? trigger)?.focus();
     });
     refreshButton.onclick = async () => {
       if (refreshingModels) return;
@@ -452,50 +420,6 @@ export function createModelPicker({
     bindFamilyChange(panel, families);
   }
 
-  function renderAdvancedPanel() {
-    const panel = root.querySelector('[data-model-picker-panel="advanced"]');
-    const harnessId = selectedHarnessId();
-    if (mode === "ongoing") {
-      const harness = harnessFor(currentSettings, harnessId);
-      panel.innerHTML = `<div class="pinned-harness"><span>Harness</span><strong>${escapeHtml(harness?.label ?? harnessId ?? "Unavailable")}</strong><small>Pinned for this thread</small></div>`;
-      return;
-    }
-    const harnesses = (currentSettings?.harnesses ?? []).filter((harness) => (
-      harness.available !== false
-      && (
-        availablePickerFamilies(currentSettings, harness.id).some(family => (
-          currentSelection?.familyId == null || String(family.id) === String(currentSelection.familyId)
-        ))
-        || harnessUsesConfigurationModel(currentSettings, harness.id)
-      )
-    ));
-    panel.innerHTML = harnesses.length
-      ? `<div class="harness-option-list" role="radiogroup" aria-label="Harnesses">${harnesses.map((harness) => {
-        const checked = harness.id === harnessId;
-        return `<button type="button" role="radio" aria-checked="${checked}" data-harness-option="${escapeHtmlAttribute(harness.id)}" ${validatingHarness ? "disabled" : ""}><span><strong>${escapeHtml(harness.label)}</strong></span><i aria-hidden="true">${checked ? "✓" : ""}</i></button>`;
-      }).join("")}</div>`
-      : `<div class="model-picker-empty"><strong>No available harnesses</strong><button type="button" class="secondary" data-model-picker-settings>Open Settings</button></div>`;
-    panel.querySelector("[data-model-picker-settings]")?.addEventListener("click", () => {
-      onUserTakeover();
-      close();
-      onOpenSettings();
-    });
-    panel.querySelectorAll("[data-harness-option]").forEach((button) => {
-      button.onclick = async () => {
-        onUserTakeover();
-        const candidateHarnessId = button.dataset.harnessOption;
-        await changeHarnessSelection(() => validateCandidateHarness(
-          currentSettings,
-          currentSelection,
-          candidateHarnessId,
-          validateSelection,
-        ), () => requestAnimationFrame(() => [...root.querySelectorAll("[data-harness-option]")]
-          .find((candidate) => candidate.dataset.harnessOption === candidateHarnessId)
-          ?.focus()));
-      };
-    });
-  }
-
   async function changeHarnessSelection(resolveSelection, onCommitted) {
     const validationSequence = harnessValidationGate.begin();
     validatingHarness = true;
@@ -523,8 +447,7 @@ export function createModelPicker({
       error = changeError instanceof Error ? changeError.message : String(changeError);
       render();
       onSelectionChange(selectionReady() ? currentSelection : null);
-      root.querySelector(activeTab === "advanced"
-        ? '[data-harness-option][aria-checked="true"]' : "[data-model-family]")?.focus();
+      root.querySelector("[data-model-family]")?.focus();
     }
   }
 
@@ -543,16 +466,7 @@ export function createModelPicker({
       ? `Model: ${labels.compact}`
       : (configurationOwnedModel ? "Model set by harness configuration" : modelSetup?.message ?? "Choose an available family");
     trigger.disabled = disabled;
-    root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => {
-      const selected = tab.dataset.modelPickerTab === activeTab;
-      tab.setAttribute("aria-selected", String(selected));
-      tab.tabIndex = selected ? 0 : -1;
-    });
-    root.querySelectorAll("[data-model-picker-panel]").forEach((panel) => {
-      panel.classList.toggle("hidden", panel.dataset.modelPickerPanel !== activeTab);
-    });
     renderModelPanel();
-    renderAdvancedPanel();
     root.querySelectorAll("[data-family-member]").forEach((button) => {
       button.onclick = () => {
         onUserTakeover();
@@ -571,15 +485,14 @@ export function createModelPicker({
     errorElement.classList.toggle("hidden", !notice);
   }
 
-  function open(tab = activeTab) {
+  function open() {
     if (disabled) return;
     resetSwipe();
-    activeTab = TABS.includes(tab) ? tab : "model";
     error = null;
     render();
     popover.classList.remove("hidden");
     trigger.setAttribute("aria-expanded", "true");
-    requestAnimationFrame(() => root.querySelector(`[data-model-picker-tab="${activeTab}"]`)?.focus());
+    requestAnimationFrame(() => (root.querySelector("[data-model-family], [data-model-picker-refresh], [data-model-picker-settings]") ?? trigger).focus());
   }
 
   function close({ returnFocus = false } = {}) {
@@ -593,42 +506,15 @@ export function createModelPicker({
     if (returnFocus) trigger.focus();
   }
 
-  function setActiveTab(tab, { focus = false } = {}) {
-    if (!TABS.includes(tab)) return;
-    resetSwipe();
-    activeTab = tab;
-    render();
-    if (focus) root.querySelector(`[data-model-picker-tab="${tab}"]`)?.focus();
-  }
-
   trigger.onclick = () => {
     onUserTakeover();
     if (popover.classList.contains("hidden")) open();
     else close();
   };
-  root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => {
-    tab.onclick = () => setActiveTab(tab.dataset.modelPickerTab);
-  });
   root.onkeydown = (event) => {
-    const intent = modelPickerKeyIntent(event, activeTab);
-    if (intent === "close") {
-      event.preventDefault();
-      close({ returnFocus: true });
-      return;
-    }
-    if (TABS.includes(intent)) {
-      event.preventDefault();
-      setActiveTab(intent, { focus: true });
-      return;
-    }
-    const option = event.target.closest?.('[role="radio"]');
-    if (!option) return;
-    const options = [...option.parentElement.querySelectorAll('[role="radio"]')];
-    const index = modelPickerCycleIndex(options.indexOf(option), options.length, event.key);
-    if (index == null) return;
+    if (event.key !== "Escape") return;
     event.preventDefault();
-    options[index].focus();
-    options[index].click();
+    close({ returnFocus: true });
   };
   const dismissWatcher = createModelPickerDismissWatcher(root);
   const outsideClick = () => {
@@ -637,7 +523,7 @@ export function createModelPicker({
   root.ownerDocument.addEventListener("click", dismissWatcher.observe, true);
   root.ownerDocument.addEventListener("click", outsideClick);
   const onFamilyWheel = (event) => {
-    if (disabled || popover.classList.contains("hidden") || activeTab !== "model"
+    if (disabled || popover.classList.contains("hidden")
       || !event.target.closest?.("[data-family-roster]") || event.ctrlKey || event.metaKey || event.altKey) return;
     if (lastSwipeTime === null || event.timeStamp - lastSwipeTime > 180) resetSwipe();
     lastSwipeTime = event.timeStamp;
@@ -688,7 +574,6 @@ export function createModelPicker({
       root.removeEventListener("wheel", onFamilyWheel);
       trigger.onclick = null;
       root.onkeydown = null;
-      root.querySelectorAll("[data-model-picker-tab]").forEach((tab) => { tab.onclick = null; });
     },
     getSelection: () => selectionReady() ? { ...currentSelection } : null,
     isReady: selectionReady,

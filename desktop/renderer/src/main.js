@@ -280,7 +280,7 @@ function bindEvents() {
     updateCreateThreadAvailability();
   };
   bindComposerKeydown($("#newThreadPrompt"), () => {
-    if (productApiAvailable && !newThreadModelSelectionReady()) openNewThreadModelPicker("model");
+    if (productApiAvailable && !newThreadModelSelectionReady()) openNewThreadModelPicker();
     else $("#createThread").click();
   });
 

@@ -32,6 +32,13 @@ function captureExportHandler({ mode = "interactive", getThread, onExportConvers
       classes,
     };
   };
+  const detailsElements = new Map([
+    ["#openThreadDetails", element(["hidden"])],
+    ["#threadDetailsDialog", { open: false }],
+    ["#threadDetailsName", element()],
+    ["#threadDetailsHarness", element()],
+    ["#closeThreadDetails", element()],
+  ]);
   const button = element();
   const archiveButton = element();
   const stopAllButton = element(["hidden"]);
@@ -56,6 +63,7 @@ function captureExportHandler({ mode = "interactive", getThread, onExportConvers
   };
   const root = {
     querySelector(selector) {
+      if (detailsElements.has(selector)) return detailsElements.get(selector);
       if (selector === "#threadView") return threadView;
       if (selector === "#conversationSettings") return settingsControl;
       if (selector === "#conversationSettingsButton") return settingsButton;

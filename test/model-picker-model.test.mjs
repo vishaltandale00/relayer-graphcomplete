@@ -9,15 +9,12 @@ import {
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
   modelPickerContextCandidate,
-  NO_MODELS_FOR_HARNESS,
   normalizePickerSelection,
   pickerSelectionIsAvailable,
   pickerSelectionPayload,
   reconcilePickerSelection,
   routablePickerFamilies,
-  selectCandidateHarness,
   selectionForInteraction,
-  validateCandidateHarness,
 } from "../desktop/renderer/src/model-picker-model.js";
 import {
   modelPickerFamilyPresentation,
@@ -157,13 +154,7 @@ describe("composer model picker selection", () => {
     expect(pickerSelectionPayload({ harnessId: "prime-agent-basic" }))
       .toEqual({ harnessId: "prime-agent-basic" });
     expect(modelSelectionLabels(catalog, { harnessId: "prime-agent-basic" })).toBeNull();
-    const validate = async () => { throw new Error("model validation must not run"); };
-    await expect(validateCandidateHarness(
-      catalog,
-      normalizePickerSelection(catalog, { harnessId: "codex-basic" }),
-      "prime-agent-basic",
-      validate,
-    )).resolves.toEqual({ selection: { harnessId: "prime-agent-basic" }, error: null });
+
   });
 
   it("respects explicit cross-provider member order instead of the default provider", () => {
@@ -246,10 +237,7 @@ describe("composer model picker selection", () => {
     const current = normalizePickerSelection(catalog, null);
     expect(current).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
     expect(availablePickerFamilies(catalog, "prime-agent-basic").map(({ id }) => id)).toEqual([3]);
-    expect(selectCandidateHarness(catalog, current, "prime-agent-basic")).toEqual({
-      selection: { ...current, harnessId: "prime-agent-basic" },
-      error: null,
-    });
+
   });
 
   it("keeps the first family's first available member authoritative over a later preferred model", () => {
@@ -368,31 +356,6 @@ describe("composer model picker selection", () => {
     expect(defaultFamilySelectionForProvider(catalog, "codex-basic", "codex")).toMatchObject({
       familyId: 1,
       providerId: "codex",
-    });
-  });
-
-  it("rolls back the complete selection when a candidate harness has no models", () => {
-    const catalog = settings();
-    const current = normalizePickerSelection(catalog, null);
-    expect(selectCandidateHarness(catalog, current, "cooked")).toEqual({
-      selection: current,
-      error: NO_MODELS_FOR_HARNESS,
-    });
-  });
-
-  it("rolls back a stale candidate when trusted server validation rejects it", async () => {
-    const catalog = settings();
-    catalog.harnesses.push({
-      id: "stale",
-      label: "Stale",
-      available: true,
-      compatibleProviderIds: ["codex"],
-    });
-    const current = normalizePickerSelection(catalog, null);
-    const validateSelection = async () => { throw new Error("stale catalog"); };
-    await expect(validateCandidateHarness(catalog, current, "stale", validateSelection)).resolves.toEqual({
-      selection: current,
-      error: NO_MODELS_FOR_HARNESS,
     });
   });
 

@@ -110,10 +110,10 @@ function recoveringWithWorkDefault() {
 }
 
 describe("default family that needs model setup (PROV-008)", () => {
-  it.each(["family", "Advanced"])("automatically routes the %s choice only after validation and permissions are ready", async kind => {
+  it("automatically routes the family choice only after validation and permissions are ready", async () => {
     const settings = withClaude();
     settings.harnesses.push({ id: "codex-other", label: "Codex Other", available: true, compatibleProviderIds: ["codex", "work"] });
-    const expected = kind === "family" ? { harnessId: "claude-basic", familyId: 4, providerId: "claude", modelId: "sonnet" } : { harnessId: "codex-other", familyId: 1, providerId: "codex", modelId: "gpt-5.6-sol" };
+    const expected = { harnessId: "claude-basic", familyId: 4, providerId: "claude", modelId: "sonnet" };
     const validation = deferred();
     const preparation = deferred();
     const applyPermissions = vi.fn();
@@ -124,11 +124,7 @@ describe("default family that needs model setup (PROV-008)", () => {
     picker.open();
     const select = root.querySelector("[data-model-family]");
     expect([...select.options].map(option => option.value)).toEqual(["1", "2", "4"]);
-    if (kind === "family") {
-      select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
-    } else {
-      picker.open("advanced");root.querySelector('[data-harness-option="codex-other"]').click();
-    }
+    select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
     expect(validateSelection).toHaveBeenCalledWith(expected);
     expect(picker.getSelection()).toBeNull();
     expect(prepareHarnessChange).not.toHaveBeenCalled();
@@ -141,14 +137,17 @@ describe("default family that needs model setup (PROV-008)", () => {
     expect(changed).toHaveBeenLastCalledWith(picker.getSelection());
     expect(applyPermissions.mock.invocationCallOrder[0]).toBeLessThan(changed.mock.invocationCallOrder.at(-1));
     expect(root.querySelector(".model-picker-recovery")).toBeNull();
-    expect(document.activeElement).toBe(root.querySelector(kind === "family" ? "[data-model-picker-trigger]" : '[data-harness-option="codex-other"]'));
-    picker.open("advanced");
-    expect([...root.querySelectorAll("[data-harness-option]")].map(button => button.dataset.harnessOption)).toEqual(kind === "family" ? ["claude-basic"] : ["codex-basic", "codex-other"]);
+    expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
+    picker.open();
+    expect(root.querySelector("[data-harness-option], [role=tab]")).toBeNull();
+    root.dispatchEvent(new document.defaultView.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(root.querySelector("[data-model-picker-popover]").classList.contains("hidden")).toBe(true);
+    expect(document.activeElement).toBe(root.querySelector("[data-model-picker-trigger]"));
     expect(settings.defaults).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
     picker.dispose();
   });
 
-  it.each([["validation", "family"], ["permissions", "family"], ["validation", "Advanced"], ["permissions", "Advanced"]])("retains the old family and harness when %s fails from %s", async (phase, kind) => {
+  it.each(["validation", "permissions"])("retains the old family and harness when %s fails", async phase => {
     const settings = withClaude();
     settings.harnesses.push({ id: "codex-other", label: "Codex Other", available: true, compatibleProviderIds: ["codex", "work"] });
     const validateSelection = vi.fn(async () => { if (phase === "validation") throw new Error("Validation failed"); });
@@ -157,8 +156,7 @@ describe("default family that needs model setup (PROV-008)", () => {
     const original = picker.getSelection();
     picker.open();
     const select = root.querySelector("[data-model-family]");
-    if (kind === "family") { select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true })); }
-    else { picker.open("advanced");root.querySelector('[data-harness-option="codex-other"]').click(); }
+    select.value = "4";select.dispatchEvent(new document.defaultView.Event("change", { bubbles: true }));
     await vi.waitFor(() => expect(root.querySelector("[data-model-picker-error]").textContent).not.toBe(""));
     expect(picker.getSelection()).toEqual(original);
     expect(root.querySelector("[data-model-family]").value).toBe("1");
@@ -370,8 +368,6 @@ describe("default family that needs model setup (PROV-008)", () => {
     expect(wheel({ deltaX: 80 }, 855, ".model-family-field").defaultPrevented).toBe(false);
     picker.close();
     expect(wheel({ deltaX: 80 }, 860).defaultPrevented).toBe(false);
-    picker.open("advanced");
-    expect(wheel({ deltaX: 80 }, 865).defaultPrevented).toBe(false);
     picker.open("model");
     wheel({ deltaX: 60 }, 870);
     expect(changed).toHaveBeenCalledTimes(7);

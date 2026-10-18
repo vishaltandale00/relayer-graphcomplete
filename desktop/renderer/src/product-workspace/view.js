@@ -13,6 +13,7 @@ export function productWorkspaceMarkup() {
         <div class="conversation-settings hidden" id="conversationSettings">
           <button class="conversation-settings-button" id="conversationSettingsButton" type="button" title="Conversation settings" aria-label="Conversation settings" aria-expanded="false" aria-controls="conversationSettingsMenu">•••</button>
           <div class="conversation-settings-menu hidden" id="conversationSettingsMenu" role="menu" aria-label="Conversation settings">
+            <button class="conversation-export hidden" id="openThreadDetails" type="button" role="menuitem">Thread details</button>
             <button class="conversation-export hidden" id="stopAllRuns" type="button" role="menuitem">Stop all runs</button>
             <button class="conversation-export hidden" id="archiveConversation" type="button" role="menuitem">Archive</button>
             <button class="conversation-export hidden" id="stopAllAndArchive" type="button" role="menuitem">Stop all and archive</button>
@@ -24,6 +25,11 @@ export function productWorkspaceMarkup() {
         <button class="share-conversation-button hidden" id="shareConversation" type="button" data-review-ref="share-conversation" data-review-kind="conversation-share" aria-label="Share thread">Share</button>
       </div>
     </header>
+    <dialog id="threadDetailsDialog" class="thread-details-dialog" aria-labelledby="threadDetailsTitle">
+      <header><h2 id="threadDetailsTitle">Thread details</h2><button id="closeThreadDetails" type="button" aria-label="Close thread details">×</button></header>
+      <dl><div><dt>Thread</dt><dd id="threadDetailsName"></dd></div><div><dt>Harness</dt><dd id="threadDetailsHarness"></dd></div></dl>
+      <p>The harness is pinned for this thread.</p>
+    </dialog>
     <div class="share-dialog-backdrop hidden" id="shareDialog"></div>
     <div class="pending-turn-notice hidden" id="pendingTurnNotice" role="status"><span id="pendingTurnText"></span><button id="openReadyResult" type="button" class="hidden">Result ready</button></div>
     <div class="interaction-banner" id="interactionBanner">

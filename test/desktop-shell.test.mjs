@@ -176,7 +176,7 @@ describe("desktop skeleton", () => {
     expect(secondaryApp.on).not.toHaveBeenCalled();
   });
 
-  it("exposes Codex setup, separate permissions, and the advanced composer picker", async () => {
+  it("exposes Codex setup, separate permissions, and the family-only composer picker", async () => {
     const html = await readFile(new URL("../desktop/renderer/index.html", import.meta.url), "utf8");
     const desktopMain = await readFile(new URL("../desktop/main/index.mjs", import.meta.url), "utf8");
     const packageManifest = await readFile(new URL("../package.json", import.meta.url), "utf8");
@@ -211,7 +211,8 @@ describe("desktop skeleton", () => {
     expect(html).toContain('id="permissionButton"');
     expect(html).toContain('id="permissionMenu"');
     expect(html).toContain('id="newModelControl"');
-    expect(html).toContain('data-model-picker-tab="advanced"');
+    expect(html).not.toContain("data-model-picker-tab");
+    expect(html).toContain('data-model-picker-panel="model"');
     expect(html).toContain('id="createThread" title="Create thread and send" disabled');
     expect(html).toContain('id="providerDefinitionList"');
     expect(html).toContain('id="updateChannel"');
@@ -234,7 +235,7 @@ describe("desktop skeleton", () => {
     expect(desktopMain).not.toContain("PrimeAgentThreadRunner");
     expect(rendererMain).toContain('import { bindComposerKeydown } from "./product-workspace/workspace.js";');
     expect(rendererMain).toContain('bindComposerKeydown($("#newThreadPrompt"), () => {');
-    expect(rendererMain).toContain('openNewThreadModelPicker("model")');
+    expect(rendererMain).toContain('openNewThreadModelPicker()');
     expect(desktopMain).toContain("RelayerAppServerService");
     expect(desktopMain.match(/issueErrorCapability,/gu)).toHaveLength(2);
     expect(desktopMain).toContain("authenticatedErrorReporting?.issueCapability({ component, processGeneration }) ?? null");
