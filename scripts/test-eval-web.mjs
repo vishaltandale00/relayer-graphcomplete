@@ -673,6 +673,22 @@ async function proveDecisionTaskActor({ browser, service, productSession, data }
     await until(async () => (await page.locator("#setupPublished").textContent()).includes(benchmarkRevision.id), "endpoint benchmark displayed");
     await page.locator("#actorSetupRevision").selectOption(benchmarkRevision.id);
     console.log("PASS endpoint benchmark UI: explicit v11/v8 staging, feedback publication, picker selection, previous revisions preserved and no promotion");
+    await page.locator("#setupUseUpdateActor").click();
+    assert.equal(await page.locator('#setupPublish [name="promptVersion"]').inputValue(), "task-actor-v12");
+    assert.equal(await page.locator('#setupPublish [name="actorDecisionEngine"]').inputValue(), "native");
+    await page.locator('#setupPublish [name="name"]').fill("Visible update discovery browser experiment");
+    await page.locator("#setupFeedbackSession").selectOption(baselineTask.id);
+    await page.locator("#setupFeedbackRecords input").first().check();
+    await page.locator("#setupPublish button").click();
+    const updateRevision = await until(() => setupRegistry.catalog().revisions.find(item => item.name === "Visible update discovery browser experiment"), "update-aware revision published");
+    assert.equal(updateRevision.behaviorContract.id, "task-actor-v9");
+    assert.equal(updateRevision.behaviorContract.observationContract.id, "task-actor-observation-v5");
+    assert.equal(updateRevision.settings.decision, undefined);
+    assert.equal(setupRegistry.selected("actor").id, baseline.id);
+    assert.deepEqual(setupRegistry.get(benchmarkRevision.id, "actor"), benchmarkRevision);
+    await until(async () => (await page.locator("#setupPublished").textContent()).includes(updateRevision.id), "update revision displayed");
+    await page.locator("#actorSetupRevision").selectOption(updateRevision.id);
+    console.log("PASS update-aware revision UI: Decisions predecessor stages native v12/v9/v5, feedback publication, explicit selection, immutable predecessor and no promotion");
     await proveDecisionCompletionJudge({ page, actors, tasks, taskOptions, setupRegistry, baseline, baselineTask });
   } finally { await actors.close(); await page.close(); }
 }

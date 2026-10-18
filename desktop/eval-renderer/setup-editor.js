@@ -15,7 +15,7 @@ export function initializeSetupEditor({ api, root, toast, changed }) {
       <label>Predecessor<select id="setupPredecessor">${catalog.revisions.map((item) => `<option value="${escape(item.id)}">${escape(item.kind)} · ${escape(item.name)} · ${escape(item.id)}</option>`).join("")}</select></label>
       ${fileConfigs ? `<label>${source.kind === "completion-judge" ? "Completion judge" : "Graph judge"} config file<select id="judgeConfigFile">${fileConfigs.map((item) => `<option value="${escape(item.file)}">${escape(item.file)}</option>`).join("")}</select></label><p>Edit <code>${escape(judgeConfig.path)}</code>, then reload this panel. Publication pins its exact bytes and digest.</p>` : ""}
       ${judgeConfig?.definition.spec?.decision ? `<p id="completionDecisionRoute">Verdict: OpenAI Decisions ${escape(judgeConfig.definition.spec.decision.model)} via ${escape(judgeConfig.definition.spec.decision.providerId)}. Written feedback: Codex ${escape(judgeConfig.definition.spec.model)}. Both connections are required and inference uses both routes. Set the connected provider ID in this YAML file before publishing. Connected OpenAI API IDs: ${(catalog.actorDecisionProviders || []).map(item => escape(item.id)).join(", ") || "none"}.</p>` : ""}
-      ${source.kind === "actor" ? `<button type="button" id="setupUseCurrentActor">Use current actor and completion reviewer</button><button type="button" id="setupUseInputActor">Use input and delivery revision</button><button type="button" id="setupUseEndpointActor">Use endpoint benchmark revision</button>` : ""}
+      ${source.kind === "actor" ? `<button type="button" id="setupUseCurrentActor">Use current actor and completion reviewer</button><button type="button" id="setupUseUpdateActor">Use update-aware user revision</button><button type="button" id="setupUseInputActor">Use input and delivery revision</button><button type="button" id="setupUseEndpointActor">Use endpoint benchmark revision</button>` : ""}
       <form id="setupPublish">${judgeConfig ? `<p>Config digest: <code>${escape(judgeConfig.digest)}</code></p>` : `<label>Revision name<input name="name" value="${escape(source.name)}" required maxlength="200"></label>
       <label>Prompt version<input name="promptVersion" value="${escape(source.promptVersion)}" required maxlength="100"></label>
       <label>Action selection<select name="actorDecisionEngine"><option value="native" ${source.settings.decision ? "" : "selected"}>Codex</option><option value="decisions" ${source.settings.decision ? "selected" : ""}>OpenAI Decisions · GPT-6 Luna</option></select></label>
@@ -64,6 +64,12 @@ export function initializeSetupEditor({ api, root, toast, changed }) {
       root.querySelector('[name="promptTemplate"]').value = definition.promptTemplate;
       root.querySelector("#setupCompletionReviewer").textContent = message;
       toast("Revision staged. Publish with motivating feedback to save it; default promotion remains separate.");
+    };
+    const updateActor = root.querySelector("#setupUseUpdateActor");
+    if (updateActor) updateActor.onclick = () => {
+      stageInputActor(catalog.actorUpdateDefinition, "Pending native visible update discovery revision. Publish and select explicitly; defaults remain unchanged.");
+      delete source.settings.decision;
+      root.querySelector('[name="actorDecisionEngine"]').value = "native";
     };
     const inputActor = root.querySelector("#setupUseInputActor");
     if (inputActor) inputActor.onclick = () => stageInputActor(catalog.actorInputDefinition, "Pending input and delivery revision. Genuine unfinished stopping remains available. Publish with motivating feedback to save it.");

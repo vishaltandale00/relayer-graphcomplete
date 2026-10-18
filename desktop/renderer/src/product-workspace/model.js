@@ -354,3 +354,18 @@ export function presentationInteractionRevision(interactions = [], threadId) {
       + (interaction.queueReason ? `:${interaction.queueReason}` : ""))
     .join(",");
 }
+
+// A pin baseline is navigation metadata, never a read/view receipt.
+export function currentUpdateNotice(state, thread, selection) {
+  const interaction = state.interactions?.find(item => String(item.id) === String(selection.currentInteractionId)
+    && String(item.threadId) === String(thread?.id));
+  const pin = selection.temporalCurrent;
+  if (!interaction || thread?.imported || interaction.inertInvocationCurrent || interaction.inertInvocationSource
+    || pin?.mode !== 'pinned' || String(pin.completionId) !== String(interaction.graphNodeId)) return null;
+  const current = state.currentProjections?.get(String(pin.completionId));
+  if (!current?.temporalFeatures?.projectionUi || current.currentLayerId == null
+    || String(current.currentLayerId) === String(state.visibleLayer?.layer?.id)) return null;
+  return { threadId: thread.id, turnId: interaction.id, completionId: current.completionId,
+    attemptId: interaction.latestAttempt?.id ?? null, revision: current.headRevision, layerId: current.currentLayerId,
+    newUpdate: Number.isSafeInteger(pin.pinnedAtRevision) && current.headRevision > pin.pinnedAtRevision };
+}

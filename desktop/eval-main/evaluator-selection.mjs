@@ -25,7 +25,7 @@ export const completionJudgeSpec = task => task.completionJudgeSetup?.spec ?? ta
 
 // Opt-in participant authority; old actor revisions keep judge-gated stopping.
 export function participantMayStopIncomplete(task, action) {
-  return ["task-actor-v5", "task-actor-v6", "task-actor-v7"].includes(task.actorSetup?.behaviorContract?.id)
+  return ["task-actor-v5", "task-actor-v6", "task-actor-v7", "task-actor-v9"].includes(task.actorSetup?.behaviorContract?.id)
     && task.actorSetup.behaviorContract.participantMayStopIncomplete === true
     && ["satisfied", "abandoned"].includes(action?.reason)
     && ["incomplete", "uncertain"].includes(action?.endpointStatus)

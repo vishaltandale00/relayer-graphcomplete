@@ -1,0 +1,154 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-18T20:55:52.764072+00:00",
+  "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
+  "sourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
+  "sourceManifest": "source.json",
+  "scopeQualification": "Checks ran against these frozen source bytes after rebasing onto main. Generated source/verification/review records are excluded from the source digest; no live model rerun is claimed for this snapshot.",
+  "checks": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/check.log",
+        "sha256": "d16f3d3516e25890ff1d53ea91bcea0ec20c5a7e7ad4b7f39ca64e8721a02cdf"
+      },
+      "scope": "Full deterministic repository pipeline; aggregate process exit 0, native groups and Vitest/Python/doc gates verified in the log.",
+      "results": {
+        "vitest": {
+          "filesPassed": 340,
+          "filesSkipped": 1,
+          "testsPassed": 4560,
+          "testsSkipped": 3
+        },
+        "separateCodexSecretBoundary": {
+          "testsPassed": 2
+        },
+        "python": {
+          "testsPassed": 100
+        },
+        "nativeAndCrashRecovery": "Every reported group passed; aggregate exit0.",
+        "receiptsAndReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/build-final.log",
+        "sha256": "d03f1927407cef0e4f8cd337e8306ab8cf20ce8ca14d36589814716ae9b3a1b3"
+      },
+      "scope": "Warm native source build, TypeScript and workspace packages."
+    },
+    {
+      "command": "focused six production/planner test files",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/focused-final.log",
+        "sha256": "c94efd17cb48bebee10075e6dc28c55fd8e7c36f88e34c81974c970eed8d3cfa"
+      },
+      "passed": 338
+    },
+    {
+      "command": "npm run test:eval-web",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/eval-web.log",
+        "sha256": "1df72a3034889982044d3c172e2ff75bf77c4c71f7d57a5222569a3b12aefcc2"
+      },
+      "scope": "All assembled browser chapters pass, including explicit native v12 publication; native/authored live-answer fixture paths; trusted chrome and authored ID collision; delayed latest-navigation/Return/final-refresh/paint and unsent draft preservation. Fixture inference only."
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/compiled.log",
+        "sha256": "068e1f1e1905854565e9a4db966350a7967bd15fbbcab4f57e82600d4b584881"
+      },
+      "passed": 12
+    },
+    {
+      "command": "npm run evidence:share-preview",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/share-preview.log",
+        "sha256": "f2f32a620dc48402f8cc14535c4085fd2a4b95ac9ed9dbb5378055361e7f050c"
+      },
+      "scope": "Actual Electron light/dark capture; positive passed receipt with cleanup."
+    },
+    {
+      "command": "documented Follow-up annotation Electron capture",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-20261018/followup.log",
+        "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2"
+      },
+      "scope": "Actual A/B/C/D capture, context-draft API, reload and positive cleanup result; zero paid inference. Existing project-sidebar-read fixture warnings remain in the log."
+    }
+  ],
+  "nativeBuild": {
+    "mode": "Source rebuild with compatible warm Cargo/Ladybug outputs; no cold provisioning.",
+    "historicalCacheRejection": "Earlier prebuilt Ladybug bundle had a Cargo.lock identity mismatch and was not restored. Current native binaries were rebuilt from rebased Rust source.",
+    "runtimeBinaries": [
+      {
+        "name": "relayer-app-server",
+        "sha256": "dfcde31a363ba6e8f7a06b6dd5dd972e8ff0495ca084d98bedf4f58549a8ac99"
+      },
+      {
+        "name": "relayer-graph-server",
+        "sha256": "2fa13b554467c5de3858146a3a303fc87cb59572841917e03696cbfad8d4764b"
+      }
+    ]
+  },
+  "failuresRetained": {
+    "historicalSnapshot": {
+      "sourceDigest": "078958472ff897464d937ee72721bbeb0ce97b945b16410ffacf8414f4f1e281",
+      "fullCheck": [
+        {
+          "command": "npm run check",
+          "exitCode": 1,
+          "evidence": {
+            "path": ".relayer/current-navigation-diagnosis-20261018/check-handoff.log",
+            "sha256": "285b0ebba2692096ad102d497eae80ccf042f72a6a7b3d6f40f9d72cbc909a33"
+          },
+          "runtimeResult": "All Rust, clippy/format, package, TS, 4548 Vitest tests, 2 separate secret-boundary tests, 100 Python tests and receipt gates passed; 3 Vitest tests skipped.",
+          "failure": "Final PRD readability gate: one 26-word sentence. Preserved outer failure; not a pass for npm run check.",
+          "followup": "Only PRD semicolon changed to a sentence break; no product, test or runner behavior changed. Re-ran the exact failed documentation gate below instead of repeating runtime proof."
+        }
+      ],
+      "otherFailures": [
+        "Initial stale visual receipts",
+        "Compiled runtime target/debug ENOENT setup",
+        "Build cleanup overlapped browser startup; generated dependencies restored before rerun",
+        "Expected red cue style and navigation synchronization reproductions",
+        "Busy cleanup test fixture initially injected unsupported toast callback; corrected to real production DOM",
+        "Earlier and final full-check readability failures"
+      ]
+    },
+    "mergePreparation": [
+      {
+        "evidence": {
+          "path": ".relayer/current-update-pr-20261018/trusted-chrome-red.log",
+          "sha256": "a00ef2666115104b3d4a336b3a714107a6f2b87fd91a50e8fcca9996d1b855b6"
+        },
+        "outcome": "Expected authored-collision failure plus cargo ENOENT from an incomplete test PATH; not a pass. PATH was corrected before planner red/green."
+      },
+      {
+        "evidence": {
+          "path": ".relayer/current-update-pr-20261018/mapping-red.log",
+          "sha256": "f8ac7a4aecd48d23ed189d7182b47b5bc198a699c3edd561abda2368863f43bf"
+        },
+        "outcome": "Two expected production-owner mapping failures; other 91 planner cases passed. Both mappings repaired before final focused/full checks."
+      }
+    ]
+  },
+  "historicalLive": {
+    "record": "live-20261018/confirmation.json",
+    "baseCommit": "24de17f22db3df8c4d6b5bd162c269964881be3a",
+    "sourceDigest": "078958472ff897464d937ee72721bbeb0ce97b945b16410ffacf8414f4f1e281",
+    "finding": "One controlled native model run noticed the visible new-update cue while pinned, requested a fresh decision after a certified non-dispatch refusal, opened Current and described its new facts.",
+    "limits": "Pre-rebase evidence; one controlled opportunity; fixture candidate; no natural discovery rate, exhaustive observation, calibrated quality or causal claim. No paid inference in merge-preparation checks."
+  },
+  "hostedCI": "Exact-head check and freshness required after publication; hosted status is reported by the PR, not inferred from local results.",
+  "review": "review.json; source review assertions and independent execution qualifications remain separate."
+}

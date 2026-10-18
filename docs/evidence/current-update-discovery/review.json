@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
+  "sourceManifest": "source.json",
+  "sourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
+  "verificationSha256": "6da5c210b7db67f1547fe8e8378dd72026e7433601e85c599bf3db6f6501bcd9",
+  "assertions": [
+    {
+      "reviewer": "design_authority_review",
+      "scope": "Rebased UI semantics, authority and checkpoint mapping; paused/interrupted Resume attempt replacement; all six fresh social/annotation images and receipt bindings; historical live qualification; final execution evidence/hash audit.",
+      "verdict": "PASS",
+      "unresolvedFindings": [],
+      "executionQualification": "Independently audited all referenced log hashes and inner results; did not execute tests or inference independently."
+    },
+    {
+      "reviewer": "actor_renderer_review",
+      "scope": "Native v12/v9/v5 and predecessor/default immutability, visible pinned/current separation, trusted chrome recognition/rebind, authored collision exclusion, navigation wait, service recording, setup UI, production CI mapping; promoted historical live evidence fidelity. Final full-check/build/focused/browser/compiled log hashes and inner results.",
+      "verdict": "PASS for frozen source, checkpoint mapping and inspected local/historical evidence",
+      "unresolvedFindings": [],
+      "executionQualification": "Independently read and hashed all 10 verification log references and inner results; did not execute tests or inference independently."
+    }
+  ],
+  "hostedQualification": "Exact-head hosted check and merge-freshness-status required after publication. Local results do not imply hosted success.",
+  "liveQualification": "One controlled historical live opportunity on base24de17f2. Not live proof of the rebased source, natural discovery rate, calibrated quality, causal improvement, exhaustive observation or release readiness.",
+  "excludedGeneratedEvidence": [
+    "docs/evidence/current-update-discovery/review.json",
+    "docs/evidence/current-update-discovery/source.json",
+    "docs/evidence/current-update-discovery/verification.json"
+  ]
+}

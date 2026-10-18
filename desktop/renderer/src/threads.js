@@ -31,6 +31,7 @@ import {
   setSettingsTab,
 } from "./navigation.js";
 import {
+  currentUpdateNotice,
   appendLayerPath,
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
@@ -733,6 +734,7 @@ export async function refreshState(
         completionId: projectionState.completionId,
         revision: projectionState.headRevision,
         mode: "pinned",
+        ...(viewState.temporalCurrent.pinnedAtRevision === undefined ? {} : { pinnedAtRevision: viewState.temporalCurrent.pinnedAtRevision }),
       };
     }
     if (changed && wasFollowing && projectionState.currentLayerId != null && selected) {
@@ -1369,6 +1371,43 @@ export async function navigateImportedInvocationHistory(historyEntry) {
   return retainInvocationPresentation(thread, source, current.interaction, current.layers, origin, null, retained);
 }
 
+export async function openLatestCurrent(scope) {
+  const available = () => currentUpdateNotice(appState,
+    appState.threads.find(thread => String(thread.id) === String(viewState.currentThreadId)), viewState);
+  const sameScope = notice => notice && String(notice.threadId) === String(scope.threadId)
+    && String(notice.turnId) === String(scope.turnId) && String(notice.completionId) === String(scope.completionId)
+    && String(notice.attemptId) === String(scope.attemptId);
+  if (!sameScope(available())) return false;
+  cancelAutomaticTurn();
+  recordCurrentNavigation();
+  supersedePendingHistory({ presentationChanged: true });
+  const pending = layerNavigationCoordinator.begin({ threadId: viewState.currentThreadId,
+    interactionId: viewState.currentInteractionId, layerId: appState.visibleLayer?.layer?.id, layerPath: viewState.layerPath });
+  const owns = () => layerNavigationCoordinator.isCurrent(pending, { threadId: viewState.currentThreadId,
+    interactionId: viewState.currentInteractionId, layerId: appState.visibleLayer?.layer?.id });
+  for (let count = 0; count < 3; count++) {
+    await refreshState(scope.threadId);
+    const notice = available();
+    if (!owns() || !sameScope(notice)) return false;
+    const identity = { threadId: notice.threadId, turnId: notice.turnId, layerId: notice.layerId };
+    const layer = validateResolvedLayer(identity, await request(
+      `/api/threads/${encodeURIComponent(identity.threadId)}/interactions/${encodeURIComponent(identity.turnId)}/layers/${encodeURIComponent(identity.layerId)}`));
+    await refreshState(scope.threadId);
+    if (!owns() || !sameScope(available())) return false;
+    const latest = available();
+    if (String(latest.layerId) !== String(notice.layerId) || latest.revision !== notice.revision) continue;
+    const interaction = appState.interactions.find(item => String(item.id) === String(scope.turnId));
+    refreshGate.invalidate();
+    hydrateWorkspace(interaction, layer, { layerPath: layerPathForVisibleLayer([], interaction, layer),
+      temporalCurrent: { completionId: notice.completionId, revision: notice.revision, mode: "following" } });
+    recordCurrentNavigation("push");
+    renderThread();
+    schedulePendingRefresh(scope.threadId);
+    return true;
+  }
+  throw new Error("The update changed while opening. Try viewing the latest update again.");
+}
+
 export async function navigateLayer(layerId, navigation = {}) {
   if (navigation.invocationOrigin) {
     const origin = viewState.invocationOrigin;
@@ -1456,6 +1495,7 @@ export async function navigateLayer(layerId, navigation = {}) {
         completionId: projection.completionId,
         revision: projection.headRevision,
         mode: "pinned",
+        pinnedAtRevision: viewState.temporalCurrent?.pinnedAtRevision ?? projection.headRevision,
       },
     });
     recordCurrentNavigation("push");

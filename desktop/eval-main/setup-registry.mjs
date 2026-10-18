@@ -1,3 +1,4 @@
+import { UPDATE_AWARE_ACTOR_PROMPT_VERSION, UPDATE_AWARE_OBSERVATION_CONTRACT, ACTOR_PROMPT_V12_GUIDANCE } from "./task-actor.mjs";
 import { COMPLETION_JUDGE_SPEC, COMPLETION_JUDGE_SCHEMA, COMPLETION_JUDGE_EVIDENCE_CONTRACT, completionEvidenceContract, validateCompletionJudgeSpec } from "./task-completion-judge.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
@@ -80,6 +81,13 @@ export function defaultActorSetup() {
   return { kind: "actor", name: "Low-effort user", promptVersion: ACTOR_PROMPT_VERSION, promptTemplate: ACTOR_PROMPT_TEMPLATE + "\n" + ACTOR_PROMPT_V8_GUIDANCE + "\n" + ACTOR_PROMPT_V9_GUIDANCE,
     settings: actorConfiguration(), behaviorContract: { id: "task-actor-v6", participantMayStopIncomplete: true, actionSchema: copy(ACTOR_ACTION_SCHEMA), observationContract: copy(ACTOR_OBSERVATION_CONTRACT), completionJudge: copy(COMPLETION_JUDGE_SPEC) } };
 }
+export function updateAwareActorSetup() {
+  const base = defaultActorSetup();
+  return { ...base, name: "User with visible update discovery", promptVersion: UPDATE_AWARE_ACTOR_PROMPT_VERSION,
+    promptTemplate: base.promptTemplate + "\n" + ACTOR_PROMPT_V12_GUIDANCE,
+    settings: { ...base.settings, promptVersion: UPDATE_AWARE_ACTOR_PROMPT_VERSION },
+    behaviorContract: { ...base.behaviorContract, id: "task-actor-v9", observationContract: copy(UPDATE_AWARE_OBSERVATION_CONTRACT) } };
+}
 export function inputActorSetup() {
   const base = defaultActorSetup();
   return { ...base, name: "Task user with input delivery", promptVersion: INPUT_ACTOR_PROMPT_VERSION,
@@ -130,9 +138,10 @@ function normalize(input) {
     const legacyContract = copy(priorContract);
     legacyContract.actionSchema.properties.reason = { type: "string" };
     // Publication may upgrade a known historical contract; stored revisions stay immutable.
-    if (![endpointBenchmarkActorSetup().behaviorContract, inputActorSetup().behaviorContract, behaviorContract, settledContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
+    if (![updateAwareActorSetup().behaviorContract, endpointBenchmarkActorSetup().behaviorContract, inputActorSetup().behaviorContract, behaviorContract, settledContract, guidedContract, nativeMenuContract, priorContract, legacyContract].some(contract => JSON.stringify(input.behaviorContract) === JSON.stringify(contract))) fail("Actor behavior authority contract is not editable.");
     const settings = actorConfiguration(input.settings);
-    const contract = input.promptVersion === ENDPOINT_ACTOR_PROMPT_VERSION ? endpointBenchmarkActorSetup().behaviorContract : input.promptVersion === INPUT_ACTOR_PROMPT_VERSION ? inputActorSetup().behaviorContract : input.promptVersion === ACTOR_PROMPT_VERSION ? behaviorContract : copy(input.behaviorContract);
+    const contract = input.promptVersion === UPDATE_AWARE_ACTOR_PROMPT_VERSION ? updateAwareActorSetup().behaviorContract : input.promptVersion === ENDPOINT_ACTOR_PROMPT_VERSION ? endpointBenchmarkActorSetup().behaviorContract : input.promptVersion === INPUT_ACTOR_PROMPT_VERSION ? inputActorSetup().behaviorContract : input.promptVersion === ACTOR_PROMPT_VERSION ? behaviorContract : copy(input.behaviorContract);
+    if (contract.id === "task-actor-v9" && settings.decision) fail("The update-aware actor revision requires native Codex execution.");
     if (["task-actor-v7", "task-actor-v8"].includes(contract.id) && settings.decision && settings.decision.contractId !== "openai-decisions-codex-text-v2") fail("The input actor revision requires Decisions execution v2.");
     return { kind: input.kind, name: input.name.trim(), promptVersion: input.promptVersion,
       promptTemplate: template(input.promptTemplate, ["request", "endpoint", "privateBrief", "exploration", "meticulousness"]),
@@ -202,7 +211,7 @@ export class SetupRegistry {
   selected(kind, id) {
     return this.get(id || this.state.promotions.findLast((item) => item.kind === kind)?.revisionId || this.state.revisions.find((item) => item.kind === kind)?.id, kind);
   }
-  catalog() { return { ...copy(this.state), actorDefinition: defaultActorSetup(), actorInputDefinition: inputActorSetup(), actorEndpointDefinition: endpointBenchmarkActorSetup(), judgeConfigs: this.judgeConfigs(), completionJudgeConfigs: this.completionJudgeConfigs() }; }
+  catalog() { return { ...copy(this.state), actorDefinition: defaultActorSetup(), actorUpdateDefinition: updateAwareActorSetup(), actorInputDefinition: inputActorSetup(), actorEndpointDefinition: endpointBenchmarkActorSetup(), judgeConfigs: this.judgeConfigs(), completionJudgeConfigs: this.completionJudgeConfigs() }; }
   judgeConfigs() { return copy(judgeConfigurations(this.judgeConfigDirectory)); }
   completionJudgeConfigs() { return copy(completionJudgeConfigurations(this.completionJudgeConfigDirectory)); }
   publishCompletionJudgeConfig(input) { return this.publishConfig({ ...input, kind: "completion-judge" }); }

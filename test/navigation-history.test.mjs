@@ -417,3 +417,12 @@ describe("latest request gate", () => {
     expect(gate.isCurrent(gate.begin())).toBe(true);
   });
 });
+
+it('round-trips a pin baseline without inventing read receipts for legacy histories', () => {
+  const base = entry({ temporalCurrent: { completionId: 50, revision: 3, mode: 'pinned' } });
+  expect(normalizeNavigationEntry(base).temporalCurrent).not.toHaveProperty('pinnedAtRevision');
+  const pinned = normalizeNavigationEntry({ ...base, temporalCurrent: { ...base.temporalCurrent, pinnedAtRevision: 1 } });
+  expect(normalizeNavigationEntry(JSON.parse(JSON.stringify(pinned)))).toEqual(pinned);
+  for (const value of [-1, 4, 1.5])
+    expect(() => normalizeNavigationEntry({ ...base, temporalCurrent: { ...base.temporalCurrent, pinnedAtRevision: value } })).toThrow();
+});

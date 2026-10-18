@@ -1136,3 +1136,18 @@ it("derives fill capability from actual editable DOM types without expanding wor
   expect(taskActorWorkingControlAllowed(document.getElementById("range"), "fill")).toBe(false);
   expect(taskActorWorkingControlAllowed(document.getElementById("text"), "fill")).toBe(true);
 });
+
+it('keeps pinned observations distinct from actually viewed Current and then captures the selected latest update', async () => {
+  let count = 0;
+  const f = await fixture({ busy: true, actorSetup: setupDefinitions.updateAwareActorSetup(),
+    observeCurrent: async () => { const capture = currentCapture(++count); return count === 1 ? { ...capture, pointer: { ...capture.pointer, viewingCurrent: false }, observation: { ...capture.observation, text: 'Earlier view with visible latest-update cue' } } : { ...capture, pointer: { ...capture.pointer, viewingCurrent: true } }; },
+    observe: async (_observation, _signal, turns) => { if (count === 2)
+      turns[0].completionStatus = 'accepted'; return { comment: 'Observed actual displayed pixels' }; },
+    decide: async () => action('finish', { reason: 'satisfied', satisfaction: 3 }) });
+  await f.done;
+  const events = f.tasks.get(f.id).events;
+  expect(events.filter(e => e.kind === 'actor_observation' && e.phase === 'pinned')).toHaveLength(1);
+  expect(events.filter(e => e.kind === 'actor_observation' && e.phase === 'current')).toHaveLength(1);
+  expect(events.find(e => e.kind === 'actor_current_not_viewed')).toMatchObject({ reason: 'pinned_navigation' });
+  expect(events.find(e => e.kind === 'actor_current_gap')).toMatchObject({ missingRevisions: 1 });
+});

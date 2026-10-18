@@ -20,7 +20,7 @@ export function taskActorPresentationReady({ expected, presentation = globalThis
 }
 
 // Correlation only: never read hidden layers or a child's graph inventory.
-export function taskActorCurrentIdentity({ expected, presentation = globalThis.window?.__taskActorPresentation, document = globalThis.document }) {
+export function taskActorCurrentIdentity({ expected, presentation = globalThis.window?.__taskActorPresentation, document = globalThis.document, pinnedObservation = false }) {
   const p = presentation;
   const pointer = p?.currentPointer;
   if (String(p?.threadId) !== String(expected.threadId) || String(p?.turnId) !== String(expected.turnId)
@@ -28,13 +28,25 @@ export function taskActorCurrentIdentity({ expected, presentation = globalThis.w
     || !Number.isFinite(p?.observedAt) || !Number.isFinite(expected.submittedAt)
     || p.observedAt < expected.submittedAt
     || (expected.attemptId != null && String(p.attemptId) !== String(expected.attemptId))
-    || pointer?.mode !== "following" || !Number.isSafeInteger(pointer.revision) || pointer.revision < 1
-    || pointer.layerId == null || String(pointer.layerId) !== String(p.layerId)) return null;
+    || !Number.isSafeInteger(pointer?.revision) || pointer.revision < 1 || p.layerId == null
+    || !(pointer.mode === "following" && String(pointer.layerId) === String(p.layerId)
+      || pinnedObservation && pointer.mode === "pinned")) return null;
   // Delivery can settle without a graph Advance. Only rendered status enters
   // this dedup identity; never field values, hidden content or graph inventory.
   const answers = [];
+  let visibleUpdate = null;
   function collect(root) {
     for (const element of root?.querySelectorAll("*") ?? []) {
+      if (pinnedObservation && element.tagName === "BUTTON" && element.getRootNode() === element.ownerDocument
+        && element === element.ownerDocument.querySelector(".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate")) {
+        const rect = element.getBoundingClientRect();
+        const x = Math.max(0, rect.left) + Math.min(rect.width, document.defaultView.innerWidth - Math.max(0, rect.left)) / 2;
+        const y = Math.max(0, rect.top) + Math.min(rect.height, document.defaultView.innerHeight - Math.max(0, rect.top)) / 2;
+        const hit = element.getRootNode().elementFromPoint?.(x, y);
+        if (rect.width > 0 && rect.height > 0 && (hit === element || element.contains(hit))) {
+          visibleUpdate = [element.dataset.currentUpdateScope, element.dataset.currentUpdateRevision, element.textContent, element.disabled];
+        }
+      }
       if (element.matches('[data-input-control-role="answer"]')) {
         const rect = element.getBoundingClientRect();
         const x = Math.max(0, rect.left) + Math.min(rect.width, document.defaultView.innerWidth - Math.max(0, rect.left)) / 2;
@@ -52,11 +64,20 @@ export function taskActorCurrentIdentity({ expected, presentation = globalThis.w
   return { threadId: p.threadId, turnId: p.turnId, attemptId: p.attemptId ?? null,
     revision: pointer.revision, layerId: p.layerId, observedAt: p.observedAt,
     completionStatus: p.completionStatus, selectedNodeId: p.selectedNodeId, navigationPath: p.navigationPath,
-    answerPresentation: JSON.stringify(answers) };
+    answerPresentation: JSON.stringify(answers),
+    ...(pinnedObservation ? { viewingCurrent: pointer.mode === "following" && String(pointer.layerId) === String(p.layerId),
+      visibleUpdate: JSON.stringify(visibleUpdate) } : {}) };
 }
 
 export function taskActorCurrentUnchanged(pointer, previous) {
-  return Boolean(previous && pointer.revision === previous.revision
+  if (pointer.viewingCurrent === false) return Boolean(previous?.viewingCurrent === false
+    && String(pointer.threadId) === String(previous.threadId) && String(pointer.turnId) === String(previous.turnId)
+    && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.layerId) === String(previous.layerId)
+    && pointer.completionStatus === previous.completionStatus && pointer.visibleUpdate === previous.visibleUpdate
+    && String(pointer.selectedNodeId) === String(previous.selectedNodeId)
+    && JSON.stringify(pointer.navigationPath) === JSON.stringify(previous.navigationPath)
+    && pointer.answerPresentation === previous.answerPresentation);
+  return Boolean(previous && pointer.viewingCurrent === previous.viewingCurrent && pointer.revision === previous.revision
     && String(pointer.threadId) === String(previous.threadId)
     && String(pointer.attemptId) === String(previous.attemptId) && String(pointer.turnId) === String(previous.turnId)
     && pointer.completionStatus === previous.completionStatus
@@ -74,6 +95,8 @@ export function taskActorFillCapability(element) {
 
 export function taskActorWorkingControlAllowed(element, kind) {
   if (kind === "scroll") return true;
+  if (kind === "click" && element?.tagName === "BUTTON" && element.getRootNode() === element.ownerDocument
+    && element === element.ownerDocument.querySelector(".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate")) return true;
   const live = element?.closest?.("[data-live-answer-scope]");
   if (live) {
     const text = element.matches("textarea") || (element.matches("input")
@@ -91,7 +114,10 @@ export function taskActorControlIdentity(element) {
   const p = element.ownerDocument.defaultView.__taskActorPresentation;
   if (!p?.threadId || !p?.turnId || !p?.layerId) return null;
   let kind; let keys;
-  if (element.matches?.(".workspace-layout #nodeLayer .graph-node[data-node]")) {
+  if (element.tagName === "BUTTON" && element.getRootNode() === element.ownerDocument
+    && element === element.ownerDocument.querySelector(".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate")) {
+    kind = "current-update"; keys = ["data-current-update-scope", "data-current-update-revision", "aria-label"];
+  } else if (element.matches?.(".workspace-layout #nodeLayer .graph-node[data-node]")) {
     kind = "node"; keys = ["data-node", "aria-label"];
   } else if (p.selectedNodeId != null && element.matches?.(".workspace-layout #detailActions button.action-control[data-action-id]")) {
     if (!element.dataset.actionId || element.dataset.reviewActionId !== element.dataset.actionId
@@ -127,7 +153,7 @@ export function taskActorRebindControl(identity, document = globalThis.document)
       && Object.entries(identity.attributes).every(([key, value]) => element.getAttribute(key) === value));
     return matches.length === 1 ? matches[0] : null;
   }
-  const selector = ({ node: ".workspace-layout #nodeLayer .graph-node[data-node]",
+  const selector = ({ "current-update": ".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate", node: ".workspace-layout #nodeLayer .graph-node[data-node]",
     action: ".workspace-layout #detailActions button.action-control[data-action-id]",
     breadcrumb: ".workspace-layout #workspaceBreadcrumb button.breadcrumb-segment[data-review-path-index]" })[identity.kind];
   if (!selector) return null;
@@ -259,8 +285,9 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
     page.on("popup", (popup) => { void popup.close(); });
     await page.goto(surface.url);
     await page.locator(".workspace-layout").waitFor({ state: "visible" });
+    const pinnedObservation = observationContract?.id === "task-actor-observation-v5";
     const listObservation = observationContract?.id === "task-actor-observation-v4";
-    const nativeMenuObservation = ["task-actor-observation-v2", "task-actor-observation-v3", "task-actor-observation-v4"].includes(observationContract?.id)
+    const nativeMenuObservation = ["task-actor-observation-v2", "task-actor-observation-v3", "task-actor-observation-v4", "task-actor-observation-v5"].includes(observationContract?.id)
       && observationContract.optionObservation === "opened-native-select-accessibility";
     let openedSelect = null;
     let openedMenuSignature = null;
@@ -274,7 +301,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
       handles = new Map();
       controlIdentities = new Map();
       menuAuthorities = new Map();
-      const snapshot = await page.evaluateHandle(async working => {
+      const snapshot = await page.evaluateHandle(async ({ working, pinnedObservation }) => {
         const { isVisibleElement, accessibleControlName } = await import("/src/review-tools.js");
         const { compiledNodeDetailReviewControls } = await import("/src/product-workspace/node-detail-runtime.js");
         const authoredNavigation = new Set(compiledNodeDetailReviewControls(document).filter(control => control.kind === "navigate-action").map(control => control.element));
@@ -311,7 +338,8 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         let controls = visible.filter((element) => (element.matches("button,input:not([type=hidden]):not([type=file]),textarea,select,[role=button],[role=tab],summary") || authoredNavigation.has(element)) && !element.disabled && element.getAttribute("aria-disabled") !== "true");
         if (working) controls = controls.filter(element => {
           const live = element.closest?.("[data-live-answer-scope]");
-          return authoredNavigation.has(element) || (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole)))
+          return (pinnedObservation && element.tagName === "BUTTON" && element.getRootNode() === element.ownerDocument
+            && element === element.ownerDocument.querySelector(".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate")) || authoredNavigation.has(element) || (live && (element.matches("textarea,input,select") || ["answer", "option"].includes(element.dataset.inputControlRole)))
             || element.matches("#nodeLayer .graph-node[data-node],#detailActions button[data-review-kind=navigate-action],#workspaceBreadcrumb button[data-review-kind=layer-navigation],#closeInspector");
         });
         // Pixels are the content observation. Accessible names identify controls;
@@ -319,7 +347,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         const text = "Use the attached screenshot and these currently visible controls.";
         const inspector = document.getElementById("inspectorContent");
         return { text, canScroll: Boolean(inspector && visibleRect(inspector) && inspector.scrollHeight > inspector.clientHeight + 1), elements: controls, controls: controls.map((element) => ({ name: actorControlName(element), role: element.getAttribute("role") || element.tagName.toLowerCase() })) };
-      }, working);
+      }, { working, pinnedObservation });
       try {
         const text = await (await snapshot.getProperty("text")).jsonValue();
         const controls = await (await snapshot.getProperty("controls")).jsonValue();
@@ -361,28 +389,31 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
         return abortable(signal, async () => {
           signal?.throwIfAborted();
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-          const pointer = await page.evaluate(taskActorCurrentIdentity, { expected });
+          const pointer = await page.evaluate(taskActorCurrentIdentity, { expected, pinnedObservation });
           if (!pointer || (expected.workingOnly && ["accepted", "failed", "stopped", "not_started"].includes(pointer.completionStatus)) || taskActorCurrentUnchanged(pointer, previous)) return null;
           const observation = await observe(undefined, true);
           await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-          const after = await page.evaluate(taskActorCurrentIdentity, { expected });
+          const after = await page.evaluate(taskActorCurrentIdentity, { expected, pinnedObservation });
           // A paint, selection or pointer change during capture makes the pixels
           // unbound. Keep the gap; never relabel them as an earlier revision.
           if (JSON.stringify(pointer) !== JSON.stringify(after)) return { kind: "gap", pointer, reason: "presentation_changed_during_capture" };
           return { kind: "observation", pointer, observation: { ...observation,
-            text: "Current working update. You may answer visible questions using the explicit Answer control. Send starts a later interaction after settlement.",
-            currentUpdate: { revision: pointer.revision, observedAt: pointer.observedAt, completionStatus: pointer.completionStatus },
+            text: pointer.viewingCurrent === false
+              ? "You are browsing earlier material while work continues. Use the screenshot and visible controls; a visible update announcement does not reveal its contents."
+              : "Current working update. You may answer visible questions using the explicit Answer control. Send starts a later interaction after settlement.",
+            ...(pointer.viewingCurrent === false ? { displayedView: "historical" }
+              : { currentUpdate: { revision: pointer.revision, observedAt: pointer.observedAt, completionStatus: pointer.completionStatus } }),
             availableActions: observation.availableActions.filter(kind => ["click", "fill", "select", ...(listObservation ? ["deselect"] : []), "scroll"].includes(kind)) } };
         });
       },
       async observe(expected) { try { return await observe(expected); } catch (error) { await diagnostics?.operationError("observe", error); throw error; } },
       async act(action, correlation = {}) {
         const actionId = randomUUID();
-        let stage = "preflight"; let diagnosticTarget = null;
+        let stage = "preflight"; let diagnosticTarget = null; let waitForCurrentNavigation = false;
         await diagnostics?.record("action_started", { actionId, actionEventId: correlation.actionEventId ?? null, observationEventId: correlation.observationEventId ?? null, kind: action.kind, ref: action.ref ?? null });
         try {
         if (correlation.current) {
-          const now = await page.evaluate(taskActorCurrentIdentity, { expected: correlation.current.expected });
+          const now = await page.evaluate(taskActorCurrentIdentity, { expected: correlation.current.expected, pinnedObservation });
           if (!now || ["revision", "layerId", "attemptId", "selectedNodeId"].some(key => String(now[key]) !== String(correlation.current.pointer[key]))
             || JSON.stringify(now.navigationPath) !== JSON.stringify(correlation.current.pointer.navigationPath)) {
             throw Object.assign(new Error("The working question changed before dispatch."), { code: "actor_control_stale", actionDispatched: false });
@@ -414,6 +445,7 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
           // Renderer refresh replaces graph and navigation controls during model latency.
           // Rebind only exact control identity in the same presentation, never by name.
           const identity = controlIdentities.get(action.ref);
+          waitForCurrentNavigation = pinnedObservation && action.kind === "click" && identity?.kind === "current-update";
           if (handle && identity && !await handle.evaluate(element => element.isConnected)) {
             const replacement = await page.evaluateHandle(identity.kind === "authored-navigation" ? taskActorAuthoredNavigation : taskActorRebindControl, identity);
             const rebound = replacement.asElement();
@@ -515,6 +547,10 @@ export async function openTaskActorBrowser({ tasks, sessionId, productSession, b
             if (openedSelect) { await openedSelect.dispose(); openedSelect = null; }
           }
           else throw new Error("Unknown actor browser action.");
+        }
+        if (waitForCurrentNavigation) {
+          stage = "wait_for_current_navigation";
+          await page.waitForFunction(() => document.querySelector("#workspaceBreadcrumb")?.getAttribute("aria-busy") !== "true", null, { timeout: 30000 });
         }
         stage = "wait_for_render";
         await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
