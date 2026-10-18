@@ -358,6 +358,15 @@ export function updateCreateThreadAvailability() {
   });
 }
 
+// Fresh pinning records the known head; legacy pinned absence stays unknown.
+function pinnedTemporalCurrent(current) {
+  return current == null ? current : {
+    ...current,
+    mode: "pinned",
+    ...(current.mode === "following" ? { pinnedAtRevision: current.revision } : {}),
+  };
+}
+
 function currentNavigationEntry() {
   return navigationEntryFromView({
     threadId: viewState.currentThreadId,
@@ -984,6 +993,7 @@ export function selectTurnById(interactionId, { responseRoot = false, threadId =
       completionId: projection.completionId,
       revision: projection.headRevision,
       mode: "pinned",
+      pinnedAtRevision: projection.headRevision,
     },
   });
   recordCurrentNavigation("push");
@@ -1326,7 +1336,7 @@ function retainedInvocationOrigin(thread, source, call, resultId, kind) {
   if (!entry) return null;
   const sourceEntry = { ...entry, selectedNodeId: sourceNodeId };
   delete sourceEntry.invocationOrigin;
-  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = pinnedTemporalCurrent(sourceEntry.temporalCurrent);
   const layer = String(appState.visibleLayer?.layer?.id) === String(presentingLayerId) ? appState.visibleLayer
     : String(source.completionOutput?.rootLayer?.layer?.id) === String(presentingLayerId) ? source.completionOutput.rootLayer
       : acceptedLayerCache.get({ threadId: thread.id, turnId: source.id, layerId: presentingLayerId });
@@ -1495,7 +1505,9 @@ export async function navigateLayer(layerId, navigation = {}) {
         completionId: projection.completionId,
         revision: projection.headRevision,
         mode: "pinned",
-        pinnedAtRevision: viewState.temporalCurrent?.pinnedAtRevision ?? projection.headRevision,
+        pinnedAtRevision: String(viewState.temporalCurrent?.completionId) === String(projection.completionId)
+          ? viewState.temporalCurrent?.pinnedAtRevision ?? projection.headRevision
+          : projection.headRevision,
       },
     });
     recordCurrentNavigation("push");
@@ -1784,7 +1796,7 @@ export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
     renderSidebar();
     const restoredEntry = resolved.entry.temporalCurrent == null ? resolved.entry : {
       ...resolved.entry,
-      temporalCurrent: { ...resolved.entry.temporalCurrent, mode: "pinned" },
+      temporalCurrent: pinnedTemporalCurrent(resolved.entry.temporalCurrent),
     };
     viewState.temporalCurrent = restoredEntry.temporalCurrent;
     navigationHistory.replaceCurrent(restoredEntry);
@@ -1838,7 +1850,7 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
   // Capture the clicked occurrence before asynchronous execution or browsing.
   let sourceEntry = { ...navigationHistory.current, selectedNodeId: action.sourceNodeId };
   delete sourceEntry.invocationOrigin;
-  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = pinnedTemporalCurrent(sourceEntry.temporalCurrent);
   let invocationSource = {
     origin: { sourceEntry, actionId: action.id, invocationKey, sourceNodeId: action.sourceNodeId,
       presentingLayerId: invocationBody.presentingLayerId },
@@ -1861,7 +1873,7 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     }) : null;
     if (sourceEntry) {
       sourceEntry = { ...sourceEntry }; delete sourceEntry.invocationOrigin;
-      if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+      if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = pinnedTemporalCurrent(sourceEntry.temporalCurrent);
     }
     // A reservation retains its original presenting Layer. Unknown session paths
     // cannot be substituted with the currently visible occurrence.

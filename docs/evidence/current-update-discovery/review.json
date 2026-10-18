@@ -2,22 +2,22 @@
   "schemaVersion": 1,
   "baseCommit": "a798598399c23b3842d2a4849f6ead22db06a4c8",
   "sourceManifest": "source.json",
-  "sourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
-  "verificationSha256": "6da5c210b7db67f1547fe8e8378dd72026e7433601e85c599bf3db6f6501bcd9",
+  "sourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+  "verificationSha256": "4183954812479300f5fcda60169c15b37a0d546ac56f752dac27c695a8f3b2d9",
   "assertions": [
     {
       "reviewer": "design_authority_review",
-      "scope": "Rebased UI semantics, authority and checkpoint mapping; paused/interrupted Resume attempt replacement; all six fresh social/annotation images and receipt bindings; historical live qualification; final execution evidence/hash audit.",
-      "verdict": "PASS",
+      "scope": "Rebased UI semantics, authority and checkpoint mapping; paused/interrupted Resume attempt replacement; all six fresh social/annotation images and receipt bindings; historical live qualification; final execution evidence/hash audit. Fresh turn/history/Invoke pin conversions, legacy unknown preservation and completion-scoped inheritance. Reinspected recaptured images and all final evidence.",
+      "verdict": "PASS for exact-source mapping and qualified local evidence",
       "unresolvedFindings": [],
       "executionQualification": "Independently audited all referenced log hashes and inner results; did not execute tests or inference independently."
     },
     {
       "reviewer": "actor_renderer_review",
-      "scope": "Native v12/v9/v5 and predecessor/default immutability, visible pinned/current separation, trusted chrome recognition/rebind, authored collision exclusion, navigation wait, service recording, setup UI, production CI mapping; promoted historical live evidence fidelity. Final full-check/build/focused/browser/compiled log hashes and inner results.",
-      "verdict": "PASS for frozen source, checkpoint mapping and inspected local/historical evidence",
+      "scope": "Native v12/v9/v5 and predecessor/default immutability, visible pinned/current separation, trusted chrome recognition/rebind, authored collision exclusion, navigation wait, service recording, setup UI, production CI mapping; promoted historical live evidence fidelity. Final full-check/build/focused/browser/compiled log hashes and inner results. Corrected v5 judge-evidence receipt boundary with authenticated gateway delivery and accepted/unknown/reconciled projection coverage.",
+      "verdict": "PASS for corrected source, mapping and qualified recorded evidence",
       "unresolvedFindings": [],
-      "executionQualification": "Independently read and hashed all 10 verification log references and inner results; did not execute tests or inference independently."
+      "executionQualification": "Independently verified 38 source entries, 12 log hashes and 119 receipt/source/image references; read inner results including initial compiled failure and separately isolated pass. Did not execute tests or inference independently."
     }
   ],
   "hostedQualification": "Exact-head hosted check and merge-freshness-status required after publication. Local results do not imply hosted success.",
@@ -26,5 +26,10 @@
     "docs/evidence/current-update-discovery/review.json",
     "docs/evidence/current-update-discovery/source.json",
     "docs/evidence/current-update-discovery/verification.json"
-  ]
+  ],
+  "supersedes": {
+    "initialSourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
+    "reason": "Automated review exposed v5 judge-receipt omission and incomplete fresh-pin transition coverage. Earlier completeness assertions are superseded by these fixes and expanded checkpoint mapping."
+  },
+  "compiledQualification": "Initial concurrent compiled run failed 8 recipe cases and passed 4, cause unproven. Isolated post-build run passed all 12 without source edits. The failed log remains hashed in verification.json; no stability or proven root-cause claim."
 }

@@ -606,7 +606,7 @@ export class HumanTaskService {
           committed.set(`${threadId}:${turn.id}`, turn);
         }
       }
-      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4"].includes(session.actorSetup?.behaviorContract?.observationContract?.id);
+      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4", "task-actor-observation-v5"].includes(session.actorSetup?.behaviorContract?.observationContract?.id);
       const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind)
         || (currentNative && (event.kind === "live_answer_reconciled" || (event.kind === "product_action" && event.path?.endsWith("/live-answers")))));
       const projected = candidates.slice(-80).map(event => {
