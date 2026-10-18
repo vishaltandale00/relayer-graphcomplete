@@ -403,11 +403,24 @@ async fn reconcile_interrupted_interaction(
             // A message with no input identity, such as a thread's first message, reruns on
             // this same graph interaction when the user resumes it (#722). Only an active
             // current can run again; one the graph already ended keeps its canonical outcome.
-            let current = runtime
-                .completion_current(graph_node_id)
-                .await
-                .map_err(StartupReconciliationError::from_runtime)?;
-            match current.lifecycle {
+            // A graph without the temporal schema has no current to read, so its message
+            // waits for Resume as before.
+            let current = if runtime.temporal_features().schema_read {
+                Some(
+                    runtime
+                        .completion_current(graph_node_id)
+                        .await
+                        .map_err(StartupReconciliationError::from_runtime)?,
+                )
+            } else {
+                None
+            };
+            let lifecycle = current
+                .as_ref()
+                .map_or(relayer_graph_core::CompletionLifecycle::Active, |current| {
+                    current.lifecycle
+                });
+            match lifecycle {
                 relayer_graph_core::CompletionLifecycle::Active => {
                     storage
                         .interrupt_unidentified_message(
@@ -431,7 +444,7 @@ async fn reconcile_interrupted_interaction(
                 }
                 relayer_graph_core::CompletionLifecycle::Failed => {
                     let reason = current
-                        .safe_reason
+                        .and_then(|current| current.safe_reason)
                         .unwrap_or_else(|| "application_restart".into());
                     let harness = thread_harness(storage, &interaction).await?;
                     storage

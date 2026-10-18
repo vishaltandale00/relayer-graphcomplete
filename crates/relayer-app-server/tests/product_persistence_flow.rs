@@ -4914,6 +4914,9 @@ struct HeldRunsFixture {
     stopped_currents: Arc<Mutex<Vec<i64>>>,
     /// Graph currents the graph failed, by node.
     failed_currents: Arc<Mutex<std::collections::HashSet<i64>>>,
+    /// While set, the graph runs without the temporal schema: it reports no schema read, and
+    /// a current read answers `feature_disabled`, as a graph with the feature off does.
+    temporal_off: Arc<std::sync::atomic::AtomicBool>,
     /// The graph interactions whose result the graph accepted.
     accepted_nodes: Arc<Mutex<std::collections::HashSet<i64>>>,
     /// Invoke actions whose graph preparation the graph refuses.
@@ -5073,6 +5076,9 @@ impl HeldRunsFixture {
         let read_stopped = stopped_currents.clone();
         let failed_currents = Arc::new(Mutex::new(std::collections::HashSet::<i64>::new()));
         let read_failed = failed_currents.clone();
+        let temporal_off = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let current_off = temporal_off.clone();
+        let features_off = temporal_off.clone();
         let recorded_stops = stopped_currents.clone();
         let graph = axum::Router::new()
             .route(
@@ -5081,15 +5087,22 @@ impl HeldRunsFixture {
                     let stopped = read_stopped.lock().unwrap().contains(&id);
                     let accepted = current_accepted.lock().unwrap().contains(&id);
                     let failed = read_failed.lock().unwrap().contains(&id);
+                    let off = current_off.load(Ordering::SeqCst);
                     async move {
-                        axum::Json(json!({
+                        if off {
+                            return (
+                                StatusCode::NOT_FOUND,
+                                axum::Json(json!({"error": {"code": "feature_disabled", "message": "Temporal feature schema-read is disabled."}})),
+                            );
+                        }
+                        (StatusCode::OK, axum::Json(json!({
                             "completionId": id,
                             "lifecycle": if accepted { "succeeded" } else if stopped { "stopped" } else if failed { "failed" } else { "active" },
                             "headRevision": if stopped || accepted || failed { 2 } else { 1 }, "currentLayerId": null,
                             "finalLayerId": null, "safeReason": if failed { json!("provider_failed") } else { Value::Null },
                             "temporalFeatures": {"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true,
                                 "projectionUi": false, "invokeResolution": false, "providerRecursion": false}
-                        }))
+                        })))
                     }
                 }),
             )
@@ -5128,8 +5141,11 @@ impl HeldRunsFixture {
             // Stop needs the temporal schema, as in the desktop.
             .route(
                 "/api/control/temporal-features",
-                axum::routing::get(|| async {
-                    axum::Json(json!({"configVersion": 1, "schemaRead": true, "rootCurrentWrite": true, "projectionUi": false, "invokeResolution": false, "providerRecursion": false}))
+                axum::routing::get(move || {
+                    let on = !features_off.load(Ordering::SeqCst);
+                    async move {
+                        axum::Json(json!({"configVersion": 1, "schemaRead": on, "rootCurrentWrite": on, "projectionUi": false, "invokeResolution": false, "providerRecursion": false}))
+                    }
                 }),
             )
             .route(
@@ -5376,6 +5392,7 @@ impl HeldRunsFixture {
             frozen: Vec::new(),
             stopped_currents,
             failed_currents,
+            temporal_off,
             accepted_nodes,
             refused_actions,
             garbled_actions,
@@ -7049,6 +7066,13 @@ async fn a_restart_keeps_the_graph_outcome_of_a_plain_message_that_already_ended
     );
     assert_eq!(fixture.status_of(stopped).await, "stopped");
     assert_eq!(fixture.status_of(active).await, "interrupted");
+    // A graph without the temporal schema has no current to read: the message still waits,
+    // interrupted, for Resume, and startup never quarantines it.
+    fixture.temporal_off.store(true, Ordering::SeqCst);
+    fixture.restart().await;
+    assert_eq!(fixture.status_of(active).await, "interrupted");
+    fixture.temporal_off.store(false, Ordering::SeqCst);
+    fixture.restart().await;
     for run in [failed, stopped] {
         let (status, refused) = fixture.run_action(run, "resume").await;
         assert_eq!(status, StatusCode::CONFLICT, "{refused}");
