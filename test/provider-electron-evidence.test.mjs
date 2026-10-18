@@ -133,7 +133,7 @@ describe("provider browser evidence", () => {
       expect(repair).toMatchObject({
         renderer: "production", provider: "deterministic fixture", exactProviderId: "router",
         phases: ["connected", "missing", "failure", "success", "composer"], attempts: 2,
-        composerAdmitted: true, defaultsPreserved: true,
+        composerAdmitted: true, automaticHarnessSelected: true, defaultsPreserved: true,
       });
 
       const variants = (await readdir(join(output, "variants")))

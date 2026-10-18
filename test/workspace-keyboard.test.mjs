@@ -656,7 +656,7 @@ describe("product workspace keyboard behavior", () => {
     const markup = productWorkspaceMarkup();
     const warning = markup.slice(
       markup.indexOf('id="contextDraftSendWarning"'),
-      markup.indexOf("</dialog>") + "</dialog>".length,
+      markup.indexOf("</dialog>", markup.indexOf('id="contextDraftSendWarning"')) + "</dialog>".length,
     );
 
     expect(warning).toContain('role="dialog" aria-modal="true"');
