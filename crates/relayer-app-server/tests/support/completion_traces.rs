@@ -183,8 +183,11 @@ struct GraphFaults {
     /// While set, every control preparation answers 200 with a body the client cannot
     /// decode, so the product cannot tell whether the graph committed it.
     garble_preparation: AtomicBool,
-    /// This many control reads of a completion's current answer 503 first.
+    /// This many control reads of the child's current answer 503 first. Reads of any other
+    /// completion's current, such as its parent's at startup, are not affected.
     fail_current_reads: std::sync::atomic::AtomicUsize,
+    /// The child's graph completion, whose current reads `fail_current_reads` affects.
+    child_completion: std::sync::atomic::AtomicI64,
     /// While set, invalidating a node's capabilities is refused with a 409, a deterministic
     /// failure startup cannot retry.
     refuse_invalidation: AtomicBool,
@@ -482,7 +485,10 @@ impl World {
                         faults.detail_asset_reads.fetch_add(1, Ordering::SeqCst);
                     }
                     if request.method() == axum::http::Method::GET
-                        && request.uri().path().ends_with("/current")
+                        && request.uri().path().ends_with(&format!(
+                            "/interactions/{}/current",
+                            faults.child_completion.load(Ordering::SeqCst)
+                        ))
                         && faults
                             .fail_current_reads
                             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
@@ -1065,6 +1071,9 @@ impl World {
             thread,
             completion_id: {
                 *harness_control.completion_id.lock().unwrap() = seeded.graph_node_id;
+                faults
+                    .child_completion
+                    .store(seeded.graph_node_id, Ordering::SeqCst);
                 seeded.graph_node_id
             },
             child,
