@@ -1,0 +1,49 @@
+{
+  "reviewer": "/root/review_versioned_actor",
+  "workspaceDigest": "c119733bcec08022dd403a773bd894f75d81087d7df9aa88bb9f4e403257bb47",
+  "status": "non-certifying without a PR",
+  "scope": [
+    "Version isolation and immutable defaults/history",
+    "Native option visibility and exact-state dispatch authority",
+    "Authored partial selection draft, validation refusal, refresh and authority-boundary reset",
+    "Explicit Send and accepted delivery/consumption",
+    "Checkpoint mapping and regression changes; no test retirement",
+    "Paired raw hashes, usage aggregation, timing, consumed inputs, final screenshot pixels and prose"
+  ],
+  "verdict": "No remaining static blocker or material measurement mismatch",
+  "reports": [
+    {
+      "path": "docs/evidence/versioned-decision-actor/multiturn-input-comparison-20261016.md",
+      "sha256": "77b93b67ccba1319f40100e4c8708c546be5b5c259ea88639f998b01fb3f9b4f"
+    },
+    {
+      "path": "docs/evidence/versioned-decision-actor/multiturn-input-comparison-20261016.json",
+      "sha256": "6c2dc8797e365ac9118860105774b8407a40933aba2ee54c7c36a8fa7904f4d7"
+    }
+  ],
+  "qualifications": [
+    "Different candidate responses, turn counts, final completeness and shared-host load prevent a matched-endpoint latency/cost win claim.",
+    "Native costs are API-rate equivalents, not subscription invoices.",
+    "Heavy verification failures remain independently reported; review does not convert failures into passes."
+  ],
+  "unresolvedStaticFindings": [],
+  "heavyVerificationAudit": {
+    "reviewer": "/root/review_versioned_actor",
+    "verdict": "No material mismatch; referenced log hashes and source digest match. No whole-repository pass established.",
+    "verification": {
+      "path": "docs/evidence/versioned-decision-actor/actor-inputs-verification-20261016.json",
+      "sha256": "0818a2da9f42102114e467b6255cc02940ed382009ce1288944fa26ad3ad890b"
+    },
+    "evidenceDocument": {
+      "path": "docs/evidence/versioned-decision-actor/actor-inputs-20261016.md",
+      "sha256": "05b16862c18d05d6af2b3a30fbca26fb8ccb6938dbe9b7f648b79db002169b74"
+    },
+    "preserved": [
+      "Root and isolated command-runner failures",
+      "Unreached suites",
+      "Full-browser native observation failure",
+      "Earlier compiled-runtime failures alongside final12-test pass"
+    ],
+    "status": "non-certifying without a PR"
+  }
+}

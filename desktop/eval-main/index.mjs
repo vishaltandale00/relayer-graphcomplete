@@ -292,14 +292,17 @@ async function start() {
     annotationSnapshotLoader: (threadIds) => loadAnnotationSnapshots(productSession, threadIds),
   }).open();
   taskActors = new TaskActorService({ tasks: humanTasks, setupRegistry,
-    resolveRuntime: (config, options) => providerSetup.resolveCodexJudgeRuntime(config, options),
-    resolveCompletionJudgeRuntime: (config, options) => providerSetup.resolveCodexJudgeRuntime(config, options),
+    resolveRuntime: (config, options) => providerSetup.resolveTaskActorRuntime(config, options),
+    resolveCompletionJudgeRuntime: (config, options) => providerSetup.resolveCompletionJudgeRuntime(config, options),
     openBrowser: async (sessionId, signal, observationContract) => openTaskActorBrowser({ tasks: humanTasks, sessionId, productSession, signal, observationContract, diagnosticDirectory: process.env.RELAYER_EVAL_ACTOR_DIAGNOSTICS === "1" ? join(dirname(evalStateFile), "actor-diagnostics", sessionId) : undefined, browser: await judgeBrowser.get() }),
   });
   calibration = await new CalibrationService({ stateFile: join(dirname(evalStateFile), "calibration.json"), setups: setupRegistry,
     tasks: humanTasks, evalService, author: humanTasks.annotator }).open();
   dashboard = await createEvalDashboard({
     service: evalService, rendererDirectory: evalRendererDirectory, humanTasks, taskActors, setupRegistry, calibration,
+    actorDecisionProviders: async () => (await providerSetup.status()).definitions.filter(item => item.adapterId === "openai-api"
+      && item.connected && item.lifecycleState === "active" && item.endpoint?.replace(/\/$/, "") === "https://api.openai.com/v1")
+      .map(({ id, label }) => ({ id, label })),
     openSettings: async () => {
       requireRunning();
       const pending = createSettingsSurface({ productSession, providerSetup, isBusy: evalIsBusy });

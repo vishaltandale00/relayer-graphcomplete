@@ -1,0 +1,16 @@
+{
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16",
+  "implementationWorkspaceDigest": "dedd1cc66f3d41a06250a6c9274b16f79cace9184a5df83c7b572f79f958d5d2",
+  "reportSha256": "a51de686cbdc8fcbc4c260ff3edb2ec8e8c7fc699e7f8c3905d11f2742aff78b",
+  "metricsSha256": "5704c614db20f490c61bbdac85407aa68f37d626ae8c9c3d1bd04cd918110639",
+  "scope": "Report and metrics against the exact runner, raw timing/API/task records, immutable exports, candidate traces and native cumulative token usage. Candidate-time caveat, nearly equal simulator inference time, working reactions, absence of input/adaptation proof, differing endpoint claims, ratings, not-run scripted checks and unchanged revisions/defaults.",
+  "verdict": "No material mismatch found. No unresolved material audit finding.",
+  "unresolvedMaterialAuditFindings": [],
+  "limitations": [
+    "Non-certifying without a PR.",
+    "One sequential pair with a live stochastic candidate establishes no general performance, quality, realism or total-cost advantage.",
+    "Recorded judge verdicts do not independently prove equivalent endpoint attainment.",
+    "Invalidated if either reviewed report or metrics file changes."
+  ]
+}

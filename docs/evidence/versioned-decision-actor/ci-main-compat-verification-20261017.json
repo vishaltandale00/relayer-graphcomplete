@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-17T17:56:47.522580+00:00",
+  "workspaceDigest": "bb1653035a6c150f55c2605df3d4c547e741f5725ab8136b9a413556f3856612",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-main-compat-source-20261017.json",
+    "sha256": "933c19e23b0ba65993c943f5f8bac4e1386712a5e5bc4f43c6eb9f76fc195875",
+    "files": 162
+  },
+  "requiredPlan": "docs/evidence/versioned-decision-actor/ci-main-compat-20261017.md",
+  "completedCurrentCommands": [
+    "build.log",
+    "windows.log",
+    "telemetry.log",
+    "check.log"
+  ],
+  "defaultCheck": {
+    "vitestFilesPassed": 336,
+    "vitestFilesSkipped": 1,
+    "vitestTestsPassed": 4437,
+    "vitestTestsSkipped": 3,
+    "secretBoundaryTestsPassed": 2,
+    "pythonTestsPassed": 99,
+    "nativeAndCrashAndLintStagesPassed": true
+  },
+  "telemetry": {
+    "nativePanicTestsPassed": 5,
+    "portfolioFilesPassed": 19,
+    "portfolioTestsPassed": 184,
+    "newArtifact": {
+      "path": ".relayer/verification/pr755-main-compat-20261017/telemetry-v1.json",
+      "sha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea"
+    },
+    "canonicalHistoricalArtifactRestoredByteIdentically": true
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-main-compat-20261017/outer-exits.json",
+    "sha256": "9609d9d62fd60ffd548a81f735119875985289721212a9efe881e9f377a04df7"
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/aligned-pilot.log",
+      "sha256": "1c1001605665fc584299f63c862070bda160154642d2d61106bb53b75a88a076",
+      "bytes": 239,
+      "actualOuterExit": 0,
+      "scope": "intermediate/preflight, not full postcommit merge proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/compatible-pilot.log",
+      "sha256": "0896b7c4d9a5c8a926c78aeb2f98bae5ae17903e8d2ce819b27470fcb0652525",
+      "bytes": 239,
+      "actualOuterExit": 0,
+      "scope": "intermediate/preflight, not full postcommit merge proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/original-merge-conflict.log",
+      "sha256": "e0cc5421a9d6dfae60da3bc84cd241d0b57156a97e7cc4acb06f05004c8a1721",
+      "bytes": 673,
+      "actualOuterExit": 1,
+      "scope": "intermediate/preflight, not full postcommit merge proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/per-file-merge.log",
+      "sha256": "56dd5223520080fa052116551dc7e137b3a1c52aac5939fc88e6fe16945e3ed3",
+      "bytes": 28130,
+      "actualOuterExit": 0,
+      "scope": "intermediate/preflight, not full postcommit merge proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/build.log",
+      "sha256": "825244f64b6e5329ead34bb33c2e7ecb503c6a494237d76e397c154688518778",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "current162"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/windows.log",
+      "sha256": "427fddf32640a5a5367085ab41a0ec453968a406c281d859fc2522906ffa8c5d",
+      "bytes": 239,
+      "actualOuterExit": 0,
+      "scope": "current162"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/telemetry.log",
+      "sha256": "4a5a3ff6d4b375d6afefe4cf09512a568fa6571e0e823162c68fc7c6925e440e",
+      "bytes": 1122,
+      "actualOuterExit": 0,
+      "scope": "current162"
+    },
+    {
+      "path": ".relayer/verification/pr755-main-compat-20261017/check.log",
+      "sha256": "8ec8e356dfc01ab08f075075faf1900c87162279c92a6114443d46063c6cbe7b",
+      "bytes": 147729,
+      "actualOuterExit": 0,
+      "scope": "current162"
+    }
+  ],
+  "historicalReuse": {
+    "verificationReceipt": "docs/evidence/versioned-decision-actor/ci-final-review-verification-20261017.json",
+    "sha256": "7de769082ba1a513a30da2423f20903c971e565c055e38788ba274a8660a47a4",
+    "boundary": "Prior161 local proof and qualified160 evaluator browser/compiled/focused proofs retain original identities; only Windows unit changed from161 and new checkpoint prose was added. Consumed evaluator/desktop/capture inputs remain unchanged. No historical invocation relabeled fresh162."
+  },
+  "mergePreflight": {
+    "oldPublishedHead": "bac2b32397f09d8e4a504fc75bd6be23668ab254",
+    "observedMain": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+    "oldPublishedMergeTreeExit": 1,
+    "finalPerFileMergeExit": 0,
+    "fullPostcommitMergeRequired": true
+  },
+  "failureHistory": "Earlier fixture root check ENOTEMPTY, controlled possible late-writer probe, older hosted Ladybug setup timeout and once diagnostic retry remain in prior receipts; cause of the exact original sibling/setup timeout remains unknown. Intermediate cleanup-only alignment passed units but text-conflicted. Both negative cases plus main exact cleanup guard are now retained.",
+  "limits": [
+    "Fresh published-head hosted CI, freshness and full postcommit merge preflight remain publication gates.",
+    "No paid inference, live Decisions calibration, signed release or general latency/cost claim."
+  ],
+  "requiredLocalPortfolioPassed": true
+}

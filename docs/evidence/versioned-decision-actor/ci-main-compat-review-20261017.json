@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T17:57:44.055382+00:00",
+  "pullRequest": 755,
+  "reviewType": "Bounded main-compatibility source, test-subsumption and completed local heavy-evidence review",
+  "workspaceDigest": "bb1653035a6c150f55c2605df3d4c547e741f5725ab8136b9a413556f3856612",
+  "priorPrHead": "bac2b32397f09d8e4a504fc75bd6be23668ab254",
+  "observedMain": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-main-compat-source-20261017.json",
+    "sha256": "933c19e23b0ba65993c943f5f8bac4e1386712a5e5bc4f43c6eb9f76fc195875",
+    "files": 162,
+    "all162FileHashesAndSortedPathNulBytesAggregateIndependentlyVerified": true
+  },
+  "mapping": {
+    "path": "docs/evidence/versioned-decision-actor/ci-main-compat-20261017.md",
+    "sha256": "263db39f571280fea1baba3718052c0b68958e16471765785d1033c65a2a3a92",
+    "checkpoint": "MCI-015"
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-main-compat-verification-20261017.json",
+    "sha256": "230f561103efc3c8fd4ddf25bb7a4d39c30e4e91c4dcfb895669c8b52d446cf0",
+    "allEightLogHashesSizesAndActualOuterExitBindingsVerified": true
+  },
+  "results": {
+    "path": "docs/evidence/versioned-decision-actor/ci-main-compat-results-20261017.md",
+    "sha256": "c98bbe8113256a91dad18bf64f6972077fba95c0b71f3096148e00ef1d19d8ba",
+    "materialMismatchFound": false
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-main-compat-20261017/outer-exits.json",
+    "sha256": "9609d9d62fd60ffd548a81f735119875985289721212a9efe881e9f377a04df7"
+  },
+  "reviewedScope": [
+    "Only test/windows-candidate.test.mjs changes from qualified161; the new MCI015 document is the sole added source-scope path. Production, renderer, native and evaluator/browser/compiled inputs remain identical.",
+    "Full-resource positive signing/copy/inventory/native-source assertions remain unchanged. A directory-filtered one-EXE negative case writes a partial signature before rejection, asserts signer destination and native-source immutability. The original full concurrent-matchers rejection scenario is additionally retained, protecting generic error propagation with multiple resources.",
+    "Main a2 exact bounded rm(maxRetries5,retryDelay100) cleanup block and original concurrent rejection block are preserved. This is test fixture cleanup policy; no signing failure assertion or product/test deadline is relaxed. It does not establish that all internal copy promises are drained.",
+    "Eight retained logs and attested exits, completed inner build/unit/telemetry/root outcomes, prior160/161 proof reuse, original merge conflict versus current per-file preflight, canonical telemetry restoration and historical failure boundaries."
+  ],
+  "observedCurrent162Outcomes": {
+    "build": "Native/TypeScript/package build completed, attested outer0; compatible ordinary local Cargo fingerprints, no new external artifact.",
+    "windows": "All10 tests passed1.52s, attested outer0; both negative boundaries and all positive assertions retained.",
+    "telemetry": "Declared entry native panic5 plus19files184tests passed, attested outer0; local loopback evidenceok.",
+    "defaultCheck": "336files4437tests passed;1file3tests skipped; native formatting/Clippy/workspace/doc/crash, builds/TypeScript/workspaces, separate secret2, Python99, receipt lint and PRD readability all completed, attested outer0."
+  },
+  "historicalReuse": {
+    "prior161Verification": {
+      "verificationReceipt": "docs/evidence/versioned-decision-actor/ci-final-review-verification-20261017.json",
+      "sha256": "7de769082ba1a513a30da2423f20903c971e565c055e38788ba274a8660a47a4",
+      "boundary": "Prior161 local proof and qualified160 evaluator browser/compiled/focused proofs retain original identities; only Windows unit changed from161 and new checkpoint prose was added. Consumed evaluator/desktop/capture inputs remain unchanged. No historical invocation relabeled fresh162."
+    },
+    "prior161Review": {
+      "path": "docs/evidence/versioned-decision-actor/ci-final-review-review-20261017.json",
+      "sha256": "adf0543138d5da5eb08cff59697e9814e7d716f9421260b12975a40004980d6a"
+    },
+    "qualified160Digest": "1efd7ff8ff00b4140451328ca97e5a9ee66f84cd98b33bb911676828f3792387",
+    "qualified161Digest": "fb80bc9b8cf10e815fc213b0d2923223920f682f162354cd48290218a8537178",
+    "boundary": "Prior focused182/standalone/fullbrowser/compiled12 evaluator proofs retain160 identity, and prior161 local results remain historical. The only new executable input is a Windows unit consumed by fresh check and telemetry; explicit evaluator/browser/compiled and desktop/image capture consumers exclude it and the checkpoint prose. No old invocation is relabeled fresh162."
+  },
+  "mergePreflight": {
+    "oldPublishedHead": "bac2b32397f09d8e4a504fc75bd6be23668ab254",
+    "observedMain": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+    "oldPublishedMergeTreeExit": 1,
+    "finalPerFileMergeExit": 0,
+    "fullPostcommitMergeRequired": true,
+    "observed": "Original bac2 full merge-tree log contains a Windows test content conflict and exit1. Current per-file three-way output succeeds with attested0. Intermediate unit passes do not prove a conflict-free full Git merge.",
+    "unresolved": "Full postcommit merge-tree and fresh exact published-head synthetic-merge CI/freshness are still required."
+  },
+  "telemetryArtifact": {
+    "fresh": {
+      "path": ".relayer/verification/pr755-main-compat-20261017/telemetry-v1.json",
+      "sha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea"
+    },
+    "canonicalPath": ".relayer/evidence/telemetry-v1.json",
+    "priorBackupPath": ".relayer/verification/pr755-main-compat-20261017/telemetry-prior.json",
+    "allThreeHashesIndependentlyMatch": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea",
+    "freshExecutionSupportedByInnerLogAndOuterAttestation": true
+  },
+  "verdict": "No blocking source, authority, subsumption, consumed-input mapping or local evidence mismatch found for exact162-source digest and explicitly qualified historical evaluator proofs. Required local portfolio is supported; full postcommit merge and published-head hosted readiness remain pending.",
+  "unresolvedBoundaries": [
+    "No claim that current full postcommit Git merge preflight or current published-head CI/freshness has passed; commit/push and those gates remain necessary. No merge is authorized or performed by this review.",
+    "Earlier no-blocker reviews missed deletion/capability cases and remain historical. Prior ENOTEMPTY and hosted Ladybug timeout evidence remains preserved; late-copy mechanism is demonstrated but original sibling and hosted slowdown cause remain unidentified.",
+    "Retained packet consistency does not authenticate coordinated rewriting of all local history. No paid inference, live Decisions calibration, judgment-quality/performance/cost advantage, Windows signing/release or deployment proof is claimed."
+  ]
+}

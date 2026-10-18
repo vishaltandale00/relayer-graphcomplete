@@ -111,10 +111,12 @@ describe("independent Windows candidate", () => {
       await writeFile(join(crtInput, "provenance.json"), "{}");
       builder.extraResources.find(item => item.to === "node").from = nodeInput;
       builder.extraResources.find(item => item.to === "bin" && item.filter?.includes("*.dll")).from = crtInput;
-      const matchers = getFileMatchers(builder, "extraResources", resources, {
+      const copyOptions = {
         macroExpander: value => value, customBuildOptions: builder.win,
         globalOutDir: appOutDir, defaultSrc: f.repositoryRoot,
-      }).filter(matcher => [join(f.repositoryRoot, "target"), nodeInput, crtInput].some(prefix => matcher.from.startsWith(prefix)));
+      };
+      const matchers = getFileMatchers(builder, "extraResources", resources, copyOptions)
+        .filter(matcher => [join(f.repositoryRoot, "target"), nodeInput, crtInput].some(prefix => matcher.from.startsWith(prefix)));
       const signed = [];
       const signingPackager = {
         platformSpecificBuildOptions: builder.win,
@@ -138,6 +140,20 @@ describe("independent Windows candidate", () => {
       for (const name of executables) {
         expect(await readFile(join(resources, "bin", name), "utf8")).toBe(`native fixture: ${name}\nsigned fixture`);
       }
+      // A rejecting copy aggregate does not drain sibling writers. One exact
+      // directory-filtered EXE tests failure propagation without racing cleanup.
+      const rejected = [];
+      signingPackager.signIf = async destination => {
+        rejected.push(destination);
+        await writeFile(destination, "partial signature fixture");
+        throw Error("signing rejected");
+      };
+      const failingMatchers = getFileMatchers({ extraResources: [
+        { from: f.directory, to: "bin", filter: [executables[0]] },
+      ] }, "extraResources", resources, copyOptions);
+      await expect(copyFiles(failingMatchers, transformer)).rejects.toThrow("signing rejected");
+      expect(rejected).toEqual([join(resources, "bin", executables[0])]);
+      for (const name of f.names) expect(await readFile(join(f.directory, name), "utf8")).toBe(`native fixture: ${name}`);
       await rm(resources, { recursive: true, force: true });
       signingPackager.signIf = async () => { throw Error("signing rejected"); };
       await expect(copyFiles(matchers, transformer)).rejects.toThrow("signing rejected");

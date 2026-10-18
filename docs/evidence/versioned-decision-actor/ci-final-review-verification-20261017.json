@@ -1,0 +1,309 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-17T17:38:27.315347+00:00",
+  "workspaceDigest": "fb80bc9b8cf10e815fc213b0d2923223920f682f162354cd48290218a8537178",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-source-20261017.json",
+    "sha256": "5ef8a6ca4cc7aff029e8362b6f1aa8627ce108e3d6e1c4bdbfe7599e0945343f",
+    "files": 161
+  },
+  "requiredPlan": "docs/evidence/versioned-decision-actor/ci-final-review-20261017.md",
+  "completedCurrentCommands": [
+    "build-windows-fixed.log",
+    "windows-qualified.log",
+    "telemetry.log",
+    "check-windows-fixed.log"
+  ],
+  "qualifiedEvaluatorCommands": [
+    "focused-qualified.log",
+    "actor-inputs-qualified.log",
+    "compiled.log",
+    "web-qualified.log"
+  ],
+  "evaluatorSourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-final-review-evaluator-source-20261017.json",
+    "sha256": "6087fe7ff620bcc91f7c31df4bb5a2c28215799d637e9027493200d1f4476c5e",
+    "workspaceDigest": "1efd7ff8ff00b4140451328ca97e5a9ee66f84cd98b33bb911676828f3792387",
+    "files": 160,
+    "boundary": "Actual standalone/fullbrowser/compiled/focused entries retain160-source identity. Only mapping document and Windows unit fixture changed afterward; neither is a consumed input. All evaluator executable/test hashes remain identical. No old command relabeled as fresh161."
+  },
+  "defaultCheck": {
+    "vitestFilesPassed": 336,
+    "vitestFilesSkipped": 1,
+    "vitestTestsPassed": 4437,
+    "vitestTestsSkipped": 3,
+    "secretBoundaryTestsPassed": 2,
+    "pythonTestsPassed": 99,
+    "nativeAndCrashAndLintStagesPassed": true
+  },
+  "browser": {
+    "entireRunnerPassed": true,
+    "actualObservedFillCapabilityAndTextTextareaRangeDispatchPassed": true,
+    "checkboxRadioReadOnlyFillExcludedAndClickRetained": true,
+    "exactFieldPrivacyAssertionRetainedWithOnlyBooleanTypeMetadataAdded": true,
+    "threeCandidateMultiTurnNativeJourneyPassed": true,
+    "decisionsActorAndCompletionJudgePassed": true,
+    "bothCurrentVariantsAndJudgeAndPersistencePassed": true
+  },
+  "compiledScenariosPassed": 12,
+  "telemetry": {
+    "freshDeclaredEntryPassed": true,
+    "nativePanicTestsPassed": 5,
+    "portfolioFilesPassed": 19,
+    "portfolioTestsPassed": 184,
+    "newArtifact": {
+      "path": ".relayer/verification/pr755-final-review-20261017/telemetry-v1.json",
+      "sha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea"
+    },
+    "canonicalHistoricalArtifactRestoredByteIdentically": true,
+    "boundary": "Local fixture receiver and panic/portfolio evidence; not live hosted receiver/symbolication or release proof."
+  },
+  "windowsFixture": {
+    "positiveFullResourceAssertionsUnchanged": true,
+    "negativeDirectoryMatcherExactlyOneNativeExe": true,
+    "rejectedSignerDestinationAndNativeSourceImmutabilityAsserted": true,
+    "controlledProbe": {
+      "source": ".relayer/verification/pr755-final-review-20261017/copy-race-probe.mjs",
+      "sha256": "5bb9984d5c5b7173a1d683ad5308e918407a402f5ae6a6a27167488433cae5bb",
+      "actualOuterExit": 0,
+      "aggregateRejectedBeforeSiblingWriterCompleted": true,
+      "siblingWroteAfterRejection": true,
+      "boundary": "Confirms early-rejection/late-writer mechanism; exact original ENOTEMPTY sibling remains unidentified."
+    }
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-final-review-20261017/outer-exits.json",
+    "sha256": "8e36043e6d687dd696a2d629c2a4762af2252750404998518ecfd0a59cac70a3",
+    "basis": "Closed parent-observed unified-exec/write_stdin outcomes; Python subprocess records each code after exit; inner scenarios independently verified."
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/red.log",
+      "sha256": "7de37aa678ebd84b647cf63b99e3316be27e9830f56bcb92234f659a066430cb",
+      "bytes": 128088,
+      "actualOuterExit": 1,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/green-pilot.log",
+      "sha256": "0c4f675d02420f3643b6b9206ac590b4c6911d248785281237e77dcfef242a58",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/focused.log",
+      "sha256": "c48f22f00916dd59a40fddde3e4707a86439e82e2f04f41e47e7090e1c1adeff",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/focused-final.log",
+      "sha256": "f7ca3deb8c724dc1b036fc941f80f416e86456c7a3ace894ae6f7e4b1f75e042",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/build.log",
+      "sha256": "d03f1927407cef0e4f8cd337e8306ab8cf20ce8ca14d36589814716ae9b3a1b3",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/actor-inputs.log",
+      "sha256": "ad772a021db9be81a5c705f4774db205d30e3635f9fee00bc56e4916011d43f6",
+      "bytes": 817,
+      "actualOuterExit": 1,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/actor-inputs-fixed.log",
+      "sha256": "ad772a021db9be81a5c705f4774db205d30e3635f9fee00bc56e4916011d43f6",
+      "bytes": 817,
+      "actualOuterExit": 1,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/actor-inputs-roles.log",
+      "sha256": "93d21662175e2d94582c5e531c39182e1aebc45561fc6c9565c515f03286c44d",
+      "bytes": 465,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/build-final.log",
+      "sha256": "ccb18582a72ddeb6c18dc6b1fb303b01877643f595b706e01f187c46dc537924",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/qualified-focused.log",
+      "sha256": "1eb41804ff441e10e94d65bee7b63dbf561cc43e40ddd93eb3cb1ff6665a3a61",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/actor-inputs-final.log",
+      "sha256": "93d21662175e2d94582c5e531c39182e1aebc45561fc6c9565c515f03286c44d",
+      "bytes": 465,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/web.log",
+      "sha256": "d788c262a10ff3298619686ab030d9b1afa535ab982361b806cc448a30f05c6b",
+      "bytes": 3579,
+      "actualOuterExit": 1,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/build-qualified.log",
+      "sha256": "62e1ec1029ad94859b75609312d70744781ee05c0a8467ae69db893fb18cac41",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/focused-qualified.log",
+      "sha256": "368bab97788f7ec4929794632d997339adf87a765dc73a3acca0d04f31e20f05",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "qualified evaluator160; unchanged consumed inputs"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/actor-inputs-qualified.log",
+      "sha256": "93d21662175e2d94582c5e531c39182e1aebc45561fc6c9565c515f03286c44d",
+      "bytes": 465,
+      "actualOuterExit": 0,
+      "scope": "qualified evaluator160; unchanged consumed inputs"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/web-qualified.log",
+      "sha256": "78c291b8b20df167610b21591d8c655e17eb8eb4ce467df35670df4e7e8b5978",
+      "bytes": 8518,
+      "actualOuterExit": 0,
+      "scope": "qualified evaluator160; unchanged consumed inputs"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/compiled.log",
+      "sha256": "b3c463c440f5b77ef8ee2bef332647f696595a23517ee504a33580e4171ef0d1",
+      "bytes": 362,
+      "actualOuterExit": 0,
+      "scope": "qualified evaluator160; unchanged consumed inputs"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/check.log",
+      "sha256": "ed900b0a15302755a5916eed6d0d03f12865b9a3ec4250f39bfee3d0e1359e50",
+      "bytes": 146717,
+      "actualOuterExit": 1,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/windows-fixture-fixed.log",
+      "sha256": "cc4b9124f845cd6f10cb12d16c5c440d22002819237e9fc777bc1f63008b41fe",
+      "bytes": 239,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/copy-race-probe.log",
+      "sha256": "737c555e77577e4c4bcc20508f2d6ff6b4dfd59d1289bb074cfd14981b1d37e2",
+      "bytes": 147,
+      "actualOuterExit": 0,
+      "scope": "development or diagnostic snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/build-windows-fixed.log",
+      "sha256": "d03f1927407cef0e4f8cd337e8306ab8cf20ce8ca14d36589814716ae9b3a1b3",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "final161"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/windows-qualified.log",
+      "sha256": "08ce24d86984b21825ac9f1bdd8ffd476eaa65e17f4aa778de92e89b44e04ac9",
+      "bytes": 239,
+      "actualOuterExit": 0,
+      "scope": "final161"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/telemetry.log",
+      "sha256": "e8a16a1a8eaa61eccc33b1b267e1e4a04ac5e6d86adf160a6aa412083bc3758b",
+      "bytes": 1121,
+      "actualOuterExit": 0,
+      "scope": "final161"
+    },
+    {
+      "path": ".relayer/verification/pr755-final-review-20261017/check-windows-fixed.log",
+      "sha256": "9849e0c35219c5ca2b3a8c27a0f95ee1442f757f5a9bcfe7eb9854ede82941f3",
+      "bytes": 147730,
+      "actualOuterExit": 0,
+      "scope": "final161"
+    }
+  ],
+  "developmentFailures": {
+    "red.log": "Three failed98passed before complete-chain/fill repairs.",
+    "actor-inputs.log": "Missing family roles; new chapter not reached.",
+    "actor-inputs-fixed.log": "Incorrect singular role correction; new chapter not reached.",
+    "web.log": "Pilot160 e6e160 source: new capability/input/judge chapters passed; old exact-field privacy assertion rejected new metadata; later chapters not reached. Exact whitelist/type checks corrected.",
+    "check.log": "Qualified evaluator160: native/crash/build/TypeScript passed; Vitest1failed4436passed3skipped due ENOTEMPTY Windows negative signing fixture cleanup. Secret-boundary/Python/lints after Vitest not reached. Repaired fixture, not an unchanged retry.",
+    "scope": "Intermediate passes remain development-only; final current and qualified evaluator entries above carry readiness proof."
+  },
+  "pilotSource": {
+    "path": ".relayer/verification/pr755-final-review-20261017/source-pilot.json",
+    "sha256": "e595b6898b4259c41cee1975db791f3ab3d3c7b078d3af35aacc5c24c4024e8a",
+    "workspaceDigest": "e6e16003af5df346ccf50b257b2e9046c2e56f2d163aebccb5884d224bd40fdc",
+    "boundary": "Historical pre-whitelist correction; not current proof."
+  },
+  "historicalHostedAe3": {
+    "runId": 39051085923,
+    "head": "ae3bb1825ce7a8fa7ee817c444c2650269ee2834",
+    "originalCreatedAt": "2026-10-17T16:49:29Z",
+    "syntheticMerge": "454502af",
+    "base": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+    "attempt1": "Artifact beforeAll timed out10000ms;14 assertions skipped; all other selected jobs passed.",
+    "diagnosticRetry": "Once unchanged failed-job retry: artifact14pass13.115s;338files4499tests pass,1file34tests skipped; separate secret2tests platform-skipped.",
+    "localArtifactReproduction": "14pass7.12s actual0. Artifact CLI/native-contract helper/config unchanged.",
+    "rootCause": "Unknown; contention plausible, not established. No source/deadline/assertion change for retry; original creation-time freshness window preserved.",
+    "boundary": "Historical ae3 only; new correction needs published-head CI and two thread resolutions.",
+    "records": [
+      {
+        "path": ".relayer/verification/pr755-review-20261017/hosted-vitest.log",
+        "sha256": "53e576c2b914fe414d281c94aa168911aab127cc32b1974c9ef9fe4312d8e515",
+        "bytes": 309582
+      },
+      {
+        "path": ".relayer/verification/pr755-review-20261017/hosted-vitest-attempt2.log",
+        "sha256": "5ee13e2add64dac6641a7ba48970dc97337fa2ddab20d33631d8c0423dffe630",
+        "bytes": 316969
+      },
+      {
+        "path": ".relayer/verification/pr755-review-20261017/hosted-attempt1-jobs.json",
+        "sha256": "39fc5745245329991f18e681ecf0806cadaff65d8ad40bea55d27a66a7535ad3",
+        "bytes": 38747
+      },
+      {
+        "path": ".relayer/verification/pr755-review-20261017/hosted-attempt2-jobs.json",
+        "sha256": "5036ffb252f5e6b0143810594f51af41120e1e89b73fc9e0b730ba021994bcff",
+        "bytes": 38780
+      },
+      {
+        "path": ".relayer/verification/pr755-review-20261017/artifact-focused.log",
+        "sha256": "654351434bfdf10970134583b2f7ca61f6776acab4b689e9346b2673cca7b214",
+        "bytes": 1351
+      }
+    ]
+  },
+  "historicalReuse": "Prior reviews missed full-chain deletion/role-only fill; preserve their exact snapshots/verdicts with explicit limitation. Prior desktop/capture consumers exclude changed paths and retain historical identities. Telemetry was refreshed because Windows unit is in its portfolio.",
+  "limits": [
+    "No paid application inference, live Decisions calibration, latency/cost advantage, signed release or deployment proof.",
+    "Digest consistency is not authenticity against coordinated rewriting of the whole log.",
+    "Fresh published-head hosted CI/freshness and remaining thread resolution are separate."
+  ],
+  "requiredLocalPortfolioPassed": true
+}

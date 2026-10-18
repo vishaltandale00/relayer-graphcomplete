@@ -189,7 +189,7 @@ async function closeViewer(window) {
 
 async function run(window) {
   await product.seedProviderCatalog({ providerId: "codex", label: "Codex (fixture)", connected: true, models: [{ id: "gpt-fixture", label: "Fixture model", order: 0, visible: true, available: true, providerDefault: true, metadata: {} }], systemFamily: { key: "codex", name: "Codex", modelIds: ["gpt-fixture"] } });
-  const family = await request("/api/model-families", { name: "Codex fixture", enabled: true, members: [{ providerId: "codex", modelId: "gpt-fixture" }] });
+  const family = await request("/api/model-families", { name: "Codex fixture", enabled: true, members: [{ providerId: "codex", modelId: "gpt-fixture", roles: [{ name: "orchestrator" }] }] });
   await js(window, `localStorage.setItem('relayerDesktopAccountOnboardingV1', 'skipped')`);
   await window.loadURL(productSession.origin);
   window.setSize(1440, 900);

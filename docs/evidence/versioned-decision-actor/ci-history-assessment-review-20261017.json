@@ -1,0 +1,95 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T18:20:15.458470+00:00",
+  "pullRequest": 755,
+  "reviewType": "Bounded source, persisted-assessment authority, retained-history resource limits and completed heavy-evidence review",
+  "workspaceDigest": "4a5088937be01dcc7941063f55084a77c7d28c7b57c5c823dcf6de60d0cbcfaa",
+  "priorPrHead": "039d89c4fbdee0d78f0b2835975e61e45ffe9bac",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-history-assessment-source-20261017.json",
+    "sha256": "ded539af67492e7a1b0745719b04b77e667b3cde37dc1dcfdd2ff6f10c0dca76",
+    "files": 163,
+    "all163FileHashesAndSortedPathNulBytesAggregateIndependentlyVerified": true
+  },
+  "mapping": {
+    "path": "docs/evidence/versioned-decision-actor/ci-history-assessment-20261017.md",
+    "sha256": "53c0676425a703a23184c7859f3ffab74d4e07cf139a2c17e15d2cefd753dee4",
+    "checkpoints": [
+      "MCI016 persisted assessment",
+      "MCI017 retained history",
+      "MCI017 omissions"
+    ]
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-history-assessment-verification-20261017.json",
+    "sha256": "861cfa5331e213b3cb67f54785d1a2f5c59804baf6c5f2a084e1ecace9b04829",
+    "allEightLocalLogHashesSizesAndAttestedOuterExitsVerified": true,
+    "allSevenHistoricalHostedRecordHashesSizesVerified": true
+  },
+  "results": {
+    "path": "docs/evidence/versioned-decision-actor/ci-history-assessment-results-20261017.md",
+    "sha256": "abb7e232cf62b900510dee3e604ad042ff75fb3ec69df1144232535bc29fa23c",
+    "materialMismatchFound": false
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-history-assessment-20261017/outer-exits.json",
+    "sha256": "49e13e7234e32b6ab7c9c6da40cf3af63f5426977634de491ff396ab305a58c4"
+  },
+  "reviewedScope": [
+    "HumanTaskService projects the three persisted assessment fields through the existing production validator before accepting each Decisions judgment. Missing/blank/oversize explanation or hint and verdict-inconsistent hints reject with integrity failure; this includes earlier incomplete judgments in later-interrupted sessions. Existing stage/intent/observation/config/usage/termination authority remains; native historical exports and valid no-judgment partial prefixes are preserved.",
+    "The production history store actually evicts serialized text and screenshot references independently under count and aggregate limits. Text excludes screenshot content; snapshots do not expose mutable retained objects. Observation numbers remain monotonic across eviction. Oversized single past entries/images are omitted and counted, not silently truncated.",
+    "Cumulative omissions and chronological stable identities reach Decisions selection and Codex settled fill/finish, working fill and watch/reaction calls. Current observation/control inventory is unchanged, choices remain intents rather than dispatch evidence, and the existing255-choice rejection is retained.",
+    "Real persisted adapter/service corruption tests and real retained-store/dispatcher tests, including count/aggregate limits, independent eviction, omission propagation, current controls and clearing; no assertion or deadline retirement.",
+    "MCI016/17 mapping, completed local inner outcomes versus outer exits, development failures and corrected native-judge test selection, historical consumed-input reuse and hosted-current separation."
+  ],
+  "retentionLimits": {
+    "priorTextEntries": 127,
+    "sumOfSerializedStoredEntryCharacters": 512000,
+    "priorScreenshots": 127,
+    "sumOfStoredPriorBase64Characters": 16000000,
+    "boundary": "Excludes JSON array/request framing and current observation/screenshot; not a total request, model-token, memory-byte or provider-owned Codex native-context bound. Earlier text and image omission counts are independent."
+  },
+  "observedCurrent163Outcomes": {
+    "focused": "6files176tests passed4.08s; attested outer0; corrected native completion-judge file included.",
+    "build": "Completed native/TypeScript/packages, attested outer0; compatible ordinary local Cargo fingerprints, no newly adopted external artifact.",
+    "compiled": "12 scenarios passed21.54s, attested outer0.",
+    "fullBrowser": "Entire runner completed explicit Decisions actor/judge publication/reconstruction/export, real fill/input/Send, native three-completion recovery, scroll/adverse dispatch, both current-pointer variants, judging and process persistence chapters; attested outer0. Presentation-change capture gaps remain explicit diagnostic records rather than inferred observations.",
+    "defaultCheck": "336files4439tests passed;1file3tests skipped; native fmt/Clippy/workspace/doc/crash, builds/TypeScript/workspaces, secret2, Python99, receipt lint and PRD readability completed; attested outer0."
+  },
+  "developmentEvidence": [
+    "next-red.log:4failures100passes before fixes; real retained-history and persisted assessment regressions reproduced.",
+    "next-green.log:104passes on development source.",
+    "next-focused.log:172passes5files; mistyped native-judge filename did not run that file. Corrected final focused entry is176passes6files. No development entry is relabeled final proof."
+  ],
+  "historicalReuse": {
+    "priorSourceManifest": "docs/evidence/versioned-decision-actor/ci-main-compat-source-20261017.json",
+    "changedPriorPaths": [
+      "desktop/eval-main/decision-task-actor.mjs",
+      "desktop/eval-main/human-task-service.mjs",
+      "test/eval-decision-task-actor.test.mjs",
+      "test/eval-task-actor.test.mjs"
+    ],
+    "addedPath": "docs/evidence/versioned-decision-actor/ci-history-assessment-20261017.md",
+    "priorReview": {
+      "path": "docs/evidence/versioned-decision-actor/ci-main-compat-review-20261017.json",
+      "sha256": "13da4cac4b949d3e15ac28647f87cbb1bc2645d1b5c0108e8b885171965d2e49"
+    },
+    "consumerAudit": "Desktop main/renderer/native, standalone desktop and annotation/social capture sources are unchanged and do not consume the two changed Eval host modules or tests. Visual-details EvalService/ReviewSession/readiness import chains exclude them. Telemetry explicit19-file portfolio and module inventory exclude the changed paths; Windows fixture is unchanged. These earlier proofs retain their original tested identities. Changed browser/compiled/build/check consumers were freshly run; no historical invocation is relabeled fresh163."
+  },
+  "historicalHosted039d": {
+    "runId": 39056038397,
+    "attempt": 1,
+    "head": "039d89c4fbdee0d78f0b2835975e61e45ffe9bac",
+    "syntheticMerge": "e09c142e",
+    "base": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+    "observed": "Retained jobs show successful check and selected jobs. Vitest338files4502tests pass/34skip, separate Linux secret2platformskips, Python100, Rust summary totals849 and crash373; all14 Ladybug assertions ran. Seven record hashes/sizes and supporting summaries inspected.",
+    "boundary": "Historical pre-findings source only; not current163 hosted qualification. Previous setup timeout cause remains unknown despite subsequent passes."
+  },
+  "verdict": "No blocking source, authority, mapping, retained-history correctness, test-subsumption or local evidence mismatch found for exact163-source digest. Required local portfolio is supported by completed inner outcomes and attested exits.",
+  "unresolvedBoundaries": [
+    "Publish the fix before resolving the two new review threads; fresh published-head hosted CI/freshness and full postcommit merge preflight remain gates. This receipt does not assert current hosted readiness or perform a merge.",
+    "Earlier no-blocker reviews missed these persisted-field and storage-retention boundaries and remain historical; original failures and unknown causes are preserved.",
+    "Consistency/digest checks are not authenticity against coordinated rewriting of the whole local record. No paid application inference, live Decisions calibration, judgment quality/performance/cost advantage, signed release or deployment proof is claimed."
+  ]
+}

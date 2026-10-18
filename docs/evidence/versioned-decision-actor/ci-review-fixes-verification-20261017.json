@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-17T16:48:00.577041+00:00",
+  "workspaceDigest": "e5e515ba4c85002330da98138f8b66322455d2d65cad5980aee094e410c106ec",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-review-fixes-source-20261017.json",
+    "sha256": "4e086ec52b8994bb582390ac6a0299c6d9e73e2fb49bd8ede47e7977d72942b2",
+    "files": 159
+  },
+  "requiredPlan": "docs/evidence/versioned-decision-actor/ci-review-fixes-20261017.md",
+  "completedFinalCommands": [
+    "focused.log",
+    "build.log",
+    "compiled.log",
+    "web.log",
+    "check.log"
+  ],
+  "defaultCheck": {
+    "vitestFilesPassed": 336,
+    "vitestFilesSkipped": 1,
+    "vitestTestsPassed": 4434,
+    "vitestTestsSkipped": 3,
+    "secretBoundaryTestsPassed": 2,
+    "pythonTestsPassed": 99,
+    "nativeAndCrashAndLintStagesPassed": true
+  },
+  "browser": {
+    "entireRunnerPassed": true,
+    "threeCandidateMultiTurnNativeJourneyPassed": true,
+    "decisionsActorAndCompletionJudgePassed": true,
+    "bothCurrentVariantsAndJudgeAndPersistencePassed": true
+  },
+  "compiledScenariosPassed": 12,
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-review-20261017/outer-exits.json",
+    "sha256": "f3cf8c2995402a03ed21219d04976aa5d5a1f6eb3f96d03c279016ba30916415",
+    "basis": "Actual completed unified-exec/write_stdin outcomes; Python subprocess runner writes each heavy command return code only after process exit. Inner markers independently verified."
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/pr755-review-20261017/red.log",
+      "sha256": "98aad07a2882b912e71424507f80a2084d5361f84fbe3b9a462f0079791cd9a0",
+      "bytes": 188779,
+      "actualOuterExit": 1,
+      "scope": "development snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/green.log",
+      "sha256": "013a34e5fed7ebdf4d0bdff1b7931939b02621dd2c15c8bb5bc2068939b4071e",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/green-final.log",
+      "sha256": "181ca941c23843bc9753522790f3506dc76f5b3626e8fa8fc2ac9ebaadfbb61b",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/red-pinned.log",
+      "sha256": "e65d402b6bc131902f4aa7c001be779f4392bbff3954bdfa1a9539cf26b77bcd",
+      "bytes": 187785,
+      "actualOuterExit": 1,
+      "scope": "development snapshot; not final-source proof"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/focused.log",
+      "sha256": "2a9f07183b77a3df3fac2b6a9cd1aea3e5f6e336d8f94ed9f350ef891e9bdc3d",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "final159"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/build.log",
+      "sha256": "1c597702337c3df8b02a67322d4bc4b60aa39f2c4f25c086a3a0e278114923eb",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "final159"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/web.log",
+      "sha256": "58b4830a0f55aed57b37711c802559a7e32ad4ba9ff36d79a6ee7467e98a5874",
+      "bytes": 8381,
+      "actualOuterExit": 0,
+      "scope": "final159"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/compiled.log",
+      "sha256": "8701140c7daaa721e6d08012f96527b9086941256ec1665a7de04d44fcfe2d0a",
+      "bytes": 362,
+      "actualOuterExit": 0,
+      "scope": "final159"
+    },
+    {
+      "path": ".relayer/verification/pr755-review-20261017/check.log",
+      "sha256": "8c4262071f6a276cf3c9ba07ef34227ecd18551bdfcf124852cb83ead8934f3f",
+      "bytes": 147729,
+      "actualOuterExit": 0,
+      "scope": "final159"
+    }
+  ],
+  "reproductions": {
+    "red.log": "Both original findings reproduced before first fixes: four failed,113 passed.",
+    "red-pinned.log": "Jointly forged evidence/stage judge revision reproduced before session pin check: two failed,89 skipped.",
+    "green.log": "First repair development snapshot:197 passed.",
+    "green-final.log": "Prefixes and POST404 added before session pin repair:201 passed."
+  },
+  "historicalReuse": "Previous desktop/capture/telemetry proof retains recorded identities. Source diff from prior158 is four Eval host/test paths plus mapping doc; historical consumers exclude changed paths, independently audited by reviewer. No old result is relabeled as a fresh159 invocation. Prior receipts and failed logs remain unchanged.",
+  "limits": [
+    "No paid application inference, live Decisions judge calibration, latency/cost advantage, release or deployment proof.",
+    "Consistency/digest validation is not authenticity against coordinated rewriting of entire local log.",
+    "Final published-head hosted CI and freshness plus review-thread resolution remain separate."
+  ],
+  "requiredLocalPortfolioPassed": true
+}

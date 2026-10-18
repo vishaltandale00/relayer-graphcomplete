@@ -1,0 +1,11 @@
+# MCI-008: conflict-free freshness after main advances
+
+Main advanced to `a2e0ee396043ab310cae46a9523ce969680f96e4` (PR #751) while the integration's required local proof ran. The approved CI policy allows a conflict-free branch behind main when a fresh current-head CI run validates GitHub's actual synthetic merge. No additional history/runtime behavior from that commit is adopted into this branch by this correction; hosted CI must test its combination before freshness grants merge authority.
+
+A per-file three-way check against main found two conflicts, both in standalone desktop fixtures. The node-input driver now uses main's stronger assertion: the click-time request carries only the selected family, the real accepted interaction retains the exact resolved provider/model, and the later generation retains that resolved selection. The context driver uses main's equivalent selected-family/orchestrator-card checks and preserves close/focus behavior. Initial node/context requests remain family-only. No production, native, browser, renderer or capture source changes. Project restart proof merges cleanly and is not altered here.
+
+| Checkpoint | Changed seam | Actual required proof |
+| --- | --- | --- |
+| MCI-008 selected-family and resolved-route replay, conflict-free merge | Two standalone desktop fixture drivers; main-compatible assertions and existing request contract | Rerun declared node-input and interaction-context Electron entries with their builds; repeat three-way conflict check. Retain original full check/browser/compiled/telemetry/capture and other desktop source identities with unchanged consumed-input audit. Fresh hosted current-head CI must pass on the actual new-main synthetic merge. |
+
+The initial 152-file integration, 157-file fixture qualification and their completed reviews remain immutable historical scopes. The final freshness source manifest adds this checkpoint and the two revised drivers. Previous positive runs are reused only for byte-identical consumed inputs; they are never relabeled as fresh invocations on this scope. This does not certify unrelated new-main behavior or regenerate screenshots on a source that this checkout did not execute. The PR must be reviewed against its current hosted merge evidence, not only its local captures.

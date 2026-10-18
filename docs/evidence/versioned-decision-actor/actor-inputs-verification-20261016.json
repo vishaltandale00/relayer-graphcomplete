@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "workspaceDigest": "c119733bcec08022dd403a773bd894f75d81087d7df9aa88bb9f4e403257bb47",
+  "requiredPlan": [
+    "focused deterministic tests",
+    "npm run build",
+    "npm run check",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:eval-actor-inputs",
+    "npm run test:eval-web",
+    "adversarial source/authority/evidence review",
+    "separately authorized live native/Decisions multi-turn pair"
+  ],
+  "runs": [
+    {
+      "command": "npm run build",
+      "status": "passed",
+      "qualification": "Final production source; two regression assertion files extended afterward, no compiled input changed",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/build-recovery-final.log",
+        "sha256": "3c8c44737ff873c468dc0399a79c0de29055bee50906307991dbe746078eea48"
+      }
+    },
+    {
+      "command": "focused 7-file Vitest portfolio",
+      "status": "passed",
+      "passed": 257,
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/warm-recovery-verified.log",
+        "sha256": "d69097a75c21bb7b56be02802e114144206e7f1ba02561c7935ed38ec88d7f85"
+      }
+    },
+    {
+      "command": "final test/node-detail-runtime.test.mjs",
+      "status": "passed",
+      "passed": 73,
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/runtime-boundary-final.log",
+        "sha256": "8bb20680feed4b6dd9287a58061b28068fdd1e80fadfbf473712abc10d585736"
+      }
+    },
+    {
+      "command": "npm run test:eval-actor-inputs",
+      "status": "passed",
+      "proof": "All named real-browser scenarios completed including uncommitted authority-boundary reset and actual Send/accepted second response",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/browser-boundary-final.log",
+        "sha256": "3df1d92b38d75b230d982c250348f367964221e0772e5d8fab03aea38ef99fa3"
+      }
+    },
+    {
+      "command": "npm run test:eval-web",
+      "status": "failed",
+      "passedChapters": [
+        "host interruption and real lifecycle",
+        "dashboard providers/human-task/Decisions revision",
+        "new input revision staging/feedback publication/picker/isolation",
+        "new browser native+authored input proof and actual Send",
+        "existing dispatch races, opened native selects and redraw binding"
+      ],
+      "failure": "Existing native actor journey interrupted by timeout in observe, expected completed; later chapters not reached",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/web-isolated-final.log",
+        "sha256": "6366dee6862c06535984035c38e5b84d00f8b0cc8c699264f6379778152172bd"
+      }
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "status": "failed",
+      "passed": 7,
+      "failed": 5,
+      "failure": "graph/app-server readiness and 15-second test timeouts under shared-host load",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/compiled-recovery-final.log",
+        "sha256": "7f09f01c746555187051dcff304d802b4029381fccada7e39d42d637f0880dd9"
+      }
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 VITEST_MAX_WORKERS=2 RUST_TEST_THREADS=2 npm run check",
+      "status": "failed",
+      "qualification": "Prior checks interrupted during Clippy to reduce build and test concurrency after observed host memory pressure; no inner scenario verdict claimed",
+      "passedStages": [
+        "cargo fmt",
+        "cargo clippy --workspace --all-targets --all-features"
+      ],
+      "failure": "App-server workspace unit suite:397 passed,1 failed: environment::tests::command_runner_enforces_start_timeout_and_output_bounds; one-second output-bound assertion also failed isolated; cause not established",
+      "unreached": [
+        "remaining Rust workspace suites",
+        "graph crash reconciliation",
+        "root cargo/package build steps",
+        "full default Vitest portfolio",
+        "root trailing checks (separately executed below)"
+      ],
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/check-resource-bounded-final.log",
+        "sha256": "8e2a2123c3c67d808e2710fe99f120c6aa7bbd9bf0811286659159a2ee6adadc"
+      }
+    },
+    {
+      "command": "isolated cargo command-runner regression",
+      "status": "failed",
+      "passed": 0,
+      "failed": 1,
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/command-runner-isolated.log",
+        "sha256": "21ae37ca521c845816e07eb271bb74d52801a419662491fb9267d4fa664cde70"
+      }
+    },
+    {
+      "command": "VITEST_MAX_WORKERS=1 npm run test:eval-compiled-runtime",
+      "status": "passed",
+      "passed": 12,
+      "qualification": "One final lower-concurrency retry; earlier5-failure run remains preserved, no source change",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/compiled-bounded-final.log",
+        "sha256": "3af6856effbc65058a6f0b715444d6f40d0c09901d8c5d6a7b1a3bd05c67b530"
+      }
+    },
+    {
+      "command": "npx tsc --noEmit",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/typecheck-final.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    },
+    {
+      "command": "npm run check --workspaces --if-present",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/workspaces-final.log",
+        "sha256": "aca4eadf1583f782c6d819d83d937343560fbac4b7531c890809370bdfe9c1f0"
+      }
+    },
+    {
+      "command": "npm run test:codex-secret-boundary",
+      "status": "passed",
+      "passed": 2,
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/secret-boundary-final.log",
+        "sha256": "36d854307c062b78db83b35ee3dd8689502624ee938e002b6165f5daf80bfe9d"
+      }
+    },
+    {
+      "command": "Python unittest discovery",
+      "status": "passed",
+      "passed": 99,
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/python-final.log",
+        "sha256": "9561d001cfb35f793ef76217cf672b2cd43b29deb629e28b1dfb37c0b1e7d3f8"
+      }
+    },
+    {
+      "command": "npm run lint:ladybug-receipt",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/receipt-lint-final.log",
+        "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c"
+      }
+    },
+    {
+      "command": "npm run prd:check-readability",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/actor-inputs-20261016/prd-final.log",
+        "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321"
+      }
+    }
+  ],
+  "resourceInterruptions": {
+    "path": ".relayer/verification/actor-inputs-20261016/check-resource-interruption.json",
+    "sha256": "08934eebc7f53043f829abf2b4c791c59dc60ba55faec90ccdf4ca91df57a2f6"
+  },
+  "noTestsRetired": true,
+  "noPaidInferenceInDeterministicSuite": true,
+  "liveReport": "docs/evidence/versioned-decision-actor/multiturn-input-comparison-20261016.json",
+  "review": "docs/evidence/versioned-decision-actor/actor-inputs-review-20261016.json",
+  "capturedAt": "2026-10-16T07:08:33.244Z",
+  "rootResult": "failed; no whole-repository pass",
+  "completedAt": "2026-10-16T07:22:36.889Z",
+  "sourceHashesStillMatch": true
+}

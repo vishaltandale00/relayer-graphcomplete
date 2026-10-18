@@ -6,6 +6,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { actorConfiguration } from "./task-actor.mjs";
+import { COMPLETION_DECISION_CONTRACT, completionJudgeStageRequest, validateCompletionAssessment } from "./task-completion-judge.mjs";
 
 const clone = (value) => structuredClone(value);
 const digest = (value) => `sha256:${createHash("sha256").update(JSON.stringify(value)).digest("hex")}`;
@@ -113,6 +114,87 @@ export class HumanTaskService {
     if (digest(input) !== event.inputDigest) throw failure("Completion judge input integrity failure.");
     return input;
   }
+  async completionJudgeStageInput(id, eventId) {
+    const event = this.find(id).events.find(item => item.id === eventId && item.kind === "actor_completion_stage");
+    if (!event) throw failure("Missing completion judge stage.", 404);
+    return completionJudgeStageRequest(event.stage, await this.completionJudgeInput(id, event.evidenceEventId));
+  }
+  async validateCompletionJudgeStages(id) {
+    const session = this.find(id);
+    const pinnedJudge = completionJudgeSpec(session);
+    const evidence = new Map();
+    const groups = new Map();
+    const prior = new Map();
+    let latestJudgment;
+    const invalid = () => { throw failure("Completion judge stage integrity failure."); };
+    const verdicts = COMPLETION_DECISION_CONTRACT.choices.map(choice => choice.value);
+    for (const event of session.events) {
+      prior.set(event.id, event);
+      if (event.kind === "actor_completion_evidence") evidence.set(event.id, event);
+      if (event.kind === "actor_completion_judgment" && pinnedJudge?.decision) {
+        try {
+          validateCompletionAssessment({ verdict: event.verdict, evidenceExplanation: event.evidenceExplanation, continuationHint: event.continuationHint });
+        } catch { invalid(); }
+        const input = evidence.get(event.evidenceEventId);
+        const group = groups.get(event.evidenceEventId);
+        const intent = prior.get(input?.actorActionEventId);
+        const observation = prior.get(input?.observationEventId);
+        if (!group?.reported || group.judged || !isDeepStrictEqual(event.judge, pinnedJudge)
+          || intent?.kind !== "actor_action" || intent.action?.kind !== "finish" || observation?.kind !== "actor_observation"
+          || event.actorActionEventId !== intent.id || event.observationEventId !== observation.id
+          || intent.observationEventId !== observation.id || event.verdict !== group.selectedVerdict
+          || !isDeepStrictEqual(event.usage, group.nativeSessionUsage)) invalid();
+        group.judged = true; latestJudgment = event;
+      }
+      if (event.kind !== "actor_completion_stage") continue;
+      const stage = event.stage;
+      const input = evidence.get(event.evidenceEventId);
+      if (!stage || !input || !isDeepStrictEqual(input.judge, pinnedJudge) || !isDeepStrictEqual(event.judge, input.judge)
+        || !["decisions", "codex"].includes(stage.engine) || !["requested", "completed", "failed"].includes(stage.phase)
+        || stage.contractId !== COMPLETION_DECISION_CONTRACT.id || stage.contractId !== input.judge?.decision?.contractId
+        || stage.model !== (stage.engine === "decisions" ? input.judge.decision.model : input.judge.model)
+        || (stage.engine === "decisions" && stage.providerId !== input.judge.decision.providerId)) invalid();
+      const common = ["contractId", "inputDigest", "engine", "model", "requestDigest", ...(stage.engine === "decisions" ? ["providerId"] : ["selectedVerdict"])];
+      const payload = stage.phase === "requested" ? stage.engine === "decisions" ? ["inputEncoding", "questions"] : ["inputEncoding", "prompt", "outputSchema"]
+        : stage.engine === "decisions" ? ["requestUsage", stage.phase === "completed" ? "selectedVerdict" : "failure"]
+          : ["nativeSessionUsage", ...(stage.phase === "failed" ? ["failure"] : [])];
+      if (Object.keys(stage).sort().join(",") !== [...common, "phase", ...payload].sort().join(",")) invalid();
+      let group = groups.get(event.evidenceEventId);
+      if (stage.phase === "requested") {
+        if (stage.engine === "decisions") {
+          if (group) invalid();
+          group = {}; groups.set(event.evidenceEventId, group);
+        } else if (!group || group.pending || group.done || stage.selectedVerdict !== group.selectedVerdict) invalid();
+        await this.completionJudgeStageInput(id, event.id);
+        group.pending = stage;
+      } else {
+        if (!group?.pending || common.some(key => !isDeepStrictEqual(stage[key], group.pending[key]))) invalid();
+        if (stage.engine === "decisions") {
+          if (stage.requestUsage !== null && (typeof stage.requestUsage !== "object" || Array.isArray(stage.requestUsage)
+            || !Object.keys(stage.requestUsage).length || Object.entries(stage.requestUsage).some(([key, value]) =>
+              !["input_tokens", "output_tokens", "total_tokens"].includes(key) || !Number.isSafeInteger(value) || value < 0))) invalid();
+          if (stage.phase === "completed") {
+            if (!verdicts.includes(stage.selectedVerdict)) invalid();
+            group.selectedVerdict = stage.selectedVerdict;
+          } else if (!["request_failed", "refusal", "invalid_result"].includes(stage.failure)) invalid();
+        } else if ((stage.nativeSessionUsage !== null && (typeof stage.nativeSessionUsage !== "object" || Array.isArray(stage.nativeSessionUsage)))
+          || (stage.phase === "failed" && stage.failure !== "report_failed")) invalid();
+        group.pending = null;
+        group.done = stage.engine === "codex" || stage.phase === "failed";
+        if (stage.engine === "codex" && stage.phase === "completed") {
+          group.reported = true; group.nativeSessionUsage = stage.nativeSessionUsage;
+        }
+      }
+    }
+    if (pinnedJudge?.decision && session.status === "completed") {
+      if ([...evidence.keys()].some(eventId => !groups.get(eventId)?.judged)) invalid();
+      if (session.termination?.reason !== "budget_exhausted"
+        && (!latestJudgment || session.termination?.completionJudgeEventId !== latestJudgment.id
+          || (session.termination.reason === "endpoint_reached" && latestJudgment.verdict !== "complete"))) invalid();
+    }
+    // An interrupted run may retain a requested packet or selector result without
+    // its next stage. Such prefixes are evidence of partial work, never success.
+  }
   interruptActor(id, reason) {
     return this.serial(async () => {
       const session = this.find(id);
@@ -158,7 +240,8 @@ export class HumanTaskService {
         if (resolved.completionJudgeSetup) session.completionJudgeSetup = resolved.completionJudgeSetup;
         if (resolved.evaluatorRelease) session.evaluatorRelease = resolved.evaluatorRelease;
         if (setup) session.actorSetup = setup;
-        session.actor = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor); }
+        session.actor = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor);
+        if ((session.actor.decision || completionJudgeSpec(session)?.decision) && selection.liveAuthorization?.billingMode === "subscription-only") throw failure("This task authorizes subscription use only. Select native Codex actor and completion-judge revisions."); }
       this.sessions.unshift(session);
       await this.persist();
       try {
@@ -278,7 +361,7 @@ export class HumanTaskService {
       if (starts) {
         await abortable(signal, () => this.evalService.assertHumanTaskCatalog?.(session.prepared));
         await abortable(signal, () => this.evalService.assertHumanTaskExecution?.(session.prepared));
-        if (session.completions >= session.maxCompletions) throw failure("Completion limit reached. Finish this task session.", 409);
+        if (session.completions >= session.maxCompletions) throw failure("Completion limit reached. Browse existing results or finish this task.", 409);
         if (route === "/interactions" || retries) {
           const selection = session.prepared.execution.modelResolution;
           body = { ...body };
@@ -523,7 +606,7 @@ export class HumanTaskService {
           committed.set(`${threadId}:${turn.id}`, turn);
         }
       }
-      const currentNative = session.actorSetup?.behaviorContract?.observationContract?.id === "task-actor-observation-v3";
+      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4"].includes(session.actorSetup?.behaviorContract?.observationContract?.id);
       const candidates = session.events.filter(event => ["submission", "actor_action"].includes(event.kind)
         || (currentNative && (event.kind === "live_answer_reconciled" || (event.kind === "product_action" && event.path?.endsWith("/live-answers")))));
       const projected = candidates.slice(-80).map(event => {
@@ -670,7 +753,10 @@ export class HumanTaskService {
       if (!["completed", "failed", "interrupted"].includes(session.status)) throw failure("Finish the session before exporting immutable evidence.");
       if (session.status === "completed") await this.settled(session);
       const graphAnnotations = this.annotationSnapshotLoader && session.threadIds.length ? await this.annotationSnapshotLoader(session.threadIds) : null;
-      for (const event of session.events) { if (event.kind === "actor_completion_evidence" && event.input) await this.completionJudgeInput(id, event.id); }
+      for (const event of session.events) {
+        if (event.kind === "actor_completion_evidence" && event.input) await this.completionJudgeInput(id, event.id);
+      }
+      await this.validateCompletionJudgeStages(id);
       const actorScreenshots = [];
       for (const event of session.events) {
         if (event.kind === "actor_observation" && event.observation?.screenshotArtifact) actorScreenshots.push({ eventId: event.id, ...event.observation.screenshotArtifact, dataUrl: await this.actorScreenshot(id, event.id) });

@@ -259,7 +259,7 @@ async function run() {
       initialMessage: "Author deterministic input controls.",
       projectId: project.id,
       harnessId: "fixture-task-system",
-      modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" },
+      modelSelection: { familyId: family.id },
     }),
   });
   await waitForAcceptedInteractions(thread.id, 1);
@@ -270,7 +270,7 @@ async function run() {
       initialMessage: "Author a second deterministic input surface.",
       projectId: project.id,
       harnessId: "fixture-task-system",
-      modelSelection: { familyId: family.id, providerId: "codex", modelId: "fixture-model" },
+      modelSelection: { familyId: family.id },
     }),
   });
   await waitForAcceptedInteractions(idleThread.id, 1);
