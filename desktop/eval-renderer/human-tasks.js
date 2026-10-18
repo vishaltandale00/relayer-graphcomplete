@@ -7,6 +7,7 @@ export function initializeHumanTasks({ api, show, toast }) {
   const calibration = initializeCalibrationEditor({ api, root: root.querySelector("#calibrationEditor"), toast });
   const setups = initializeSetupEditor({ api, root: root.querySelector("#setupEditor"), toast, changed: () => refreshSetups() });
   let individualActor = "", individualCompletion = "", pinned = false;
+  let selectedDecisionEvaluator = false;
   async function refreshSetups() {
     const catalog = await api.setupRevisions();
     const select = root.querySelector("#actorSetupRevision");
@@ -20,16 +21,19 @@ export function initializeHumanTasks({ api, show, toast }) {
     releaseSelect.value = (catalog.evaluatorReleases || []).some((item) => item.id === releaseId) ? releaseId : "";
     const current = select.value;
     const selected = catalog.promotions.findLast((item) => item.kind === "actor")?.revisionId || catalog.revisions.find((item) => item.kind === "actor")?.id;
-    select.innerHTML = catalog.revisions.filter((item) => item.kind === "actor").map((item) => `<option value="${escape(item.id)}">${escape(item.name)} · ${escape(item.promptVersion)} · ${escape(item.id)}</option>`).join("");
+    select.innerHTML = catalog.revisions.filter((item) => item.kind === "actor").map((item) => `<option value="${escape(item.id)}">${escape(item.name)} · ${item.settings.decision ? "OpenAI Decisions + Codex text · " : ""}${escape(item.promptVersion)} · ${escape(item.id)}</option>`).join("");
     select.value = catalog.revisions.some((item) => item.id === current) ? current : selected;
     const display = () => {
       const revision = catalog.revisions.find((item) => item.id === select.value);
+      const completion = catalog.revisions.find(item => item.id === completionSelect.value)?.spec ?? revision.behaviorContract?.completionJudge;
+      selectedDecisionEvaluator = Boolean(revision.settings.decision || completion?.decision);
       for (const [name, key] of [["actorModel", "model"], ["actorReasoning", "modelReasoningEffort"], ["exploration", "exploration"], ["meticulousness", "meticulousness"], ["maxActions", "maxActions"]]) {
         const input = root.querySelector(`[name="${name}"]`); input.value = revision.settings[key];
         if (input.tagName === "SELECT") input.disabled = true; else input.readOnly = true;
       }
     };
     select.onchange = display;
+    completionSelect.onchange = display;
     releaseSelect.onchange = () => {
       const release = (catalog.evaluatorReleases || []).find((item) => item.id === releaseSelect.value);
       if (release) {
@@ -80,12 +84,12 @@ export function initializeHumanTasks({ api, show, toast }) {
     root.querySelector("#humanTaskDetail").innerHTML = `
       <h2>${escape(task.prepared?.name || task.id)}</h2><p>${escape(task.status)} · ${task.completions}/${task.maxCompletions} completions · Step ${task.step + 1}/${plan.length}</p>
       ${task.evaluatorRelease ? `<p>Evaluator release: ${escape(task.evaluatorRelease.name)} · ${escape(task.evaluatorRelease.id)}. Graph-presentation judge ${escape(task.evaluatorRelease.judgeSetup.id)} is pinned for explicit grading; selecting this release does not run grading.</p>` : ""}
-      ${simulated ? `<p>Simulated user · setup ${escape(task.actorSetup?.id || "historical unregistered setup")} · ${escape(task.actor.model)} · ${escape(task.actor.modelReasoningEffort)} reasoning · exploration ${escape(task.actor.exploration)} · meticulousness ${escape(task.actor.meticulousness)}</p>` : ""}
+      ${simulated ? `<p>Simulated user · setup ${escape(task.actorSetup?.id || "historical unregistered setup")} · ${task.actor.decision ? `OpenAI Decisions ${escape(task.actor.decision.model)} · Codex text ` : ""}${escape(task.actor.model)} · ${escape(task.actor.modelReasoningEffort)} reasoning · exploration ${escape(task.actor.exploration)} · meticulousness ${escape(task.actor.meticulousness)}</p>` : ""}
       ${simulated ? `<p>Actor satisfaction: ${escape(actorRating?.value ?? "not recorded")} / 4 · ${escape(actorRating?.comment || "")}</p><p>Actor-reported endpoint: ${escape(actorRating?.endpointStatus || "not assessed")}. Remaining work: ${escape(actorRating?.remainingWork || "not recorded")}</p>` : ""}
       <p><b>Endpoint:</b> ${escape(task.endpoint)}</p>
       <p>Objective success is assessed separately from human or actor satisfaction. ${task.firstVisibleGraph ? `First visible graph: ${Math.round(task.firstVisibleGraph.latencyMs)} ms (includes time before the workspace was opened).` : "First visible graph: not observed."}</p>
       ${task.prepared?.humanBrief ? `<details><summary>Private user brief · not sent to Relayer</summary><p style="white-space:pre-wrap">${escape(task.prepared.humanBrief)}</p><h3>What to grade</h3><p>${escape(task.prepared.humanRubric)}</p></details>` : ""}
-      ${simulated && (task.completionJudgeSetup?.spec || task.actorSetup?.behaviorContract?.completionJudge) ? `<p>Completion reviewer: ${escape((task.completionJudgeSetup?.spec || task.actorSetup.behaviorContract.completionJudge).model)} · ${escape((task.completionJudgeSetup?.spec || task.actorSetup.behaviorContract.completionJudge).modelReasoningEffort)} reasoning. ${task.actorSetup?.behaviorContract?.participantMayStopIncomplete ? "Endpoint claims require approval. An unfinished participant stop records unresolved work." : "It can require further interaction; actor satisfaction remains separate."}</p>` : ""}
+      ${simulated && (task.completionJudgeSetup?.spec || task.actorSetup?.behaviorContract?.completionJudge) ? `<p>Completion reviewer: ${(task.completionJudgeSetup?.spec || task.actorSetup.behaviorContract.completionJudge).decision ? `OpenAI Decisions ${escape((task.completionJudgeSetup?.spec || task.actorSetup.behaviorContract.completionJudge).decision.model)} verdict · Codex feedback ` : ""}${escape((task.completionJudgeSetup?.spec || task.actorSetup.behaviorContract.completionJudge).model)} · ${escape((task.completionJudgeSetup?.spec || task.actorSetup.behaviorContract.completionJudge).modelReasoningEffort)} reasoning. ${task.actorSetup?.behaviorContract?.participantMayStopIncomplete ? "Endpoint claims require approval. An unfinished participant stop records unresolved work." : "It can require further interaction; actor satisfaction remains separate."}</p>` : ""}
       <details><summary>Case instructions</summary>${plan.map((step) => `<h3>${escape(step.name)}</h3>${step.prompts.map((text) => `<p>${escape(text)}</p>`).join("")}`).join("")}</details>
       <p id="humanLifecycle">${active && simulated ? "The simulated user is working. Open graph review to watch and grade; your feedback stays separate from its decisions." : active ? "Review and grade inside the task workspace while you interact. Save grade keeps the task active. Finish task ends interaction separately." : reviewable ? "This session has ended. Open graph review to revisit the graph and add annotations; task interaction is closed." : "The session is changing state. Graph review becomes available once it has ended."}</p>
       <div class="actions"><button id="humanOpen" class="primary" ${task.threadIds.length && (active || reviewable) ? "" : "disabled"}>${active && !simulated ? "Open task workspace" : "Open graph review"} ↗</button>
@@ -212,6 +216,7 @@ export function initializeHumanTasks({ api, show, toast }) {
       else if (data.evaluatorReleaseId) { delete data.actorSetupRevisionId; delete data.completionJudgeRevisionId; }
       else { delete data.evaluatorReleaseId; if (!data.completionJudgeRevisionId) delete data.completionJudgeRevisionId; }
       if (externalCaseIds.has(data.testCaseId)) {
+        if (data.mode === "simulated" && selectedDecisionEvaluator) throw new Error("External tasks authorize subscription use only. Select native Codex actor and completion-judge revisions.");
         if (data.subscriptionConfirmed !== "on") throw new Error("Confirm subscription use before starting an external task.");
         data.liveAuthorization = { confirmed: true, billingMode: "subscription-only",
           testCaseId: data.testCaseId, harnessConfigurationName: data.harnessConfigurationName,

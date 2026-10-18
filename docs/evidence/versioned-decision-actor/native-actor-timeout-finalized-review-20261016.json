@@ -1,0 +1,193 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T22:12:28.598131+00:00",
+  "reviewType": "Adversarial finalized source, fixture subsumption and available evidence review",
+  "pullRequest": 755,
+  "workspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-finalized-source-20261016.json",
+    "sha256": "c3f435410a58af19dbb6d3aed882f973bd1d0255b4ade89b77b72e37536f5185",
+    "files": 38,
+    "allFileHashesAndAggregateVerified": true
+  },
+  "productionBytesUnchangedSince49ff": true,
+  "changedOrAddedSince49ff": [
+    "scripts/eval-current-actor-proof.mjs"
+  ],
+  "inheritedStaticReviews": [
+    {
+      "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-review-20261016.json",
+      "sha256": "23fab435de45341ba30c58749d76ab2b7fbb38b5e99203dd54c2064e1066ba77"
+    },
+    {
+      "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-stable-review-20261016.json",
+      "sha256": "48a2e2b1c843ff59e478798b05ade8a5891aa03796449fc0ed210312e5f0d244"
+    }
+  ],
+  "reviewedMapping": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-20261016.md",
+    "sha256": "60ba92d9dd0ec2642b7b29c914467d66c91ef191da296668f9a2f7c285cedadd",
+    "checkpoints": "NAT-001 through NAT-010"
+  },
+  "reviewedScope": [
+    "Exact source identity and authority verdict inherited from reviewed applied-render implementation; sole additional executable file is current-pointer browser fixture",
+    "NAT-001..003 exact source/action/result/attempt/status/outcome correlation, guarded applied-render metadata, no child graph observation and unchanged Send/Retry/current visibility",
+    "NAT-004 explicit ordinary ninth result-navigation action, exact Returned Layer and source breadcrumb, admission/recovery/calibration/export assertions",
+    "NAT-006 temporary adversarial presentation accessor retains genuine observer updates and restores them after unchanged rejection checks",
+    "NAT-009 actual original control detachment retained; redundant second detachment assertion replaced by real original scope after-paint readiness; original ref/pointer and one successful activation retained",
+    "NAT-010 setup capture selects no action; unchanged fixed-revision background state reads held, prior responses drained through response.finished, real capture returned after paint; each original fill/click once and release on error/click/cleanup",
+    "NAT-010 POST and response-loss reconciliation remain separate; production input recorder and ambiguous-dispatch terminal authority unchanged; independent concurrent-redraw chapter remains",
+    "NAT-005/007 actual social and annotation captures, source and PNG hashes, annotation provenance/reload and visual inspection of all four annotation images",
+    "NAT-008 PRD7.0 declared three desktop assembled runners added to required mapping; no inferred release/packaging context; shared renderer still selects packaging in CI"
+  ],
+  "resolvedFindings": [
+    {
+      "finding": "Raw status could certify readiness before async source controls applied",
+      "resolution": "Render-local frozen metadata published only after guarded applied render; inherited real delayed-asset regression"
+    },
+    {
+      "finding": "PRD7.0 explicitly declares three assembled desktop runners absent from initial NAT local plan",
+      "resolution": "NAT-008 and required plan now explicitly include all three; actual outstanding outcomes remain pending"
+    },
+    {
+      "finding": "Authored rebind fixture watched an already-detached handle and could act while genuine marker selection remained published",
+      "resolution": "Original detach proof retained; bounded read-only restoration of original scope before same original ref/pointer activation"
+    },
+    {
+      "finding": "Plain input fixture could click during unchanged background polling redraw and correctly fail as ambiguous",
+      "resolution": "Fixture serializes fixed revision1 state reads only; no action retry or production nondispatch relaxation"
+    }
+  ],
+  "testSubsumptionVerdict": "Approved: replacing the redundant second assertion removes no independently exercised boundary. First detachment plus same original reference/pointer successful activation still proves exact rebinding; original adverse dispatch tests and all downstream current/answer/approval/export assertions remain.",
+  "availableEvidence": [
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-finalized.log",
+      "sha256": "11a6004d76028d6ade9bda0adf794fee883d7f7f48f2f306a5beb6232520236f",
+      "snapshot": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "observed": "Complete positive chapter sequence, including native/calibration, both current cases, dispatch race, judge and persistence; parent reports command exit0"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-input-poll-gate-final.log",
+      "sha256": "f56e4d5aa6e13f532a1dbc7ff4bbfeb9e8b04608bcb12a3e863808a313d91e37",
+      "observed": "Both native and authored current-pointer cases pass with final fixture delta"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-after-evidence.log",
+      "sha256": "9780d0c556da00b71c4789fab792f3cebe4a5df5ca4952be00e1025af44f4117",
+      "snapshot": "49ff4b49989d73b31ac207d785c9a146863e8231039d9700c5d756e74bb52bfb",
+      "observed": "Completed root check with4368 main Vitest pass, secret2 and Python99; historical source, not exact finalized check"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/build-final.log",
+      "sha256": "7618c79c8ee49df017eb22fb344519fe516e728f27af816e8e77ce8ca3343f88",
+      "snapshot": "49ff4b49989d73b31ac207d785c9a146863e8231039d9700c5d756e74bb52bfb",
+      "observed": "Historical build passed; production bytes unchanged"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/compiled-final.log",
+      "sha256": "da2b86b6b0eb173e1074ac1a9ad39380fe46aaa421638117ea4bf64447495817",
+      "snapshot": "49ff4b49989d73b31ac207d785c9a146863e8231039d9700c5d756e74bb52bfb",
+      "observed": "12 compiled runtime scenarios passed; production bytes unchanged"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/desktop-node-inputs.log",
+      "sha256": "961cbe78aa74859cc716a11a17602ba2a094dc036390ef042c8e391cf8d8f548",
+      "snapshot": "7288fceb21bc8dbfbc4dbd997ae3c4ce8fcedc78adae62b842dc8fb489890fe0",
+      "observed": "Positive inference-free Electron proof result; desktop/runtime bytes unchanged; retained IPC/CSP warnings do not imply warning-free application"
+    }
+  ],
+  "artifactBindings": [
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "a43322da6e0871810f9b6fabaad79a0f92d4a7e1c1fb8cd5ca2ca7aefeef4779"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/social-preview-applied.log",
+      "sha256": "4ea9ceae4c38f76860fea59eceb5a920fd6817b0e7c6b87e479e23382b112307"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "dde0367646a88d64bbe6c63379ad7d407d19fb0010ccf22d9b1f1c334479abb6"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/annotation-capture.log",
+      "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/annotation-integrity.log",
+      "sha256": "b531566802b3b2795f775b85a9d165ec3183c5ef5d6e8cc7ad7aea471f5049ac"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "0b1ad3fe257f28ac48fe32637f6a1a3b2dcd8c58e4dff2ed558f347fc2f955d9"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "2d8766fe5bc0b9787cc69b9d7af9405615fecefb687ad57b4d7108f633b50e38"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "0d1aa51a277ec99fa53f993b36c96d05d854bcc05d80d6dd0eec31db883efb68"
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "a28cc988ef5e01b7696ab79d99849840e7ff28986da0d31d82bd29f353ade7ae"
+    }
+  ],
+  "preservedFailures": [
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-final.log",
+      "sha256": "e5c431c1eddfda37b29df6f70dfe68654e147f8acba291b780cff19810e6ed94"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-applied-final.log",
+      "sha256": "23142a1b5ae6cf29780f01255605f96ffa38a61360459ac9b8f741d4fe9887ea"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-final.log",
+      "sha256": "75a177635f27c461ea1007f61be28207e1a7b84b6ddd227529eef5e4e55222c6"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-ready.log",
+      "sha256": "83eb0b4d5944c3b53fec61292700cc8452faa10d4fab2b82c742c8fcdc526a72"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/startup-scope-race-red.log",
+      "sha256": "cb68426a36bea9afa5a71c33495f8f3e6a151f85c4a91977d8c2e1e56bcb4fbb"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/delayed-render-red-corrected.log",
+      "sha256": "351fd088c0f2ac4f1aa9fa1e42bd1caed1c2601cf6c8413de0254633874845a2"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-delayed-red.log",
+      "sha256": "9ce528c1bef99736234485d18a67fd704d7d9b1d788a394fa339241f17c5efa0"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-green.log",
+      "sha256": "0b3858a196c7bab0029ef28f9f2487f2683a61a7b0bf187b8d01aa48c5b73a94"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-restored-green.log",
+      "sha256": "e2eea064c54e716eae6134e98695612306751b818c7c3ab9b4985c545b2632f2"
+    }
+  ],
+  "verdict": "No remaining blocking static correctness, authority or checkpoint-mapping finding in the exact finalized source. Final browser evidence now reaches all chapters. Complete heavy-portfolio verdict remains pending exact finalized check and remaining declared desktop outcomes.",
+  "findings": [],
+  "unresolvedProofLimits": [
+    "Exact finalized5a root check has not yet been reviewed;49ff pass is historical and is not relabeled as5a.",
+    "Interaction-context and project-new-thread assembled runner outcomes are pending this review.",
+    "Final heavy verification receipt and actual retained outer exits require separate review; this source review does not certify unfinished commands.",
+    "Captured annotation runtime binaries are capture-time identities; ongoing root builds overwrite target/debug, so current path equality is not asserted.",
+    "No paid inference, live judge calibration, general model quality/performance, hosted merge/CI packaging, signed release or deployment claim follows."
+  ],
+  "reviewerActions": {
+    "codeEdits": false,
+    "testExecution": false,
+    "paidInference": false,
+    "historicalReceiptEdits": false
+  },
+  "certification": "Bounded review assertion for PR755 exact finalized source; invalidated by bound-source changes. Final heavy verdict pending separate receipt."
+}

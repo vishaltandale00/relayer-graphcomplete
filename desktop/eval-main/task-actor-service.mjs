@@ -3,8 +3,9 @@ import { setupDigest } from "./setup-registry.mjs";
 import { createCompletionJudge as createNativeCompletionJudge, validateCompletionAssessment, COMPLETION_JUDGE_EVIDENCE_CONTRACT } from "./task-completion-judge.mjs";
 import { randomUUID } from "node:crypto";
 import { abortable } from "./abortable.mjs";
+import { createTaskActor } from "./decision-task-actor.mjs";
 import { setTimeout as delay } from "node:timers/promises";
-import { ACTOR_NATIVE_CALL_TIMEOUT_MS, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, createCodexTaskActor, validateActorAction } from "./task-actor.mjs";
+import { ACTOR_NATIVE_CALL_TIMEOUT_MS, ACTOR_ACTION_SCHEMA, ACTOR_OBSERVATION_CONTRACT, ACTOR_SETTLED_OBSERVATION_CONTRACT, ACTOR_PROMPT_VERSION, actorConfiguration, actorPrompt, validateActorAction } from "./task-actor.mjs";
 
 // Classification may inspect native errors, but evidence and UI use only these
 // closed categories and fixed messages; never copy provider text or error.name.
@@ -19,6 +20,7 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
   else if ([401, 403].includes(status) || /authentication|unauthorized|not[_ -]?logged[_ -]?in|invalid[_ -]?(?:api[_ -]?)?key|token.{0,30}expired/.test(`${code} ${text}`)) category = "authentication";
   else if (code === "actor_control_stale") category = "stale_control";
   else if (code === "actor_control_unavailable") category = "unavailable_control";
+  else if (code === "actor_decision_limit") category = "decision_limit";
   else if (["actor_invalid_action", "actor_inconsistent_finish"].includes(code)) category = "invalid_action";
   else if (code === "actor_effort_unsupported") category = "unsupported_effort";
   else if (/model[_ -](?:not[_ -]found|unsupported)|unsupported[_ -]model/.test(code)
@@ -27,11 +29,12 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
     cancelled: "Actor was cancelled. No action is replayed automatically.",
     timeout: "Actor timed out. Review the saved trajectory before starting another task.",
     rate_limit: "Actor provider reached a rate or usage limit. Wait or check account limits before starting another task.",
-    authentication: "Actor authentication is unavailable. Reconnect the Eval profile's Codex subscription in Settings.",
-    unsupported_model: "Choose a model available to the connected Codex subscription before starting another task.",
+    authentication: "Actor authentication is unavailable. Reconnect the pinned actor providers in Eval Settings.",
+    unsupported_model: "Choose a model available to the actor's pinned provider before starting another task.",
     unsupported_effort: "Choose a reasoning effort supported by the actor model before starting another task.",
     stale_control: "The observed control reference expired before the action. No action was replayed.",
     unavailable_control: "The observed control became hidden, detached, or disabled before the action. No action was replayed.",
+    decision_limit: "The observation exceeds this actor revision's 255-choice limit. No controls were omitted or executed.",
     invalid_action: "The actor response did not satisfy the action contract. No action was executed.",
     runtime_failure: "Actor runtime failed without claiming task success. No action is replayed automatically.",
   };
@@ -42,7 +45,7 @@ function actorFailure(error, { cancelled = false, timedOut = false } = {}) {
 }
 
 export class TaskActorService {
-  constructor({ tasks, resolveRuntime, openBrowser, createActor = createCodexTaskActor, resolveCompletionJudgeRuntime = null, createCompletionJudge = createNativeCompletionJudge, pollMs = 250, deadlineMs = null, setupRegistry = null }) {
+  constructor({ tasks, resolveRuntime, openBrowser, createActor = createTaskActor, resolveCompletionJudgeRuntime = null, createCompletionJudge = createNativeCompletionJudge, pollMs = 250, deadlineMs = null, setupRegistry = null }) {
     Object.assign(this, { tasks, resolveRuntime, openBrowser, createActor, resolveCompletionJudgeRuntime, createCompletionJudge, pollMs, deadlineMs, setupRegistry });
     this.running = new Map();
   }
@@ -51,6 +54,10 @@ export class TaskActorService {
     selection = resolved.selection;
     const setup = resolved.actorSetup;
     const config = setup ? actorConfiguration({ ...setup.settings, promptTemplate: setup.promptTemplate, promptVersion: setup.promptVersion }) : actorConfiguration(selection.actor);
+    const judgeSpec = completionJudgeSpec(resolved);
+    if ((config.decision || judgeSpec?.decision) && selection.liveAuthorization?.billingMode === "subscription-only") {
+      throw new Error("This task authorizes subscription use only. Select native Codex actor and completion-judge revisions.");
+    }
     const startupId = selection.startupId ?? randomUUID();
     if (typeof startupId !== "string" || !/^[a-zA-Z0-9-]{1,80}$/.test(startupId) || this.running.has(startupId)) throw new Error("Invalid actor startup identity.");
     const controller = new AbortController();
@@ -63,7 +70,6 @@ export class TaskActorService {
       try {
         // The same deadline covers discovery, preparation and all user actions.
         const runtime = await abortable(signal, () => this.resolveRuntime(config, { signal }));
-        const judgeSpec = resolved.completionJudgeSetup?.spec ?? setup?.behaviorContract?.completionJudge;
         if (judgeSpec) {
           if (!this.resolveCompletionJudgeRuntime || !this.createCompletionJudge) throw new Error("Completion judge is unavailable.");
           const judgeRuntime = await abortable(signal, () => this.resolveCompletionJudgeRuntime(structuredClone(judgeSpec), { signal }));
@@ -108,7 +114,7 @@ export class TaskActorService {
       const observationContract = task.actorSetup ? task.actorSetup.behaviorContract?.observationContract ?? null
         : task.actor.promptVersion === ACTOR_PROMPT_VERSION ? ACTOR_OBSERVATION_CONTRACT : ACTOR_SETTLED_OBSERVATION_CONTRACT;
       browser = await this.openBrowser(id, signal, structuredClone(observationContract));
-      const currentNative = observationContract?.id === "task-actor-observation-v3";
+      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4"].includes(observationContract?.id);
       let previousPointer = null;
       let currentCaptures = 0;
       const currentCaptureLimit = task.actor.maxActions * 2 + 1;
@@ -156,12 +162,13 @@ export class TaskActorService {
         const reaction = await abortable(signal, () => actor.observe(captured.observation, signal, { actionSchema: workingSchema }));
         signal.throwIfAborted();
         if (!reaction || typeof reaction.comment !== "string" || reaction.comment.length > 8000) throw Object.assign(new Error("Invalid current-update reaction."), { code: "actor_invalid_action" });
-        await this.tasks.actorEvent(id, "actor_current_reaction", { observationEventId: observed.id, comment: reaction.comment, usage: reaction.usage ?? null });
+        await this.tasks.actorEvent(id, "actor_current_reaction", { observationEventId: observed.id, comment: reaction.comment, usage: reaction.usage ?? null,
+          ...(reaction.decisionEvidence ? { decisionEvidence: reaction.decisionEvidence } : {}) });
         previousPointer = pointer;
         repeatCurrent = false;
         if (reaction.action == null) workingControlRepairPending = false;
         if (reaction.action != null) {
-          validateActorAction(reaction.action);
+          validateActorAction(reaction.action, workingSchema);
           if (!captured.observation.availableActions.includes(reaction.action.kind)
             || actionsUsed >= task.actor.maxActions) throw Object.assign(new Error("Unavailable working action."), { code: "actor_invalid_action" });
           actionsUsed++;
@@ -194,21 +201,22 @@ export class TaskActorService {
         let expected;
         if (submission && submission.id !== observedSubmission) {
           const detail = await this.tasks.detail(submission.threadId, { signal });
-          const turn = detail.interactions.find((item) => String(item.id) === String(submission.interactionId));
+          // Invoke leaves the reader at its source (READ-001). The child still
+          // settles through task admission, but only explicit visible navigation
+          // opens its result. Send and Retry continue to correlate their own turn.
+          const invoke = submission.path && /^\/api\/threads\/([1-9][0-9]*)\/interactions\/([1-9][0-9]*)\/actions\/([1-9][0-9]*)\/invoke$/.exec(new URL(submission.path, "http://task.invalid").pathname);
+          if (invoke && String(submission.threadId) !== invoke[1]) throw new Error("Submitted interaction is unavailable.");
+          const visibleTurnId = invoke ? invoke[2] : submission.interactionId;
+          const turn = detail.interactions.find((item) => String(item.id) === String(visibleTurnId));
           if (!turn) throw new Error("Submitted interaction is unavailable.");
           const attemptId = turn.latestAttempt?.id;
           if (submission.path?.endsWith("/retry") && attemptId == null) throw new Error("Retried interaction has no settled attempt identity.");
-          expected = { threadId: submission.threadId, turnId: submission.interactionId, submittedAt: Date.parse(submission.at), ...(attemptId == null ? {} : { attemptId }) };
-          // READ-001 keeps invoked results discoverable from their source. The
-          // actor must not wait for navigation the user has not chosen.
-          const invoke = /^\/api\/threads\/([1-9]\d*)\/interactions\/([1-9]\d*)\/actions\/[1-9]\d*\/invoke$/.exec(submission.path ?? "");
-          if (invoke) {
-            const source = detail.interactions.find(item => String(item.id) === invoke[2]);
-            if (invoke[1] !== String(submission.threadId) || !source) throw new Error("Invoked source interaction is unavailable.");
-            expected.invokeSource = { turnId: source.id,
-              ...(source.latestAttempt?.id == null ? {} : { attemptId: source.latestAttempt.id }),
-              observedAfter: Date.now() };
-          }
+          const child = invoke && detail.interactions.find(item => String(item.id) === String(submission.interactionId));
+          if (invoke && !child) throw new Error("Submitted interaction is unavailable.");
+          expected = { threadId: submission.threadId, turnId: turn.id, submittedAt: Date.parse(submission.at), ...(attemptId == null ? {} : { attemptId }),
+            ...(child ? { invocation: { actionId: Number(invoke[3]), turnId: child.id, completionStatus: child.completionStatus,
+              attemptOutcome: child.latestAttempt?.outcome ?? null,
+              ...(child.latestAttempt?.id == null ? {} : { attemptId: child.latestAttempt.id }) } } : {}) };
         }
         phase = "observe";
         const observation = await browser.observe(expected);
@@ -234,13 +242,14 @@ export class TaskActorService {
         }
         phase = "decide";
         actionsUsed++;
-        const { action, usage } = await actor.decide(observation, signal, { outputSchema: actionSchema });
+        const { action, usage, decisionEvidence } = await actor.decide(observation, signal, { outputSchema: actionSchema });
         phase = "validate";
-        try { validateActorAction(action); }
+        try { validateActorAction(action, actionSchema); }
         catch (error) {
           if (error.code !== "actor_inconsistent_finish" || action.kind !== "finish") throw error;
           const retryAllowed = !finishRepairPending && actionsUsed < task.actor.maxActions;
-          await this.tasks.actorEvent(id, "actor_action_rejected", { observationEventId: observed.id, action, usage, category: "inconsistent_finish", retryAllowed, message: "Finish fields contradicted each other. No action was executed." });
+          await this.tasks.actorEvent(id, "actor_action_rejected", { observationEventId: observed.id, action, usage, category: "inconsistent_finish", retryAllowed, message: "Finish fields contradicted each other. No action was executed.",
+            ...(decisionEvidence ? { decisionEvidence } : {}) });
           if (!retryAllowed) throw error;
           finishRepairPending = true;
           continue;
@@ -250,7 +259,8 @@ export class TaskActorService {
         signal.throwIfAborted();
         // An intervening stop/finish or product request invalidates this choice.
         await this.tasks.settled(this.tasks.get(id), { signal });
-        const intent = await this.tasks.actorEvent(id, "actor_action", { observationEventId: observed.id, action, usage });
+        const intent = await this.tasks.actorEvent(id, "actor_action", { observationEventId: observed.id, action, usage,
+          ...(decisionEvidence ? { decisionEvidence } : {}) });
         signal.throwIfAborted();
         if (action.kind === "finish") {
           await this.tasks.actorEvent(id, "actor_satisfaction", { scale: "actor-1-4", value: action.satisfaction, comment: action.comment, endpointStatus: action.endpointStatus, remainingWork: action.remainingWork });
@@ -264,7 +274,11 @@ export class TaskActorService {
               input: judgeInput, inputDigest: setupDigest(judgeInput), evidenceContract: completionJudgeSpec(task).evidenceContract?.id ?? COMPLETION_JUDGE_EVIDENCE_CONTRACT.id,
             });
             signal.throwIfAborted();
-            const result = await abortable(signal, () => completionJudge.evaluate(judgeInput, signal));
+            const result = await abortable(signal, () => completionJudge.evaluate(judgeInput, signal, {
+              recordStage: stage => this.tasks.actorEvent(id, "actor_completion_stage", {
+                evidenceEventId: evidenceEvent.id, judge: structuredClone(completionJudgeSpec(task)), stage: structuredClone(stage),
+              }),
+            }));
             signal.throwIfAborted();
             const { usage: judgeUsage, ...assessment } = result ?? {};
             validateCompletionAssessment(assessment);
@@ -274,10 +288,9 @@ export class TaskActorService {
             });
             signal.throwIfAborted();
             if (result.verdict !== "complete" && !participantMayStopIncomplete(task, action)) {
-              if (this.tasks.get(id).completions >= this.tasks.get(id).maxCompletions) {
-                await this.tasks.finish(id, { reason: "budget_exhausted" }, { signal });
-                return;
-              }
+              // The response cap blocks new candidate execution, not inspection
+              // of existing output. Recovery still uses the action/time budget;
+              // HumanTaskService retains admission authority for response writes.
               completionJudgeFeedback = result.continuationHint;
               judgeInteractionRequired = true;
               continue;
@@ -296,7 +309,7 @@ export class TaskActorService {
           catch (error) {
             // Only the browser's own checks before click/fill/select/scroll certify no
             // dispatch. Playwright failures and product-write errors are ambiguous.
-            if (!["click", "fill", "select", "scroll"].includes(action.kind) || error.actionDispatched !== false
+            if (!["click", "fill", "select", "deselect", "scroll"].includes(action.kind) || error.actionDispatched !== false
               || !["actor_control_stale", "actor_control_unavailable"].includes(error.code)) throw error;
             const retryAllowed = !controlRepairPending && actionsUsed < task.actor.maxActions;
             await this.tasks.actorEvent(id, "actor_action_failed", { actionEventId: intent.id, actionDispatched: false,

@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-16T20:18:36.265279+00:00",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "workspaceDigest": "c67a5acedc3f370141c46ac4ffcea27d14f81e2795f43586b49fd3e5a4957dc1",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/completion-judge-source-20261016.json",
+    "sha256": "d46816e4059191d84e430714f456e6792195148e79d18a4c9c158187e70524c6",
+    "files": 31
+  },
+  "requiredPlan": "CJ-001 through CJ-006 and cumulative actor/input/endpoint checkpoints: focused tests, check, build, compiled runtime, full web, adversarial review; no paid default inference",
+  "finalCommands": {
+    "focused": {
+      "exitCode": 0,
+      "filesPassed": 10,
+      "testsPassed": 294
+    },
+    "check": {
+      "exitCode": 0,
+      "vitestFilesPassed": 334,
+      "vitestFilesSkipped": 1,
+      "vitestTestsPassed": 4360,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 99
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "compiledRuntime": {
+      "exitCode": 0,
+      "testsPassed": 12
+    },
+    "fullWeb": {
+      "exitCode": 1,
+      "wholeRunnerPassed": false,
+      "newCompletionJudgeChapterPassed": true,
+      "unreached": "remainder of native actor publication/calibration journey, subsequent task-actor-input/current-observation/judge and later runner chapters"
+    }
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/focused-final.log",
+      "sha256": "51d669263d92a629be2954610b4ec2fd46cf1b3a5cb4fe4f78cd5d5513d71449",
+      "bytes": 246,
+      "status": "passed",
+      "scope": "10 files, 294 tests; actual adapter, native judge, provider, registry, actor/session, actor Decisions, benchmark/input and node-detail seams"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/check-final.log",
+      "sha256": "bc34afe033229d0d068c516c3b77dc22ab9158755a8ab2a5026ce32aa57fb6b4",
+      "bytes": 147626,
+      "status": "passed",
+      "scope": "npm run check exit 0: formatting, Clippy, entire Rust workspace and doc tests, crash reconciliation, native/package builds, root/workspace TypeScript, Vitest 334 passed files + 1 skipped / 4360 passed tests + 3 skipped, secret-boundary 2 passed, Python99 passed, Ladybug receipt lint and PRD readability"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/build-final.log",
+      "sha256": "603396f2d52ec8f851dfd1f101d641679082ef0c219700e4b02fb4c1fb67c683",
+      "bytes": 2040,
+      "status": "passed",
+      "scope": "CARGO_BUILD_JOBS=2 npm run build exit 0 on exact final source"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/compiled-final.log",
+      "sha256": "5be98c6a875722489a53ca846115be98239b20223f1f8804a69a8fd916d47ef6",
+      "bytes": 362,
+      "status": "passed",
+      "scope": "npm run test:eval-compiled-runtime exit0; all12 scenarios passed;33.11s"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/web-final.log",
+      "sha256": "c5a1e63bd3871e7328911406c00d8da538e97dd3a41900d0786a4daef2eaa947",
+      "bytes": 4173,
+      "status": "failed",
+      "scope": "Full browser entry exit1. New Decisions actor/judge, input/endpoint UI and actor-input-v4, dispatch/native-select/redraw assertions passed. Existing native actor journey timed out in observe after Send/Invoke (two additional submissions after the initial request), status interrupted versus expected completed at scripts/test-eval-web.mjs:1145. Later chapters unreached."
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/social-preview-main.log",
+      "sha256": "1978781d826c76c39172314af25057544335b0f2f13f98fec82568c63c317c84",
+      "bytes": 14170,
+      "status": "passed",
+      "scope": "Actual production Electron social-preview capture after main integration; combined renderer receipt copied; both PNGs visually inspected and byte-identical to retained images"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/build-main.log",
+      "sha256": "53ac65b9e650dc6e627b433f873d6bb45859d0a5994705af62c0ed1f31909d57",
+      "bytes": 2405,
+      "status": "passed",
+      "scope": "Pilot main-integrated native/package build before final config snapshot freeze"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/prepare-main.log",
+      "sha256": "9bcc2d7c0b68bc80b9f95af3a627bfe6594e07c1fc41d5f0a73ad91c6d351b78",
+      "bytes": 192,
+      "status": "passed",
+      "scope": "Renderer preparation before actual social-preview capture"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/warm-main-built.log",
+      "sha256": "c5cf75754f22555ccd1b6bc14df13aaecd901cb79466009ee7732ae59da0dc3d",
+      "bytes": 241,
+      "status": "passed",
+      "scope": "Main-integrated6files206tests after package build, before final snapshot freeze assertion"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/warm-main.log",
+      "sha256": "0ee28b3212219545964c06a79d24e96e18f6e9320bd091338e9dfbf479039842",
+      "bytes": 2189,
+      "status": "failed_collection",
+      "scope": "Six files collected no tests: eval-runner package entry absent while build was in progress; not scenario failure or pass"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/warm-integrated-fixed.log",
+      "sha256": "cf4aaf5b05d53f5a017d4b3ed06504b3c1b9ff8637f8649015ca9ce723589620",
+      "bytes": 241,
+      "status": "passed",
+      "scope": "Pre-main6files203tests after fixing incorrect new assertion"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/warm-integrated.log",
+      "sha256": "816d7c475bde0abdb1fb8ff88a393ec150af2574c17b7493a6d34aceba71d542",
+      "bytes": 1505,
+      "status": "failed",
+      "scope": "Pre-main202passed1failed: new test expected raw provider preflight error; production sanitized it correctly. Assertion corrected; test retained"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/warm.log",
+      "sha256": "6034027a0103c85ae4038ce5a67557a433a2f9529aeafb98543bb71491b09a59",
+      "bytes": 241,
+      "status": "passed",
+      "scope": "Initial pre-main6files196tests"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/prd.log",
+      "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+      "bytes": 166,
+      "status": "passed",
+      "scope": "Pre-main PRD readability; final root check reran it successfully"
+    },
+    {
+      "path": ".relayer/verification/decisions-completion-judge-20261016/web.log",
+      "sha256": "014cb28d5fddbd68fadb3cb3c8334c253a6cb9c4b0ce85572f95d2b44bdee262",
+      "bytes": 4197,
+      "status": "failed",
+      "scope": "Pre-main new Decisions judge chapter passed; later existing native actor observe timeout; whole runner failed"
+    }
+  ],
+  "socialPreviewArtifactHashes": {
+    "docs/evidence/desktop-social-preview/receipt.json": "184c3c933eca17300f4dcc9526036c145e0899c04167702fde58215ea572216b",
+    "docs/evidence/desktop-social-preview/light.png": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+    "docs/evidence/desktop-social-preview/dark.png": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+  },
+  "historicalBoundary": "Original live paired comparison remains bound to 77b1b296 and its ff6c.../0d116... source receipts; it used native completion review. No new paid judge inference or current-runtime performance comparison was run. Historical failures remain preserved.",
+  "unresolved": [
+    "Full web entry failed in the existing native actor observe phase. No unchanged retry or deadline/assertion weakening was performed. Failure cause remains unresolved.",
+    "Live Decisions completion-judge quality, calibration, equivalence, latency and cost are unproved.",
+    "Known/unknown stage usage is not an invoice; cumulative native snapshots must not be summed."
+  ],
+  "wholeRequiredPortfolioPassed": false,
+  "testsDeletedOrWeakened": false
+}

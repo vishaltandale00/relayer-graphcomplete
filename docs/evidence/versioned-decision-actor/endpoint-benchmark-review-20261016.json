@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T07:59:28.186567+00:00",
+  "certification": "Non-certifying without a PR; invalidated by changes to the bound source or reports",
+  "liveWorkspaceDigest": "ff6c3a436b7ae43b2f61c98d5d121bbbed3f10835c81cb56b69ab1e76a121395",
+  "finalWorkspaceDigest": "0d1162a406f983e9d5b5e9b0a7eaa9f1971b2b35f846ab9bb0d0b9fcb151c62e",
+  "sourceScope": {
+    "manifest": "docs/evidence/versioned-decision-actor/endpoint-benchmark-final-source-20261016.json",
+    "fileCount": 27,
+    "allCurrentFileHashesAndAggregateVerified": true,
+    "solePostLiveChange": "scripts/test-eval-web.mjs explicitly selects the newly polled run before opening its execution; assertions retained",
+    "productionBytesUnchangedSinceLive": true
+  },
+  "reviewedScope": [
+    "PRD endpoint benchmark meaning and checkpoint mapping",
+    "Opt-in prompt v11/behavior v8, registry normalization, publication, catalog and UI staging/picker; historical/default isolation",
+    "Existing TaskActorService and HumanTaskService finish gates; actual Decisions adapter recovery, latest-judgment authority, budgets, cancellation and deadline tests",
+    "Frozen-binary native-first one-pair runner, source layering, execution-versus-export timing and provider authority",
+    "Raw task events, accepted composer submissions and structured-input consumption, retained incomplete-to-complete recovery",
+    "Per-request Decisions usage, terminal cumulative native simulator/judge rollouts, final per-thread candidate usage and nonoverlapping cost categories",
+    "Actor screenshot hashes and presentation audit; native final stable pixels, hybrid original unstable pixels, separate stable read-only accepted-response corroboration",
+    "Final comparison prose and metrics; endpoint semantics, pricing qualifications, calibration and causal limitations",
+    "Final required-versus-executed verification record, exact retained log hashes, Rust/workspace/crash stages, full Vitest failures, isolated exact-case result, bounded compiled retry and browser chapter boundaries",
+    "SOC-003 and ADR0012 evidence-only renderer receipt refresh: actual Electron generated receipt/output, every source and served renderer file/hash/aggregate, preserved original artifacts, distinct1200x630 light/dark captures, cancellation/session/window/server cleanup and visual inspection"
+  ],
+  "artifacts": {
+    "docs/evidence/versioned-decision-actor/endpoint-benchmark-comparison-20261016.md": "b0db1f91ddb24e60558b378b87395b633a6c81b8e51d0a3d999d3f020e1655aa",
+    "docs/evidence/versioned-decision-actor/endpoint-benchmark-comparison-20261016.json": "b889e2288dafd4f5568af34707ca565c8a63ef02947e9968e42c35e977c1a965",
+    "docs/evidence/versioned-decision-actor/endpoint-benchmark-final-source-20261016.json": "48f1b01447d695beeb7a83b11d4e2cbb872bf3e5962574c066499f20055fc66d",
+    "docs/evidence/versioned-decision-actor/endpoint-benchmark-20261016.md": "90021413cb409d80e63da8e763f14086c4763df290a4c830d20a419c5dcf6709",
+    "docs/evidence/versioned-decision-actor/endpoint-benchmark-verification-20261016.json": "308e03d92c7f0febd8f0bb23215f0885e265eb9a6cd4fa244404248d86a9afba",
+    "docs/evidence/desktop-social-preview/receipt.json": "f1092161ab898a2b17a7c770dcfac82a59fea927c64da55b443b9fe8b6e979b5",
+    "docs/evidence/desktop-social-preview/light.png": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+    "docs/evidence/desktop-social-preview/dark.png": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+  },
+  "rawEvidence": "All report rawFileHashes independently verified; native rollout hashes and terminal total/last token fields matched; candidate terminal totals independently recomputed",
+  "postRunReadOnlyCorroboration": {
+    "receipt": ".relayer/live/decision-actor-comparison/20261016-multiturn-endpoint-v11/post-run-review/receipt.json",
+    "sha256": "37c808221a4a5dbb51b02dc1478276eba2fac0229822716acd4bf76a16b43ded",
+    "acceptedIdentity": {
+      "threadId": 2,
+      "turnId": 5,
+      "attemptId": 5,
+      "layerId": 11,
+      "nodeId": 36
+    },
+    "screenshotSha256": "f8f470b9552b44d75700082845d5a80192d6d3716eceee0a92e49ddd74c4b004",
+    "stableBeforeAfter": true,
+    "providerExecutionAttempts": 0,
+    "browserWrites": 0,
+    "historicalEvidenceHashesUnchanged": true,
+    "qualification": "Corroborates persisted accepted final content; original actor capture remains unstable"
+  },
+  "verdict": "No remaining blocking static finding or material source/report/measurement/heavy-evidence mismatch in reviewed scope. Failed and unreached verification is accurately preserved; no whole-repository pass or release readiness is certified.",
+  "unresolvedFindings": [
+    "Completion is judge-reported. Categorical signal-failure triggers were accepted while numeric thresholds remained unspecified; preceding judgments demanded thresholds. This semantic/calibration limitation is unresolved.",
+    "Hybrid final actor capture crossed accepted-response identities and is not a stable bracket. Separate read-only corroboration cannot retroactively stabilize it.",
+    "One native-first stochastic pair with different paths, model roles, turn counts and judge calls on a shared host does not establish deterministic endpoint equivalence, equal operational readiness or a causal/general latency or cost advantage.",
+    "API-rate proxies are not subscription invoices; context/tier/regional adjustments remain unestablished.",
+    "Required root check and full browser entry remain failed. Isolated repairs/passes and the final compiled pass do not establish a whole-repository pass; the original first-message timeout cause remains unknown."
+  ],
+  "heavyVerification": {
+    "separateFromStaticAndLiveReview": true,
+    "finalVerificationReceiptReview": "completed",
+    "receipt": "docs/evidence/versioned-decision-actor/endpoint-benchmark-verification-20261016.json",
+    "sha256": "308e03d92c7f0febd8f0bb23215f0885e265eb9a6cd4fa244404248d86a9afba",
+    "allReferencedLogAndArtifactHashesVerified": true,
+    "rootResult": "failed; no whole-repository pass",
+    "rootPassedStages": [
+      "formatting",
+      "Clippy",
+      "complete Rust workspace including doc tests",
+      "crash reconciliation",
+      "native/package builds",
+      "root/workspace TypeScript and built-package smoke"
+    ],
+    "fullVitest": {
+      "passed": 4376,
+      "failed": 2,
+      "skipped": 3,
+      "files": 331
+    },
+    "retainedFailures": [
+      "First-message codex-basic/personal-presentation-v1 case exceeded20s; exact isolated retry1passed/6skipped,4.98s test time. Original cause remains unknown.",
+      "Stale social-preview renderer receipt; production Electron regeneration and integrity test subsequently passed without test/source weakening. Full suite was not rerun.",
+      "Full browser runner: new endpoint/input/Decisions and authority chapters passed, later existing native-actor journey interrupted rather than completed. Subsequent chapters remain unproved.",
+      "Initial compiled run9passed/3readiness-or-test-timeout failures retained; quiet unchanged-source retry12passed24.74s."
+    ],
+    "otherPassed": {
+      "focusedTests": 269,
+      "build": true,
+      "secretBoundaryTests": 2,
+      "pythonTests": 99,
+      "receiptLint": true,
+      "prdReadability": true,
+      "diffCheck": true
+    },
+    "socialPreviewReview": {
+      "authority": [
+        "docs/evidence/desktop-social-preview/README.md",
+        "PRD SOC-003",
+        "docs/decisions/0012-immutable-shared-thread-snapshots.md"
+      ],
+      "receipt": "docs/evidence/desktop-social-preview/receipt.json",
+      "receiptSha256": "f1092161ab898a2b17a7c770dcfac82a59fea927c64da55b443b9fe8b6e979b5",
+      "generatedCaptureReceiptMatchesCheckedInReceipt": true,
+      "allSourceAndRendererBindingsVerified": true,
+      "rendererAggregate": "e9fa49e39910d2d4c1abc63213d30b54971ddda3d495052df90514011a1a9e49",
+      "pngDimensions": [
+        1200,
+        630
+      ],
+      "visuallyInspectedBothThemes": true,
+      "originalPNGBytesUnchanged": true,
+      "onlyChangedSocialPreviewArtifact": "receipt.json",
+      "scope": "Production Electron local capture and integrity only; no hosted publication, social crawler or release proof"
+    }
+  },
+  "heavyEvidenceReviewedAt": "2026-10-16T08:22:04.411064+00:00"
+}

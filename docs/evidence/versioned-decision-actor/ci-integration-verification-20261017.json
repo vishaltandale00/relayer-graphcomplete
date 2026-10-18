@@ -1,0 +1,276 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-17T16:07:09.842608+00:00",
+  "workspaceDigest": "74c67233704dfd80f2be3c21f18c4f4ed55e1911c77098a78642183d81917d3d",
+  "priorTestedWorkspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-desktop-source-20261017.json",
+    "sha256": "d420d9ff9804383bdc49177f104840a1048cb706e1b466c6257ccdd8c87c0b80",
+    "files": 157
+  },
+  "priorPrHead": "862125fcfc9238d6bfe1ce429cc27c746937fb9a",
+  "integratedMain": "6bc1e76c83ddbc165a5f2cdf2b63152c9ba2f5ed",
+  "requiredPlan": "MCI001..007 in ci-integration-20261017.md plus ci-integration-desktop-fixtures-20261017.md; required commands listed separately from completed results.",
+  "commands": {
+    "focused.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "focused-boundaries.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "build.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "check.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "compiled.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "web.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "social-preview.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "annotation-capture.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "telemetry.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "desktop-node-inputs-fixed.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "desktop-interaction-context-fixed.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "desktop-project-thread.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "desktop-artifact-viewer.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    },
+    "desktop-visual-node-details.log": {
+      "exitCode": 0,
+      "requiredInnerMarkersVerified": true
+    }
+  },
+  "defaultCheck": {
+    "vitestFilesPassed": 336,
+    "vitestFilesSkipped": 1,
+    "vitestTestsPassed": 4428,
+    "vitestTestsSkipped": 3,
+    "secretBoundaryTestsPassed": 2,
+    "pythonTestsPassed": 99,
+    "nativeAndCrashStagesPassed": true,
+    "receiptLintAndReadabilityPassed": true,
+    "workerOverride": false
+  },
+  "browser": {
+    "wholeRunnerPassed": true,
+    "nativeActorActions": 9,
+    "candidateCompletions": 3,
+    "judgeIncompleteToCompleteRecovery": true,
+    "bothCurrentVariantsPassed": true,
+    "artifactCaptureAndScrollChaptersPassed": true,
+    "restartPersistencePassed": true
+  },
+  "captureInspection": {
+    "parentInspectedImages": 6,
+    "rawPngsUnmodified": true,
+    "captureGitHeadIsPreMergeHead": true,
+    "captureSourceIdentity": "Capture ran before merge commit; sourceHead records prior HEAD862125fc, while actual merged scripts/renderer/native binaries are independently hash-bound.",
+    "annotationPlusEditorConfirmationAndReloadPassed": true,
+    "telemetryLocalEvidenceOnly": true
+  },
+  "sourceTiming": "Check/browser/compiled/telemetry/capture proof tested original152d480 source and retains that identity. Only four standalone desktop drivers and their MCI007 addendum changed afterward; adversarial discovery/import/inventory audit finds no changed consumed input for those prior runners. All five actual desktop drivers and nested postfixture builds run on final source; nodefixed predates only unrelated context-selector correction. No prior command is relabeled as fresh157 execution.",
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-ci-20261017/outer-exits.json",
+    "sha256": "961fd13d1c9150520cdc8f6987f391fc65bf834108b7f246919c92b4f9ff5695",
+    "basis": "Closed unified-exec/write_stdin results observed by parent; independent inner markers required."
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/annotation-capture.log",
+      "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+      "bytes": 1017,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/build.log",
+      "sha256": "a785b98dbaca52718bb374ae4fa63c6d0bfe9bd4561b670da3bb9f9f605f084b",
+      "bytes": 2161,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/check.log",
+      "sha256": "5a9047e48b272c955ed9bf7605a498f095d0d9c5aef77d1894216adce444120e",
+      "bytes": 148025,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/compiled.log",
+      "sha256": "a3f1242aa3016f80e45ec6a6f4ad19ede22c2181ab87341c8546a5ccb258f5c9",
+      "bytes": 362,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-artifact-viewer.log",
+      "sha256": "d72c39358972b78f70e22e7135b389c5233f03cf9408881e6d638c530d7dad72",
+      "bytes": 7072,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-interaction-context-fixed.log",
+      "sha256": "f98d21d068a47a4ba9950429eba4b334d9ce7e50558c9ce6766c51d92c863541",
+      "bytes": 52769,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-interaction-context.log",
+      "sha256": "e36c8f9b1165601c3f0f537a2ccdeb85d3e3aee0f3db1225baf4fbd302c147c0",
+      "bytes": 9500,
+      "exitCode": 1,
+      "status": "failed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-node-inputs-fixed.log",
+      "sha256": "4b4c63c69744b6c25ee8792fc5434ddb0ebdd1b7df4c7f11b821c9e10752ce12",
+      "bytes": 72344,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-node-inputs.log",
+      "sha256": "c5a499b75ea712133ae77e38e5d6e25ce41b99867d742231c938b5e57bb55d21",
+      "bytes": 4862,
+      "exitCode": 1,
+      "status": "failed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-project-thread.log",
+      "sha256": "3b5ec44d0e2081dee5b68702bd240c10b28b461be412370975acb8f52f946fa9",
+      "bytes": 9898,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-visual-node-details.log",
+      "sha256": "29e22a1cf83c2e628e5943a5adfcf02ef23a0ff85e1e4dd641dbaff8ca3d146e",
+      "bytes": 27470,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/focused-boundaries.log",
+      "sha256": "5deb8073533c7021db0087dba80c32c5afb4e8e03a935016aa06c0636fcf73a1",
+      "bytes": 239,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/focused.log",
+      "sha256": "4189e0e64466573aa4042b26832cf805606c430a0469d9f6318c084adf420518",
+      "bytes": 241,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/social-preview.log",
+      "sha256": "7981a9f40b75e512d2d9bfd2ff4fe94a0ad9ff4e9b2408821c98938efacaa678",
+      "bytes": 14170,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/telemetry.log",
+      "sha256": "05e331553a338e44148bd69a64258586600d5fb0dd84962dcf183a03a6d2829b",
+      "bytes": 2196,
+      "exitCode": 0,
+      "status": "passed"
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/web.log",
+      "sha256": "3eaa85590c014e6e6108532b7fc39f4bf7615f4c35cddcfa87b9b94a130dde14",
+      "bytes": 8442,
+      "exitCode": 0,
+      "status": "passed"
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "0481b860c633052b593a4101499f2b934638cce123814dd7cc1e0cf5cc0557b5",
+      "bytes": 17657
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+      "bytes": 68977
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+      "bytes": 62710
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "5bd1e3b5441339e4019685fd4baf8dfeff699f149cbfd19d1137b1201acea44d",
+      "bytes": 3381
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "08b4f3be95a6cb91bd933f01fe9b55c0959348183f8d02a8900f02ac31c437ed",
+      "bytes": 152757
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "059d2e1fcfafde87b325253421e42e68d638bd3a1c5cbc84ac8872294f78b0ac",
+      "bytes": 153029
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "df3a72b4e91eafda7b386439a6fa5138410f358203424cbe92f486558855199d",
+      "bytes": 168372
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "1a75b51c5aa36b6f15e89816ae218bfca5b2956b95c50a27f9b46d77e560025c",
+      "bytes": 160289
+    },
+    {
+      "path": ".relayer/evidence/telemetry-v1.json",
+      "sha256": "c7b827dfaad2dbb65b7ddc3a86505cbc19a554e0ac7e812fa1413edcc9e206ea",
+      "bytes": 40052
+    }
+  ],
+  "historicalBoundary": "Hosted862125fc CI38978274466 passed; later conflict/freshness failure is not an application-test failure. New merged head requires fresh hosted CI and freshness. Previous20261016 source/artifact/review records are historical and remain at their original commits; refreshed captures do not relabel those proofs.",
+  "cacheBoundary": "Compatible normal Cargo source fingerprints reused; changed main Rust sources compiled. No fresh coding worker or third-party binary artifact adopted. No deadline or test selection changed; desktop producer/picker/replay assertions migrated to the family contract without deleting tests.",
+  "limits": [
+    "No paid application inference or live Decisions judge calibration/equivalence/quality/performance claim.",
+    "Retained Electron IPC/CSP/GPU and native build warnings are not a warning-free application claim.",
+    "Local telemetry is not a live receiver, hosted symbolication, release or deployment proof.",
+    "Fresh-head hosted CI/freshness and manual merge authority remain separate."
+  ],
+  "requiredLocalPortfolioPassed": true
+}

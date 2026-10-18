@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "workspaceDigest": "96fa71926cb61a62e0d7f397b8ed5db0272147d161ce3385b88681f18d2a4d2b",
+  "sourceReceipt": "budget-recovery-source-20261016.json",
+  "requiredPlan": "budget-recovery-20261016.md",
+  "results": {
+    "focusedBeforeFinalCopy": {
+      "passed": 171,
+      "seconds": 6.97
+    },
+    "actorAndHumanTaskAtFinalSource": {
+      "passed": 129,
+      "seconds": 4.2
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "compiledRuntime": {
+      "exitCode": 0,
+      "passed": 12
+    },
+    "web": {
+      "exitCode": 1,
+      "decisionsChapter": "passed",
+      "wholeRunner": "failed: existing native journey observe timeout after Invoke",
+      "laterChapters": "not reached"
+    },
+    "check": {
+      "command": "RUST_TEST_THREADS=2 npm run check",
+      "exitCode": 1,
+      "passedStages": [
+        "cargo fmt",
+        "cargo clippy",
+        "cargo test --workspace",
+        "check:graph-crash-reconciliation",
+        "native build",
+        "package builds",
+        "root TypeScript",
+        "workspace checks"
+      ],
+      "vitest": {
+        "passed": 4358,
+        "failed": 1,
+        "skipped": 3,
+        "filesPassed": 327,
+        "filesFailed": 1,
+        "filesSkipped": 1,
+        "failure": "test/eval-app-integration.test.mjs: retains graph-memory search and reference evidence in one product thread; both fixture responses failed acceptance"
+      },
+      "trailingStages": "Ran separately after short circuit"
+    },
+    "graphMemoryIsolated": {
+      "exitCode": 0,
+      "passed": 1,
+      "skipped": 18,
+      "scenarioSeconds": 8.89,
+      "qualification": "Does not erase broad-run failure; cause not established"
+    },
+    "secretBoundary": {
+      "exitCode": 0,
+      "passed": 2
+    },
+    "python": {
+      "exitCode": 0,
+      "passed": 99
+    },
+    "ladybugReceipts": {
+      "exitCode": 0
+    },
+    "prdReadability": {
+      "exitCode": 0
+    }
+  },
+  "logs": {
+    "focused.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/focused.log",
+      "sha256": "2294b71932475e9de44fdc16eda4b5f3a9a9304982ce0283d3e7dfac08a3de3d"
+    },
+    "budget-final.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/budget-final.log",
+      "sha256": "af787d73921765b1792cc9ef7650f44096b5658dc9914f2ca74bb59680dfbc25"
+    },
+    "build.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/build.log",
+      "sha256": "a82b1c829ea3b4db753b9802a76ad8afac9fbec6ed5133a6bb189ae646d3b292"
+    },
+    "compiled-runtime.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/compiled-runtime.log",
+      "sha256": "1a97b218b4b93f6e9babec37d4d35571bca29b7edd7d0194fd2dfe98cc378f46"
+    },
+    "web.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/web.log",
+      "sha256": "c79d338276412f9972989f1f7f8e83266bc9af3a368ed3eeb81e6a6e7ac86174"
+    },
+    "check.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/check.log",
+      "sha256": "91af313dd5b43ed3571315930da4773573c05d025b16fb81db352f330d42ede1"
+    },
+    "graph-memory-isolated.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/graph-memory-isolated.log",
+      "sha256": "23b33fe4704db5ebbe3bcb341553faa335601711e29a13a594fe9f40ead61db3"
+    },
+    "secret-boundary.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/secret-boundary.log",
+      "sha256": "e92d6d0f758368fdd7c9e996f5de0632eef39f2a513c3f74268992a0b1c106da"
+    },
+    "python.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/python.log",
+      "sha256": "002d70648078c014e23f106e2b69ef659a2ba9115b0bbba313d78214d090eb24"
+    },
+    "ladybug-receipts.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/ladybug-receipts.log",
+      "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c"
+    },
+    "prd-readability.log": {
+      "path": ".relayer/verification/budget-recovery-20261016/prd-readability.log",
+      "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321"
+    },
+    "check-pause.json": {
+      "path": ".relayer/verification/budget-recovery-20261016/check-pause.json",
+      "sha256": "33c228994b5c66c8c2ee067cd4f7a2eb5571c9c0a4e330adf8aa6382c65ceaea"
+    },
+    "check-pause-multiturn.json": {
+      "path": ".relayer/verification/budget-recovery-20261016/check-pause-multiturn.json",
+      "sha256": "d948345ffe4efa13f77b295438f5dde36634ea1644dc330ed1884026245a83c6"
+    }
+  },
+  "limitations": [
+    "Required portfolio is not fully green.",
+    "No paid inference in deterministic verification. Live results are separate experiments.",
+    "Verification was suspended while measuring live pairs and resumed afterward; pause records retain intervals.",
+    "Historical verification and experiment failures were retained."
+  ]
+}

@@ -1,0 +1,43 @@
+# PR 755: integration results
+
+The last PR head (`862125fc`) passed hosted application CI run `38978274466`. Its merge gate later failed because main advanced to `6bc1e76c` and introduced conflicts; the earlier CI window also expired. This change integrates that exact main commit, preserving both feature contracts and creating a new head for fresh CI. No required gate, deadline or assertion is bypassed.
+
+## Required plan and source
+
+[MCI-001..006](ci-integration-20261017.md) maps each conflict and secondary auto-merged executable seam to its production tests and declared heavy entry points. The [initial source manifest](ci-integration-source-20261017.json) binds the 152-file integration scope at digest `d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e`. The [qualified desktop-source manifest](ci-integration-desktop-source-20261017.json) adds four standalone fixture drivers and the [MCI-007 addendum](ci-integration-desktop-fixtures-20261017.md), for 157 files at digest `74c67233704dfd80f2be3c21f18c4f4ed55e1911c77098a78642183d81917d3d`, relative to merge base `c8225db3`. Production source is identical between those scopes. This is an explicit reviewed source scope, not a claim to have re-audited every incoming main hunk.
+
+The integration retains source-preserving Invoke with exact applied action/result/attempt lifecycle, and main's native-call deadlines and stage/dispatch evidence. Family-only requests and subscription revalidation combine with API-backed evaluator preflight, response-cap browsing/reassessment, visible-overflow scroll controls and revision-gated deselection. Compiled-input occurrence capture and partial multi-select draft persistence coexist. Both test cases remain; the obsolete timestamp-only Invoke bypass is replaced by the stricter lifecycle assertions, including stale-render rejection despite a fresh capture timestamp. No test is deleted.
+
+The plan separately requires warm tests, check/build, compiled runtime, the entire browser runner, three PRD7.0 desktop entries, artifact-viewer and visual-node-details desktop entries, actual affected image captures, telemetry evidence, and adversarial source/evidence review. Local results and hosted merge authority remain separate.
+
+## Actual local outcomes
+
+| Required entry | Actual outcome |
+| --- | --- |
+| Warm production-seam tests | Six files / 277 tests passed in 6.27 seconds; three additional native-deadline/input/observer files / 17 tests passed in 1.52 seconds. |
+| `npm run build` | Passed; changed Rust sources and all package/TypeScript builds completed. |
+| `npm run check` | Passed: Rust formatting/Clippy/workspace/doc/crash/native stages, package checks, 336 Vitest files / 4,428 tests passed; one file / three tests skipped. Secret-boundary tests: two passed. Python: 99 passed. Receipt lint and readability passed. Isolated workers remain three, process-bound one; no CLI/environment worker override. Provider full/focused captures completed in 51.8 / 24.9 seconds. |
+| `npm run test:eval-compiled-runtime` | All 12 scenarios passed in 21.14 seconds. |
+| `npm run test:eval-web` | Entire entry passed: Decisions actor/judge publication, execution/reconstruction, billing guards, nine-action native journey, three candidate completions and incomplete-to-complete judge recovery; input/minimum-two/Send flow, actual settled/working scroll, dispatch races, both native/authored current-input variants, artifact/compiled-input capture authority, judging and restart persistence. |
+| `npm run test:desktop:node-input-actions` | Passed after explicit-orchestrator/family-only fixture correction, including response-loss reconciliation and exact selected-family replay. |
+| `npm run test:desktop:interaction-context` | Passed after family contract and picker-selector correction, retaining annotation/context lifecycle and click-close/trigger-focus checks. |
+| `npm run test:desktop:project-new-thread` | Passed, including project collapse, restart and layer-selection persistence. |
+| `npm run test:desktop:artifact-viewer` | All 44 scenarios passed, including isolation, navigation, capture annotations, export and share. |
+| `npm run test:desktop:visual-node-details` | Passed actual Electron proof: accepted compiled details/assets/actions, read-only review capture, export/import and runtime cleanup, with a verified manifest. |
+| Actual social-preview Electron capture | Passed cancellation/cleanup/source binding and two inspected 1200×630 light/dark images; actual generated receipt copied to the canonical evidence directory. |
+| Actual follow-up annotation A/B Electron capture | Passed zero-paid-inference proof: A missing+, B visible+, C editable during generation, D one confirmed annotation; exact occurrence/provenance and reload retained. Four unmodified PNGs inspected independently. |
+| `npm run evidence:telemetry` | Passed native panic-capability seam and all 19 portfolio files / 184 tests; local evidence reports `ok: true`. |
+
+[Verification receipt](ci-integration-verification-20261017.json) records actual closed command exits, positive inner markers, log hashes and artifact hashes separately. Raw logs remain in the ignored local verification directory. Check/browser/compiled/telemetry/capture results retain their original 152-file tested source identity. The four later fixture-only changes are outside Vitest discovery and the explicit compiled/browser/telemetry imports and portfolios. They are outside root TypeScript src-only builds and desktop packaging/telemetry inventories. Existence/reference guards see the same paths; historical source guards resolve their immutable committed snapshots. The adversarial consumer audit found no changed content input for those completed runners. They are reused only for identical consumed inputs, not relabeled as fresh 157-file invocations. All five desktop entries execute their actual final drivers and post-fixture builds; the node-input pass precedes only the unrelated context-driver selector correction. The checkpoint plan expanded before the full check to include both declared capture desktop entries.
+
+Captures ran before the merge commit, so their `sourceHead` correctly records the prior Git HEAD. The actual merged capture scripts, served renderer, PNGs and capture-time native binaries are hash-bound independently. Current `target/debug` binary equality is not asserted. Six raw images and both source-bound capture receipts were inspected by the parent and adversarial reviewer. Build/desktop logs retain native and IPC/CSP/GPU warnings; these results do not claim a warning-free application.
+
+## Preserved failures, review and remaining boundaries
+
+The first node-input desktop run failed at explicit family admission because its old fixture lacked an orchestrator. The first migrated context run failed on a retired per-model radio selector after correctly showing the new selected family and orchestrator. Both failed command logs and their source identities remain separate in the verification receipt. The repaired real runners passed; no deadline was extended and no failure was converted into a pass. These are fixture-contract failures, separate from the earlier October 16 query/capture failures whose causes remain unresolved.
+
+The [static integration review](ci-integration-review-20261017.json) binds reviewer `/root/review_versioned_actor` to the exact 152-file digest, combined authority seams and assertion subsumption. It resolved the telemetry and two capture-desktop mapping gaps. The [qualified fixture and consumer review](ci-integration-desktop-review-20261017.json) binds the final 157-file scope and the limits of reused evidence. The [final heavy review](ci-integration-heavy-review-20261017.json) separately binds completed outcomes, exact artifact/log hashes and the limits of reused input identities. Any bound-source change invalidates the assertion.
+
+Normal compatible local Cargo fingerprints were reused, and changed Rust sources compiled. No new coding worker or third-party binary artifact was adopted; no cache replaced required tests. Earlier October 16 failed runs and unknown causes remain in their original evidence and commits. This successful integration does not retrospectively establish those causes or relabel old snapshots as current proof.
+
+No paid application inference or live Decisions-judge calibration/equivalence was run. No general quality, latency or cost advantage, arbitrary cross-provider specialist routing, live telemetry receiver/symbolication, signed packaging, release or deployment proof is claimed. Fresh hosted CI and merge freshness must qualify the new pushed head; merge remains manual.

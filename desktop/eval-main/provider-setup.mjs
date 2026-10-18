@@ -1,4 +1,6 @@
 import { abortable } from "./abortable.mjs";
+import { decisionActorConfiguration } from "./task-actor.mjs";
+import { completionJudgeDecisionConfiguration, validateCompletionJudgeSpec } from "./task-completion-judge.mjs";
 import { join } from "node:path";
 import { mkdir, writeFile, readFile } from "node:fs/promises";
 import { createManagedRuntimeInstaller } from "../main/managed-runtimes/installer.mjs";
@@ -194,6 +196,52 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
     } else if (result?.providerDefinition?.id) forgetLogin(result.providerDefinition.id);
     return result;
   };
+  async function resolveDecisionsRuntime(decision, config, options, resolveTextRuntime) {
+    const { signal } = options;
+    signal?.throwIfAborted();
+    const definition = (await definitions.list()).find(item => item.id === decision.providerId
+      && item.adapterId === "openai-api" && item.connected && item.lifecycleState === "active"
+      && item.endpoint?.replace(/\/$/, "") === "https://api.openai.com/v1");
+    if (!definition) throw Object.assign(new Error("Connect the pinned OpenAI API provider in Eval Settings before running this actor revision."), { code: "actor_authentication_required" });
+    const lease = await definitions.acquireExecution(definition.id);
+    let access;
+    try { access = await abortable(signal, () => lease.runtime.executionAccess({ signal })); }
+    finally { await lease.release(); }
+    if (access.kind !== "secret" || typeof access.fields?.["api-key"] !== "string" || !access.fields["api-key"]
+      || access.endpoint?.replace(/\/$/, "") !== "https://api.openai.com/v1") throw new Error("Pinned Decisions provider access is unavailable.");
+    // Keep credentials in a host-only closure, outside actor configuration,
+    // prompts, persisted task evidence and the native text runtime.
+    const request = async (path, init, requestSignal) => {
+      requestSignal?.throwIfAborted();
+      let response;
+      try {
+        response = await fetchImpl(`https://api.openai.com/v1/${path}`, { ...init, redirect: "error", signal: requestSignal,
+          headers: { Authorization: `Bearer ${access.fields["api-key"]}`, "Content-Type": "application/json" } });
+      } catch { requestSignal?.throwIfAborted(); throw new Error("Actor Decisions request failed."); }
+      if (!response.ok) throw Object.assign(new Error("Actor Decisions request was rejected."), { status: response.status });
+      try { return await response.json(); } catch { throw new Error("Actor Decisions response was invalid."); }
+    };
+    // Discovery verifies the exact account/model without spending inference.
+    let model;
+    try { model = await request(`models/${decision.model}`, { method: "GET" }, signal); }
+    catch (error) {
+      signal?.throwIfAborted();
+      if (error.status === 404) throw Object.assign(new Error("Pinned Decisions model is unavailable."), { code: "actor_model_unsupported" });
+      throw error;
+    }
+    if (model?.id !== decision.model) throw Object.assign(new Error("Pinned Decisions model is unavailable."), { code: "actor_model_unsupported" });
+    const textRuntime = await resolveTextRuntime(config, options);
+    return { textRuntime, decide: async (body, requestSignal) => {
+      if (body.model !== decision.model) throw new Error("Actor Decisions model does not match its revision.");
+      const result = await request("decisions", { method: "POST", body: JSON.stringify(body) }, requestSignal);
+      if (result?.model !== decision.model) throw Object.assign(new Error("Actor Decisions response model differs from its revision."), { code: "actor_model_unsupported" });
+      const answer = result?.answers?.length === 1 ? result.answers[0] : null;
+      // Do not retain free-form provider fields or error payloads.
+      const usage = Object.fromEntries(Object.entries(result?.usage ?? {}).filter(([key, value]) =>
+        ["input_tokens", "output_tokens", "total_tokens"].includes(key) && Number.isSafeInteger(value) && value >= 0));
+      return { answer: answer && { type: answer.type, name: answer.name, choice: answer.choice }, usage };
+    } };
+  }
   return Object.freeze({
     async start(profile) {
       if (profile) {
@@ -318,6 +366,17 @@ export function createEvalProviderSetup({ userDataDirectory, productServer, prod
         }
         return Object.freeze({ ...await abortable(signal, () => runtime(HARNESS_MANAGED_RUNTIME_REQUIREMENTS["codex.basic"].recipeId)), environment: access.environment });
       } finally { await lease.release(); }
+    },
+    async resolveTaskActorRuntime(config, options = {}) {
+      if (!config.decision) return this.resolveCodexJudgeRuntime(config, options);
+      return resolveDecisionsRuntime(decisionActorConfiguration(config.decision), config, options,
+        (textConfig, settings) => this.resolveCodexJudgeRuntime(textConfig, settings));
+    },
+    async resolveCompletionJudgeRuntime(config, options = {}) {
+      validateCompletionJudgeSpec(config);
+      if (!config.decision) return this.resolveCodexJudgeRuntime(config, options);
+      return resolveDecisionsRuntime(completionJudgeDecisionConfiguration(config.decision), config, options,
+        (textConfig, settings) => this.resolveCodexJudgeRuntime(textConfig, settings));
     },
     acquireExecution: (id) => definitions.acquireExecution(id),
     resolveCodexRuntime: () => runtime(HARNESS_MANAGED_RUNTIME_REQUIREMENTS["codex.basic"].recipeId),

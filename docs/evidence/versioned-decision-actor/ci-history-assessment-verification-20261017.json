@@ -1,0 +1,172 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-17T18:19:18.286516+00:00",
+  "workspaceDigest": "4a5088937be01dcc7941063f55084a77c7d28c7b57c5c823dcf6de60d0cbcfaa",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-history-assessment-source-20261017.json",
+    "sha256": "ded539af67492e7a1b0745719b04b77e667b3cde37dc1dcfdd2ff6f10c0dca76",
+    "files": 163
+  },
+  "requiredPlan": "docs/evidence/versioned-decision-actor/ci-history-assessment-20261017.md",
+  "completedCurrentCommands": [
+    "focused.log",
+    "build.log",
+    "compiled.log",
+    "web.log",
+    "check.log"
+  ],
+  "defaultCheck": {
+    "vitestFilesPassed": 336,
+    "vitestFilesSkipped": 1,
+    "vitestTestsPassed": 4439,
+    "vitestTestsSkipped": 3,
+    "secretBoundaryTestsPassed": 2,
+    "pythonTestsPassed": 99,
+    "nativeAndCrashAndLintStagesPassed": true
+  },
+  "focusedTests": 176,
+  "compiledScenariosPassed": 12,
+  "entireBrowserRunnerPassed": true,
+  "assessment": "Real persisted incomplete/complete and later-interrupted journeys reject missing/blank/oversized explanation/hint and verdict-inconsistent hints. Valid native histories, failed reporters and durable no-judgment prefixes remain.",
+  "history": "Production retained-state snapshots cross count and aggregate bounds independently, over-budget single past entries/images are removed and counted, IDs remain monotonic. Actual selector plus settled fill/finish, working fill and watch/reaction calls receive omission metadata. Current controls and255-choice rejection remain.",
+  "limits": {
+    "priorTextEntries": 127,
+    "sumOfSerializedEntryCharacters": 512000,
+    "priorImages": 127,
+    "sumOfPriorBase64Characters": 16000000,
+    "boundary": "Excludes JSON framing/current observation and screenshot. Not a model-token, total-request or provider-owned native session bound. No new latency/cost/calibration claim."
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-history-assessment-20261017/outer-exits.json",
+    "sha256": "49e13e7234e32b6ab7c9c6da40cf3af63f5426977634de491ff396ab305a58c4"
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/next-red.log",
+      "sha256": "df837412076b1ff61dbb00c6a4c5fa4f8da201704affe3bbf3d1a8b457ef55dc",
+      "bytes": 196170,
+      "actualOuterExit": 1,
+      "scope": "development: red/firstgreen/intermediatefocused"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/next-green.log",
+      "sha256": "469f72f63194dc77869b0a86b49da793b91a75099a928adccf4a2b2adf7782b6",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development: red/firstgreen/intermediatefocused"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/next-focused.log",
+      "sha256": "b106d5db4dfdc2472e36d07eaa3b8e7e1e38d383f576164e8e5f69637ae4a3c6",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "development: red/firstgreen/intermediatefocused"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/focused.log",
+      "sha256": "22a798574b116a7db62c034d7536de7ef4b64d79d9ede03f42d66b6055de0953",
+      "bytes": 241,
+      "actualOuterExit": 0,
+      "scope": "current163"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/build.log",
+      "sha256": "d3d9f5d2108b97264c43e9fdfa10b074ef518d92194116ffdfbd7baf12382989",
+      "bytes": 2040,
+      "actualOuterExit": 0,
+      "scope": "current163"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/compiled.log",
+      "sha256": "9c797de219bfd04d127114897f711153d998d72db54dc76c9e7ded8c53daf034",
+      "bytes": 362,
+      "actualOuterExit": 0,
+      "scope": "current163"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/web.log",
+      "sha256": "719a58d189f3439682a77b0b4dcf4056118a97da07893c58245b524397473ae6",
+      "bytes": 8579,
+      "actualOuterExit": 0,
+      "scope": "current163"
+    },
+    {
+      "path": ".relayer/verification/pr755-history-assessment-20261017/check.log",
+      "sha256": "8d339dab1d8f5b5e317c56e6d709158b81c47e44ebc6f151c51f547742d64d06",
+      "bytes": 147729,
+      "actualOuterExit": 0,
+      "scope": "current163"
+    }
+  ],
+  "developmentHistory": "4failed100passed before repair; firstgreen104pass. Intermediate focused172 passed5files but a mistyped native-judge filename was absent; corrected final176passed6files. No such intermediate invocation certifies final coverage.",
+  "historicalHosted039d": {
+    "runId": 39056038397,
+    "head": "039d89c4fbdee0d78f0b2835975e61e45ffe9bac",
+    "createdAt": "2026-10-17T17:58:05Z",
+    "attempt": 1,
+    "syntheticMerge": "e09c142e",
+    "base": "a2e0ee396043ab310cae46a9523ce969680f96e4",
+    "vitestTestsPassed": 4502,
+    "vitestTestsSkipped": 34,
+    "vitestFilesPassed": 338,
+    "separateLinuxSecretTestsSkipped": 2,
+    "pythonTestsPassed": 100,
+    "rustTestsPassed": 849,
+    "crashTestsPassed": 373,
+    "artifactTestsPassed": 14,
+    "records": [
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-jobs.json",
+        "sha256": "7bed46bfab3e151663bbfe73041cf3461b4cc5354ee1bb6059bad58aa7a87023",
+        "bytes": 27705
+      },
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-vitest.log",
+        "sha256": "6ef5e5aede347d0f12a12986dd162d86b4b8857bf1b54a1f0190a8009ec6871b",
+        "bytes": 325818
+      },
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-python.log",
+        "sha256": "dcef0c43d8df2381d9cf2c0d2980e1ff68ec06107082312d19c29fdc2373e972",
+        "bytes": 37055
+      },
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-rust.log",
+        "sha256": "55753ea060b47d3e2330d230d8200d776e141d8738f7356bd11fa88044f01950",
+        "bytes": 212263
+      },
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-crash.log",
+        "sha256": "f415d2a999630cd6f189e393c019d4cfabdaf61ab59e33ab27b456602c02865d",
+        "bytes": 134844
+      },
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-runtime.log",
+        "sha256": "8c4b92405564d8db666201836a872f9239b1289f6e958af2e71acf90d87b2e27",
+        "bytes": 40029
+      },
+      {
+        "path": ".relayer/verification/pr755-main-compat-20261017/hosted-build.log",
+        "sha256": "cde926fe8df2a99dec21a8ebeca46f9a3ac2ad66e51ed573f4743f0a4e724b5b",
+        "bytes": 46046
+      }
+    ],
+    "boundary": "Historical pre-two-findings head, not qualification for current163 repair. Prior Ladybug setup timeout did not recur; original exact cause remains unknown."
+  },
+  "priorReuse": {
+    "sourceManifest": "docs/evidence/versioned-decision-actor/ci-main-compat-source-20261017.json",
+    "onlyChangedPaths": [
+      "desktop/eval-main/decision-task-actor.mjs",
+      "desktop/eval-main/human-task-service.mjs",
+      "test/eval-decision-task-actor.test.mjs",
+      "test/eval-task-actor.test.mjs"
+    ],
+    "boundary": "Browser/compiled/check/build freshly rerun for changed consumers. Historical desktop/capture/telemetry results retain their exact identities; consumed production/fixture inputs exclude these four paths. No historical invocation relabeled fresh163."
+  },
+  "publicationGates": [
+    "Fresh current-head hosted CI/freshness and full merge preflight",
+    "Publish fixes before resolving two new review threads",
+    "Source/evidence adversarial review"
+  ],
+  "requiredLocalPortfolioPassed": true
+}

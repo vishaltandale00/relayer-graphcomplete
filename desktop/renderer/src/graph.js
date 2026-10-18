@@ -169,6 +169,10 @@ export function currentThreadModelSelectionPayload() {
   return workspace().modelSelectionPayload();
 }
 
+export function currentWorkspaceInvocationResults() {
+  return productWorkspace?.invocationResults() ?? [];
+}
+
 export function prepareCurrentWorkspaceTransition() {
   return productWorkspace?.prepareSelectionChange() ?? Promise.resolve(true);
 }

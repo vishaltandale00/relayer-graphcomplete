@@ -14,10 +14,14 @@ export function initializeSetupEditor({ api, root, toast, changed }) {
     root.innerHTML = `<h2>Setup revisions</h2><p>Publishing saves an immutable revision. Select it on a new run to execute it. Graph-presentation judging remains separate from overall trajectory judging.</p>
       <label>Predecessor<select id="setupPredecessor">${catalog.revisions.map((item) => `<option value="${escape(item.id)}">${escape(item.kind)} · ${escape(item.name)} · ${escape(item.id)}</option>`).join("")}</select></label>
       ${fileConfigs ? `<label>${source.kind === "completion-judge" ? "Completion judge" : "Graph judge"} config file<select id="judgeConfigFile">${fileConfigs.map((item) => `<option value="${escape(item.file)}">${escape(item.file)}</option>`).join("")}</select></label><p>Edit <code>${escape(judgeConfig.path)}</code>, then reload this panel. Publication pins its exact bytes and digest.</p>` : ""}
-      ${source.kind === "actor" ? `<button type="button" id="setupUseCurrentActor">Use current actor and completion reviewer</button>` : ""}
+      ${judgeConfig?.definition.spec?.decision ? `<p id="completionDecisionRoute">Verdict: OpenAI Decisions ${escape(judgeConfig.definition.spec.decision.model)} via ${escape(judgeConfig.definition.spec.decision.providerId)}. Written feedback: Codex ${escape(judgeConfig.definition.spec.model)}. Both connections are required and inference uses both routes. Set the connected provider ID in this YAML file before publishing. Connected OpenAI API IDs: ${(catalog.actorDecisionProviders || []).map(item => escape(item.id)).join(", ") || "none"}.</p>` : ""}
+      ${source.kind === "actor" ? `<button type="button" id="setupUseCurrentActor">Use current actor and completion reviewer</button><button type="button" id="setupUseInputActor">Use input and delivery revision</button><button type="button" id="setupUseEndpointActor">Use endpoint benchmark revision</button>` : ""}
       <form id="setupPublish">${judgeConfig ? `<p>Config digest: <code>${escape(judgeConfig.digest)}</code></p>` : `<label>Revision name<input name="name" value="${escape(source.name)}" required maxlength="200"></label>
       <label>Prompt version<input name="promptVersion" value="${escape(source.promptVersion)}" required maxlength="100"></label>
-      <label>Model<input name="model" value="${escape(source.settings.model)}" required></label>
+      <label>Action selection<select name="actorDecisionEngine"><option value="native" ${source.settings.decision ? "" : "selected"}>Codex</option><option value="decisions" ${source.settings.decision ? "selected" : ""}>OpenAI Decisions · GPT-6 Luna</option></select></label>
+      <label>Decisions API connection<select name="actorDecisionProvider"><option value="">Choose a connected OpenAI API provider…</option>${(catalog.actorDecisionProviders || []).map(item => `<option value="${escape(item.id)}" ${source.settings.decision?.providerId === item.id ? "selected" : ""}>${escape(item.label)} · ${escape(item.id)}</option>`).join("")}${source.settings.decision && !(catalog.actorDecisionProviders || []).some(item => item.id === source.settings.decision.providerId) ? `<option value="${escape(source.settings.decision.providerId)}" selected>Unavailable · ${escape(source.settings.decision.providerId)}</option>` : ""}</select></label>
+      <p>Decisions selects visible actions. Codex supplies replies and experience comments. Connect the API provider in Eval Settings; both connections are required. Publication keeps this choice in the new revision.</p>
+      <label>Codex text model<input name="model" value="${escape(source.settings.model)}" required></label>
       <label>Reasoning<select name="modelReasoningEffort">${["low", "medium", "high"].map((value) => `<option ${source.settings.modelReasoningEffort === value ? "selected" : ""}>${value}</option>`).join("")}</select></label>
       <label>Exploration<select name="exploration">${["low", "medium", "high"].map((value) => `<option ${source.settings.exploration === value ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>Meticulousness<select name="meticulousness">${["low", "medium", "high"].map((value) => `<option ${source.settings.meticulousness === value ? "selected" : ""}>${value}</option>`).join("")}</select></label><label>Action limit<input name="maxActions" type="number" value="${source.settings.maxActions}" min="1" max="500"></label><label>Deadline in minutes (including startup)<input name="timeoutMinutes" type="number" value="${source.settings.timeoutMs / 60000}" min="1" max="60" step="any" required></label>
       ${source.behaviorContract?.completionJudge ? `<p id="setupCompletionReviewer">Completion reviewer: ${escape(source.behaviorContract.completionJudge.model)} · ${escape(source.behaviorContract.completionJudge.modelReasoningEffort)} reasoning · ${escape(source.behaviorContract.completionJudge.version)}. ${source.behaviorContract.participantMayStopIncomplete ? "Endpoint claims require approval; the participant may stop with unresolved work recorded." : "This revision requires its approval to finish."}</p>` : `<p id="setupCompletionReviewer">This historical revision lets the actor decide when to finish.</p>`}
@@ -53,11 +57,28 @@ export function initializeSetupEditor({ api, root, toast, changed }) {
       root.querySelector("#setupCompletionReviewer").textContent = `Pending new revision: ${definition.behaviorContract.completionJudge.model} · ${definition.behaviorContract.completionJudge.modelReasoningEffort} completion review. Publish to save; existing runs stay unchanged.`;
       toast(`New revision will use ${definition.behaviorContract.completionJudge.model} completion review. Select feedback and publish to save it.`);
     };
+    const stageInputActor = (definition, message) => {
+      source = { ...source, behaviorContract: structuredClone(definition.behaviorContract), settings: { ...source.settings, promptVersion: definition.promptVersion,
+        ...(source.settings.decision ? { decision: { ...source.settings.decision, contractId: "openai-decisions-codex-text-v2" } } : {}) } };
+      root.querySelector('[name="promptVersion"]').value = definition.promptVersion;
+      root.querySelector('[name="promptTemplate"]').value = definition.promptTemplate;
+      root.querySelector("#setupCompletionReviewer").textContent = message;
+      toast("Revision staged. Publish with motivating feedback to save it; default promotion remains separate.");
+    };
+    const inputActor = root.querySelector("#setupUseInputActor");
+    if (inputActor) inputActor.onclick = () => stageInputActor(catalog.actorInputDefinition, "Pending input and delivery revision. Genuine unfinished stopping remains available. Publish with motivating feedback to save it.");
+    const endpointActor = root.querySelector("#setupUseEndpointActor");
+    if (endpointActor) endpointActor.onclick = () => stageInputActor(catalog.actorEndpointDefinition, "Pending endpoint benchmark revision. Normal completion requires judge approval; Stop, failures and budgets remain authoritative.");
     root.querySelector("#setupPublish").onsubmit = (event) => { event.preventDefault(); void run(async () => {
       const data = Object.fromEntries(new FormData(event.target));
+      const actorSettings = source.kind === "actor" ? { ...source.settings } : null;
+      if (actorSettings) {
+        if (data.actorDecisionEngine === "decisions") actorSettings.decision = { contractId: source.settings.decision?.contractId ?? (["task-actor-v7", "task-actor-v8"].includes(source.behaviorContract?.id) ? "openai-decisions-codex-text-v2" : "openai-decisions-codex-text-v1"), providerId: data.actorDecisionProvider, model: "gpt-6-luna" };
+        else delete actorSettings.decision;
+      }
       const revision = await api.publishSetup(judgeConfig ? { kind: source.kind, configFile: judgeConfig.file, configDigest: judgeConfig.digest, predecessorId: source.id, feedback } : { ...source, name: data.name, promptVersion: data.promptVersion,
         promptTemplate: data.promptTemplate, ...(source.kind === "judge" ? { inputPromptTemplate: data.inputPromptTemplate } : {}),
-        settings: { ...source.settings, model: data.model, modelReasoningEffort: data.modelReasoningEffort,
+        settings: { ...(actorSettings ?? source.settings), model: data.model, modelReasoningEffort: data.modelReasoningEffort,
           ...(source.kind === "actor" ? { exploration: data.exploration, meticulousness: data.meticulousness, maxActions: Number(data.maxActions), timeoutMs: Math.round(Number(data.timeoutMinutes) * 60000) } : {}) },
         predecessorId: source.id, feedback });
       await changed(); await open(revision.id); root.querySelector("#setupPublished").textContent = `Published ${revision.id}`;

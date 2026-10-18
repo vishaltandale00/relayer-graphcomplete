@@ -448,7 +448,17 @@ function configureInput(host, action, resolveCurrentAction, onInput, onInputEdit
     });
   }
   host.addEventListener("change", () => {
-    if (host.localName === "select") reportEdit([...host.selectedOptions].map((option) => option.value));
+    if (host.localName === "select") {
+      const value = [...host.selectedOptions].map((option) => option.value);
+      // A partial choice is a local edit even when it cannot yet be committed
+      // (for example, the first of two required signals). Keep it through
+      // validation refusal and ordinary refresh, just like a text draft.
+      inputDrafts.add(context.mountId);
+      capabilityStates.set(context.mountId, {
+        ...(capabilityStates.get(context.mountId) ?? {}), value, error: null,
+      });
+      reportEdit(value);
+    }
     const submitted = submit();
     reportEdit(null, submitted);
   });

@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T19:57:51.866352+00:00",
+  "reviewType": "Adversarial static source/authority/checkpoint review",
+  "workspaceDigest": "c67a5acedc3f370141c46ac4ffcea27d14f81e2795f43586b49fd3e5a4957dc1",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/completion-judge-source-20261016.json",
+    "sha256": "d46816e4059191d84e430714f456e6792195148e79d18a4c9c158187e70524c6",
+    "files": 31,
+    "allFileHashesAndAggregateVerified": true
+  },
+  "mapping": "docs/evidence/versioned-decision-actor/completion-judge-20261016.md CJ-001 through CJ-006; PRD13.2.4",
+  "reviewedScope": [
+    "Completion judge Decisions execution contract/spec, bounded evidence transform, selector/reporting branch and reconstruction helper",
+    "Explicit host-selected verdict, singleton reporter schema, immutable config/input capture, malformed/refusal/mismatch/transport/cancellation/persistence failure boundaries and no fallback",
+    "Separate actor/judge provider contract validation, private shared OpenAI transport, exact account/model/endpoint preflight, credential confinement and production index resolver wiring",
+    "Strict file-backed YAML catalog/publication spec matching, native bootstrap/default/history preservation, release identity and selection",
+    "TaskActorService and direct HumanTaskService independent/release subscription-only admission before provider or candidate/task creation",
+    "Awaited selector/reporter stage evidence persistence, selector per-request usage versus cumulative native-session usage, original screenshot/input binding, request reconstruction and export validation; diagnostic stages grant no finish authority",
+    "Actual adapter/provider/registry/service tests, failure/recovery/reopen/export/tamper cases and full-web publication/disclosure/selection/release billing-guard chapter",
+    "Renderer setup route disclosures, completion picker and release recomputation, API spending notice and task detail route identity"
+  ],
+  "verdict": "No actionable blocking correctness, authority or product-mapping finding in the reviewed exact source. No production code or tests were edited by this review.",
+  "findings": [],
+  "unresolvedProofLimits": [
+    "Static inspection and reviewed test assertions do not establish completed heavy entry points. Final exact-source build/check/compiled/full-web outcomes require separate log review.",
+    "The API completion-judge path has no separately observed live inference or calibration evidence; fixture tests do not establish judgment accuracy, native equivalence, latency or cost advantage.",
+    "Existing ordinary participant revisions retain authority to stop unfinished despite a non-complete judge verdict. Judge-gated stopping requires an explicitly selected benchmark/older gated actor contract.",
+    "Stage reconstruction binds logical selector and restricted-native actor inputs to retained evidence; partial/unknown usage remains unavailable and must not be reported as zero or added across cumulative snapshots."
+  ],
+  "verification": {
+    "paidInferenceStartedByReviewer": false,
+    "testExecutionByReviewer": false,
+    "heavyEvidenceReview": "pending final receipt",
+    "noWholeRepositoryPassClaim": true
+  },
+  "certification": "Non-certifying until included as a bounded assertion in the PR; any reviewed source change invalidates this receipt. Historical static/live/heavy receipts remain unchanged."
+}

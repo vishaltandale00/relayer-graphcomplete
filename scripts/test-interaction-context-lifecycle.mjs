@@ -461,8 +461,6 @@ async function run() {
   });
   const modelSelection = {
     familyId: fixtureFamily.id,
-    providerId: "codex",
-    modelId: "fixture-model",
   };
   const thread = await productRequest("/api/threads", {
     method: "POST",
