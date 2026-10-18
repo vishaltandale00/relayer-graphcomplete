@@ -1,0 +1,265 @@
+{
+  "schemaVersion": 1,
+  "workspaceDigest": "0d1162a406f983e9d5b5e9b0a7eaa9f1971b2b35f846ab9bb0d0b9fcb151c62e",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/endpoint-benchmark-final-source-20261016.json",
+    "sha256": "48f1b01447d695beeb7a83b11d4e2cbb872bf3e5962574c066499f20055fc66d"
+  },
+  "liveSourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/endpoint-benchmark-source-20261016.json",
+    "sha256": "637f7af791844029b49d66f8b530526ccfdcd2540e2d16195aed450cf3ef7ef8"
+  },
+  "sourceHashesMatch": true,
+  "productionUnchangedSinceLive": true,
+  "requiredPlan": [
+    "actual-service red/green regressions and focused deterministic portfolio",
+    "build",
+    "resource-bounded check",
+    "compiled-runtime",
+    "full web entry",
+    "existing social-preview evidence refresh when renderer manifest stale",
+    "separately authorized native/Decisions live pair",
+    "adversarial authority/measurement/heavy evidence review"
+  ],
+  "runs": [
+    {
+      "command": "New actual-service regression against preceding v7 stopping contract",
+      "status": "expected_failure",
+      "failure": "Incomplete/uncertain verdict admitted unfinished stop; only one judgment, no recovery",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/red.log",
+        "sha256": "fe097115d5dd5c6a007b1e8c8304ba8da5cc18fb912ac0089178da3e5af105a4"
+      }
+    },
+    {
+      "command": "npx vitest run test/eval-endpoint-benchmark.test.mjs test/eval-task-actor.test.mjs test/eval-human-task.test.mjs test/eval-setup-registry.test.mjs test/eval-decision-task-actor.test.mjs test/eval-provider-setup.test.mjs test/eval-actor-inputs.test.mjs test/node-detail-runtime.test.mjs --maxWorkers=2",
+      "status": "passed",
+      "passed": 269,
+      "files": 8,
+      "durationSeconds": 8.94,
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/focused-handoff.log",
+        "sha256": "76d3a605d1c1b21db9da015539c931e4aad31160dbf0e0e89de4aa05067c916b"
+      }
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 npm run build",
+      "status": "passed",
+      "source": "ff6c3a436b7ae43b2f61c98d5d121bbbed3f10835c81cb56b69ab1e76a121395",
+      "qualification": "Later test-only selection repair changed no compiled input",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/build.log",
+        "sha256": "f44298ea98aa4c93c76ac91494327b96fea8141412f545b77d5cf2dfe6a1ec85"
+      }
+    },
+    {
+      "command": "npm run test:eval-web (initial)",
+      "status": "failed",
+      "failure": "Observer waited for new run ID but did not select it before execution click; new endpoint chapter not reached",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/web.log",
+        "sha256": "c4e14e5d3fadb460295cb4253a074ead6a71115f5c38baa50f5c24457336509b"
+      }
+    },
+    {
+      "command": "npm run test:eval-web (explicit run selection repaired)",
+      "status": "failed",
+      "passedChapters": [
+        "startup interruption and persisted lifecycle",
+        "host/review authority",
+        "Providers/Settings",
+        "human task",
+        "Decisions revision",
+        "input revision",
+        "endpoint benchmark UI publication/selection/isolation",
+        "actor inputs and real Send",
+        "dispatch redraw race",
+        "opened native select"
+      ],
+      "failure": "Later existing native actor proveTaskActor interrupted during startup/observation; expected completed. Later chapters unreached.",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/web-selection-fixed.log",
+        "sha256": "eafd25dc16055ba91a63e19ce93e8988823ee2b18e43da02a7916e8ac5dcb6ad"
+      }
+    },
+    {
+      "command": "VITEST_MAX_WORKERS=1 npm run test:eval-compiled-runtime (initial, concurrent browser run)",
+      "status": "failed",
+      "passed": 9,
+      "failed": 3,
+      "failure": "Readiness and test timeouts; cause not established",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/compiled.log",
+        "sha256": "d66e5f0a94a1340b63a70a8ed5971dcc15369d20eb79b4ea327c1616d0a6b683"
+      }
+    },
+    {
+      "command": "CARGO_BUILD_JOBS=2 VITEST_MAX_WORKERS=2 RUST_TEST_THREADS=2 npm run check",
+      "status": "failed",
+      "passedStages": [
+        "cargo fmt",
+        "cargo clippy",
+        "complete Rust workspace including doc tests",
+        "graph crash reconciliation",
+        "native/package builds",
+        "root TypeScript",
+        "workspace TypeScript and built-package smoke"
+      ],
+      "vitest": {
+        "passed": 4376,
+        "failed": 2,
+        "skipped": 3,
+        "files": {
+          "passed": 328,
+          "failed": 2,
+          "skipped": 1,
+          "total": 331
+        }
+      },
+      "failures": [
+        "test/first-message-composer-integration.test.mjs: codex-basic/personal-presentation-v1 case exceeded20s",
+        "test/desktop-social-preview-evidence.test.mjs: prior renderer manifest stale after preceding input edits"
+      ],
+      "unreached": [
+        "secret-boundary/Python/Ladybug receipt/PRD tail of combined command; each executed separately"
+      ],
+      "wholeRepositoryPass": false,
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/check-resource-bounded.log",
+        "sha256": "2ae8486e52b386656b7a5d06342223c23c752e69b5699fb0dd37d2c12bcd9ef5"
+      }
+    },
+    {
+      "command": "VITEST_MAX_WORKERS=1 npm run test:eval-compiled-runtime (quiet retry)",
+      "status": "passed",
+      "passed": 12,
+      "durationSeconds": 24.74,
+      "qualification": "One unchanged-source lower-contention retry; earlier failure retained",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/compiled-quiet.log",
+        "sha256": "0bfc4167a99301440bbe1292fce0b1b61cb8f73f93eb5c5d3f1dbbaf2096b78f"
+      }
+    },
+    {
+      "command": "npm run evidence:share-preview",
+      "status": "passed",
+      "authority": "Existing PRD SOC-003, ADR0012, docs/evidence/desktop-social-preview/README.md",
+      "evidence": "Actual production Electron light/dark capture, distinct1200x630 images, cancellation/cleanup, source/renderer identity before and after, root visual inspection; no live share publication",
+      "preservedOriginal": ".relayer/verification/endpoint-benchmark-20261016/social-preview-before/",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/social-preview-refresh.log",
+        "sha256": "990ede65d287a392750da161472d15ae0b6f16e9bd10e5b93a3248f4d640c222"
+      }
+    },
+    {
+      "command": "npx vitest run test/desktop-social-preview-evidence.test.mjs --maxWorkers=1",
+      "status": "passed",
+      "passed": 1,
+      "qualification": "Regenerated receipt only; PNGs byte-identical to preceding evidence. Full suite not rerun.",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/social-preview-integrity-final.log",
+        "sha256": "517265266b87ed75d63f86cf63f847bd7c9405272c482d4240785248a3a5e421"
+      }
+    },
+    {
+      "command": "npx vitest run test/first-message-composer-integration.test.mjs --maxWorkers=1 -t exact failing case",
+      "status": "passed",
+      "passed": 1,
+      "skipped": 6,
+      "qualification": "Only timed-out case retried in isolation; original full-portfolio timeout retained, cause not established",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/first-message-isolated.log",
+        "sha256": "fa0f5e25ec12afd6976dcc6a3672ed79404ec0e0ec37dc11c76c6ba15698daf6"
+      },
+      "testSeconds": 4.98
+    },
+    {
+      "command": "VITEST_MAX_WORKERS=1 npm run test:codex-secret-boundary",
+      "status": "passed",
+      "passed": 2,
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/secret-boundary-final.log",
+        "sha256": "288c618b6ec7b5df72e608157b1ad832f660bbf6668c7d3778cf0cf7f4ca9676"
+      }
+    },
+    {
+      "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests",
+      "status": "passed",
+      "passed": 99,
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/python-final.log",
+        "sha256": "d5214df4343451a16dee38daef5d4dc0dffbeb531e289bcb537b293c8e3cb30c"
+      }
+    },
+    {
+      "command": "npm run lint:ladybug-receipt",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/receipt-lint-final.log",
+        "sha256": "1b529311a19916ae37ad0c7261c097146039939448083be45c049ce58fca625c"
+      }
+    },
+    {
+      "command": "npm run prd:check-readability",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/prd-final.log",
+        "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321"
+      }
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed",
+      "log": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/diff-final.log",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      }
+    }
+  ],
+  "evidenceArtifacts": [
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "f1092161ab898a2b17a7c770dcfac82a59fea927c64da55b443b9fe8b6e979b5",
+      "previous": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/social-preview-before/receipt.json",
+        "sha256": "ee08671370d8bf784b8b1dfb8187301ea764c31dc926939ed4a79d0f66b74913"
+      },
+      "unchanged": false
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+      "previous": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/social-preview-before/light.png",
+        "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979"
+      },
+      "unchanged": true
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+      "previous": {
+        "path": ".relayer/verification/endpoint-benchmark-20261016/social-preview-before/dark.png",
+        "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+      },
+      "unchanged": true
+    }
+  ],
+  "liveReport": {
+    "path": "docs/evidence/versioned-decision-actor/endpoint-benchmark-comparison-20261016.json",
+    "sha256": "b889e2288dafd4f5568af34707ca565c8a63ef02947e9968e42c35e977c1a965"
+  },
+  "liveProse": {
+    "path": "docs/evidence/versioned-decision-actor/endpoint-benchmark-comparison-20261016.md",
+    "sha256": "b0db1f91ddb24e60558b378b87395b633a6c81b8e51d0a3d999d3f020e1655aa"
+  },
+  "postRunReadOnlyReview": {
+    "path": ".relayer/live/decision-actor-comparison/20261016-multiturn-endpoint-v11/post-run-review/receipt.json",
+    "sha256": "37c808221a4a5dbb51b02dc1478276eba2fac0229822716acd4bf76a16b43ded"
+  },
+  "noTestsRetired": true,
+  "noPaidInferenceInDeterministicSuite": true,
+  "rootResult": "failed; no whole-repository pass",
+  "noBroadUnchangedRetry": true,
+  "capturedAt": "2026-10-16T08:20:07.916Z"
+}

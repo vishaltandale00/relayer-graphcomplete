@@ -1,0 +1,597 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-16T22:50:38.122758+00:00",
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "workspaceDigest": "1c93b250db31571086e0f25c7f9047d4cdbecd74145a2e29aff003a682a7f074",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-qualified-source-20261016.json",
+    "sha256": "7c384894e33654abeb28cd321f8eacfa2bbc8732d4d16467e449d8bb11721624",
+    "files": 40
+  },
+  "requiredPlan": "NAT001..011 plus cumulative Decisions actor/judge/input/endpoint checkpoints: warm in-process, check/build, compiled, entireweb, PRD7.0 assembleddesktop3, actualSOC/annotationcaptures, adversarialsource/heavyreview; no paid default inference",
+  "finalCommands": {
+    "check": {
+      "exitCode": 0,
+      "workerPolicy": {
+        "isolated": 3,
+        "processBound": 1,
+        "cliOrEnvironmentOverride": false
+      },
+      "vitestFilesPassed": 334,
+      "vitestFilesSkipped": 1,
+      "vitestTestsPassed": 4368,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 99
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "compiledRuntime": {
+      "exitCode": 0,
+      "testsPassed": 12
+    },
+    "fullWeb": {
+      "exitCode": 0,
+      "testedWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "standaloneBrowserAndProductionInputsUnchangedInQualifiedSource": true,
+      "wholeRunnerPassed": true,
+      "nativeActorActions": 9,
+      "candidateCompletions": 3,
+      "completionJudgments": [
+        "incomplete",
+        "complete"
+      ],
+      "bothCurrentInputVariantsPassed": true,
+      "judgeAndPersistencePassed": true
+    },
+    "desktopNodeInputs": {
+      "exitCode": 0,
+      "productionSourceIdenticalToFinal": true,
+      "testedWorkspaceDigest": "7288fceb21bc8dbfbc4dbd997ae3c4ce8fcedc78adae62b842dc8fb489890fe0",
+      "scope": "Desktop/runtime source unchanged; current-proof fixture-only file changed during separate work and is not consumed by this runner."
+    },
+    "desktopInteractionContext": {
+      "exitCode": 0,
+      "testedWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "desktopInputsUnchangedInQualifiedSource": true
+    },
+    "desktopProjectNewThread": {
+      "exitCode": 0,
+      "testedWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "desktopInputsUnchangedInQualifiedSource": true,
+      "restartPersistence": true,
+      "layerSelectionRestartPersistence": true
+    },
+    "annotationCapture": {
+      "exitCode": 0,
+      "paidInferenceCalls": 0,
+      "imagesVisuallyInspected": 4,
+      "reloadRestores": true
+    },
+    "annotationIntegrity": {
+      "exitCode": 0,
+      "testsPassed": 1
+    },
+    "socialPreview": {
+      "exitCode": 0,
+      "imagesVisuallyInspected": 2,
+      "rendererSourceIdenticalToFinal": true
+    }
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/native-actor-timeout-20261016/outer-command-exits.json",
+    "sha256": "9bd6bfdd9b19a7a0c570aacdc67c18dabf90f96b7afae3dddb00c31a8e30245c",
+    "unknownHistoricalExitsRemainNull": true
+  },
+  "logs": [
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/annotation-capture.log",
+      "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2",
+      "bytes": 1017,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/annotation-integrity.log",
+      "sha256": "b531566802b3b2795f775b85a9d165ec3183c5ef5d6e8cc7ad7aea471f5049ac",
+      "bytes": 232,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/applied-render-green.log",
+      "sha256": "e3a9e93314c377d411045628c114e23289a71abf681e9aab68a0b836c8c8b5ed",
+      "bytes": 239,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/build-final.log",
+      "sha256": "7618c79c8ee49df017eb22fb344519fe516e728f27af816e8e77ce8ca3343f88",
+      "bytes": 2040,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/build-finalized.log",
+      "sha256": "fa3a7e1432d992a22245ddf2a9b81ed1d7a73c2cb39805bd99550b8510936837",
+      "bytes": 2040,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Exact qualified40-file standalone npm run build exit0."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/calibration-assertion-probe.log",
+      "sha256": "b34e7c9600e1068d607da4091700f1b6af4513d54884ff89e41f38ad98b838c8",
+      "bytes": 5339,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-after-evidence.log",
+      "sha256": "9780d0c556da00b71c4789fab792f3cebe4a5df5ca4952be00e1025af44f4117",
+      "bytes": 147107,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Historical49ff complete check passed4368+secret2+Python99; not relabeled as finalized5a."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-final.log",
+      "sha256": "e5c431c1eddfda37b29df6f70dfe68654e147f8acba291b780cff19810e6ed94",
+      "bytes": 146285,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "Historical49ff check: only stale annotation receipt failed;4367 tests passed,1 failed,3 skipped; later secret/Python/lint/readability stages not reached. Capture regenerated, not hash-patched."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-finalized.log",
+      "sha256": "a68a402fb79aeb273046f08511c2f38873a4c973b5ac84a6bf94e36bf1b1724e",
+      "bytes": 146504,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "Failed5a default-concurrency rootcheck: native stages passed; one250ms search returned wall_time_exceeded versusgranted;4367 passed1failed3skipped. Secret/Python/lint/readability unreached. Not relabeled asqualified pass."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-qualified-retry.log",
+      "sha256": "d0d2507368ae75614aef1894b320525f6db1577292a168c896c573852d92af3a",
+      "bytes": 146649,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Exact qualified40-file unchanged full rootcheck retry exit0 with default repository worker policy (isolated3/process-bound1): Rust/clippy/doc/crash, builds/TypeScript,334files4368 Vitest pass (1file/3tests skipped), secret2, Python99, receipt lint, readability."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-qualified.log",
+      "sha256": "f9d618d1b6043396d332de1108f2f7e79f4078a10ecb69d39726404cb4804c9d",
+      "bytes": 146484,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "First qualified40-file default check failed only provider-video capture: child finished180016ms at its180000ms ceiling after one frame; cause unknown.4367 passed1failed3skipped. Latersecret/Python/lint/readability unreached; bounds and failure retained."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/compiled-final.log",
+      "sha256": "da2b86b6b0eb173e1074ac1a9ad39380fe46aaa421638117ea4bf64447495817",
+      "bytes": 362,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/compiled-finalized.log",
+      "sha256": "8398cfe62e8d63c8de7602188bcb856eeece906193b1d28b4858706730786807",
+      "bytes": 362,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Exact qualified40-file compiled-runtime12 scenarios passed."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/correlation-expanded.log",
+      "sha256": "8a1cdc1014606a7320147b954fd6355eb8f60439996d5ae898758e203d5128c8",
+      "bytes": 239,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/correlation-green.log",
+      "sha256": "fc345f76accc676d065e68a4a86bc223ee070e78d93e8e431049eb3a5087442c",
+      "bytes": 239,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/correlation-red.log",
+      "sha256": "87f732e22e26a139c9a2422f314fc312961f1f3b6d2463fc57166cccae6bf220",
+      "bytes": 1488,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Real service regression: Invoke expected child while page correctly retained source; Send distinction passed."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-input-poll-gate-final.log",
+      "sha256": "f56e4d5aa6e13f532a1dbc7ff4bbfeb9e8b04608bcb12a3e863808a313d91e37",
+      "bytes": 2098,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Final fixture source; both native/authored complete current cases passed after draining/holding unchanged background state reads before actor-visible capture."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-input-poll-gate-green.log",
+      "sha256": "f56e4d5aa6e13f532a1dbc7ff4bbfeb9e8b04608bcb12a3e863808a313d91e37",
+      "bytes": 2098,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Pilot poll gate passed both current cases before refining first-capture setup boundary; not exact final fixture."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-delayed-red.log",
+      "sha256": "9ce528c1bef99736234485d18a67fd704d7d9b1d788a394fa339241f17c5efa0",
+      "bytes": 1584,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "Held genuine marker publication: captured node29 versus published30 after DOM restored. Existing guard correctly rejects stale dispatch; controlled failure preserved."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-green.log",
+      "sha256": "0b3858a196c7bab0029ef28f9f2487f2683a61a7b0bf187b8d01aa48c5b73a94",
+      "bytes": 1073,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "Discarded strict-newer-than-refresh timestamp setup stalled and ended with closed page/outer assertion failure. Dedup allows identical refresh without new observedAt; not a green despite filename."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-probe.log",
+      "sha256": "e00124d37611a76220960d62d8257e467f3b04f8d56760dd9058d9c59f5a299b",
+      "bytes": 1713,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-restored-green.log",
+      "sha256": "e2eea064c54e716eae6134e98695612306751b818c7c3ab9b4985c545b2632f2",
+      "bytes": 1073,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "Discarded fresh-control-detachment setup assumed unchanged refresh must replace controls; ended with closed page/outer assertion failure. Not a green despite filename."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/current-rebind-scope-green.log",
+      "sha256": "c114d2b834312f59120fad49e90c88b949c99ccaa974142973f4f6048128c4f9",
+      "bytes": 1171,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Focused authored-current passed after real after-paint original-scope wait; same originalref/pointer and one positiveact."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/delayed-render-fixture.log",
+      "sha256": "8f1f990ab7c46426d664814127636d1143b4785dd8f4ef55efc05f9557dd0a07",
+      "bytes": 1610,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Invalid compiled-asset fixture used wrong mount attribute, rejected as unsafe markup; setup failure."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/delayed-render-red-corrected.log",
+      "sha256": "351fd088c0f2ac4f1aa9fa1e42bd1caed1c2601cf6c8413de0254633874845a2",
+      "bytes": 1330,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Real compiled-asset pending render reproduced false terminal readiness before applied-render metadata fix;852ms."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/delayed-render-red.log",
+      "sha256": "136653c1464f8438ef659b2733f54858b5740e0f9776f615ebd7976b1b9b32e1",
+      "bytes": 1209,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Invalid new fixture timed out; setup failure, not production-bug proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/desktop-interaction-context.log",
+      "sha256": "e172a6b15c9de1dc036a7ad7148a24e841bae41b2a59239fa7cc4f93be39fed0",
+      "bytes": 52769,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Actual declared assembled runner passed on final5a, including nested npm run build; retained IPC warnings."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/desktop-node-inputs.log",
+      "sha256": "961cbe78aa74859cc716a11a17602ba2a094dc036390ef042c8e391cf8d8f548",
+      "bytes": 77136,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Actual inference-free assembled proof passed on7288; every production source byte is unchanged in final5a. No warning-free claim; retained IPC/CSP warnings."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/desktop-project-thread.log",
+      "sha256": "d72f47fb3ee565b4fcc228c7f36888ceeada332f5a190c736607914132c7df7c",
+      "bytes": 9614,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Actual declared runner passed on final5a; positive result includes restart, project collapse and layer-selection restart persistence; nested build passed."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/focused-applied-final.log",
+      "sha256": "d8378b68db89356e3f723c888eee54a72d5f76586d5fe818da16c76cfed0a47c",
+      "bytes": 245,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/focused-final.log",
+      "sha256": "eda689853c74100806b3065ece11c5137ab33aad6ef5aa27efb4dbbb873e2116",
+      "bytes": 243,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/focused-frozen.log",
+      "sha256": "209a02f95fc382a8c533ab804e735b8ca72461bb9ee2b7e05867bf24bd2d6947",
+      "bytes": 245,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "10files334 in-process tests passed on a7ef; final check separately reruns whole current portfolio."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/native-correlated.log",
+      "sha256": "a283af3bcc8bf5512de63462b094fcd04c2354d3a599a39d3a0582e3be48e300",
+      "bytes": 3281,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/native-identity-probe.log",
+      "sha256": "8e25fff6f7bcd770fcd46455c497b7a3f4b5fc7335421daa9a62dfce53ee9f95",
+      "bytes": 4330,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Original expected child3/attempt3 versus rendered source2/attempt2."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/native-no-preflight-red.log",
+      "sha256": "340783210d1b1bfcac25c50e7ff9b96737d868cfeb494f837a1f57b32a5bce84",
+      "bytes": 1578,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/native-only-fixed.log",
+      "sha256": "02954137dd674dd78f6bcedd26dec3a16de1272351bec79591ff6462585834d0",
+      "bytes": 2596,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/native-only-red.log",
+      "sha256": "01e1c0ace21bf98396fd5dc09d5c1c352b9412c801d2d0b1cb45a9c6168fdd65",
+      "bytes": 2713,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/native-result-navigation.log",
+      "sha256": "ad278b7f77b4d29a061fde93a634012ae60639f9c83b003fca37d2705e3cd057",
+      "bytes": 3726,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/prepare-applied.log",
+      "sha256": "9bcc2d7c0b68bc80b9f95af3a627bfe6594e07c1fc41d5f0a73ad91c6d351b78",
+      "bytes": 192,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/prepare-renderer.log",
+      "sha256": "9bcc2d7c0b68bc80b9f95af3a627bfe6594e07c1fc41d5f0a73ad91c6d351b78",
+      "bytes": 192,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/provider-capture-focused.log",
+      "sha256": "e1b401e27fc480a714ce5012c657822273f246a1aea77eb9b89eaabd127d5196",
+      "bytes": 408,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Unchanged exact full-provider capture test passed alone; other tests unselected in this focused diagnostic. It does not establish original timeout cause or replace the whole check."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/render-correlation-green.log",
+      "sha256": "f11e292afa7b46e7f2bef0c08d20e803cf2b7bd21010af03e8a8ecdd0dbc51a6",
+      "bytes": 239,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/render-status-red.log",
+      "sha256": "087b11324625b286f39679b84f7de4e7f9ca7b458b2da6f636ac5b4abfde45f0",
+      "bytes": 1341,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Accepted source plus still-running invocation incorrectly satisfied old readiness; exact result lifecycle correlation added."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/result-assertion-probe.log",
+      "sha256": "fff0743e419028377f6ca427af99f7a15bfeedc1056822d92ab14e6f7eea11d6",
+      "bytes": 3164,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/result-control-probe.log",
+      "sha256": "d24a1abc311d96ab053559214d948e1ba393843a8b78b25af12dd69d80c0acc4",
+      "bytes": 3900,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/search-deadline-focused.log",
+      "sha256": "35c0a76d555294e8d70ff3ff1cc6e75ecc65aa96d3df6ebcb2aa0826f915593b",
+      "bytes": 251,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Unchanged5a native two-target search cases passed alone6.74s;20 othercases intentionally unselected in this diagnostic. Does not prove contention caused original failure."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/search-worker-policy-green.log",
+      "sha256": "cc42129a1fde1ddf14f38a768eb2a64c3b36a0670fb4305e03f063004c1386ff",
+      "bytes": 251,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Qualified cap3 source: same two actual native target cases pass3.78s;20 othercases unselected in focused check. Full qualified check separately covers all335 files."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/social-preview-applied.log",
+      "sha256": "4ea9ceae4c38f76860fea59eceb5a920fd6817b0e7c6b87e479e23382b112307",
+      "bytes": 14170,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/social-preview.log",
+      "sha256": "cc5a8857ca4fe05b9547e31d4d88d26a5acc1a05010e3b0dedc93adb398494d9",
+      "bytes": 14170,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/startup-probe.log",
+      "sha256": "a283af3bcc8bf5512de63462b094fcd04c2354d3a599a39d3a0582e3be48e300",
+      "bytes": 3281,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "Transitional diagnostic/setup capture; preserved historical result, not exact finalized proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/startup-scope-race-red.log",
+      "sha256": "cb68426a36bea9afa5a71c33495f8f3e6a151f85c4a91977d8c2e1e56bcb4fbb",
+      "bytes": 1646,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "Two genuine RAFs overwrote forged turn with1; unchanged rejection assertion then failed. Adversarial accessor fixture fixes setup."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-applied-final.log",
+      "sha256": "23142a1b5ae6cf29780f01255605f96ffa38a61360459ac9b8f741d4fe9887ea",
+      "bytes": 3732,
+      "exitCode": null,
+      "status": "failed",
+      "scope": "a7ef repaired native journey passed, subsequent adversarial spoof preflight failed because direct presentation assignment was overwritten by real paint."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-final.log",
+      "sha256": "75a177635f27c461ea1007f61be28207e1a7b84b6ddd227529eef5e4e55222c6",
+      "bytes": 7015,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "49ff native/calibration/plain-current passed; authored-current stale published selection failed; judge/persistence unreached."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-finalized.log",
+      "sha256": "11a6004d76028d6ade9bda0adf794fee883d7f7f48f2f306a5beb6232520236f",
+      "bytes": 7317,
+      "exitCode": 0,
+      "status": "passed",
+      "scope": "Exact finalized5a whole browser entry exit0; all named chapters including both current cases, concurrent-redraw failure authority, native ninth-action result navigation, calibration, judge and persistence."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-projection-pilot.log",
+      "sha256": "dcd7eaff57fd4052bd2c4ade37b6b7652ac9823b4a739a727d62ece450136ba9",
+      "bytes": 7378,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "35-file raw-status pilot full browser passed; later adversarial delayed-asset red invalidated this as final readiness proof."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-ready.log",
+      "sha256": "83eb0b4d5944c3b53fec61292700cc8452faa10d4fab2b82c742c8fcdc526a72",
+      "bytes": 6174,
+      "exitCode": 1,
+      "status": "failed",
+      "scope": "7288 native/calibration passed; plain-current live Answer detached during stability; nondispatch unproved so correctly terminal; authored/judge/persistence unreached."
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-stable-final.log",
+      "sha256": "11a6004d76028d6ade9bda0adf794fee883d7f7f48f2f306a5beb6232520236f",
+      "bytes": 7317,
+      "exitCode": null,
+      "status": "passed",
+      "scope": "85ab whole browser pass before EOF-only style repair and later independently exposed current-fixture races."
+    }
+  ],
+  "artifacts": [
+    {
+      "path": "docs/evidence/desktop-social-preview/receipt.json",
+      "sha256": "a43322da6e0871810f9b6fabaad79a0f92d4a7e1c1fb8cd5ca2ca7aefeef4779",
+      "bytes": 17657
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/light.png",
+      "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+      "bytes": 68977
+    },
+    {
+      "path": "docs/evidence/desktop-social-preview/dark.png",
+      "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+      "bytes": 62710
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/receipt.json",
+      "sha256": "dde0367646a88d64bbe6c63379ad7d407d19fb0010ccf22d9b1f1c334479abb6",
+      "bytes": 3381
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/A-before-missing-plus.png",
+      "sha256": "0b1ad3fe257f28ac48fe32637f6a1a3b2dcd8c58e4dff2ed558f347fc2f955d9",
+      "bytes": 153998
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/B-after-plus-visible.png",
+      "sha256": "2d8766fe5bc0b9787cc69b9d7af9405615fecefb687ad57b4d7108f633b50e38",
+      "bytes": 154131
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/C-after-editor.png",
+      "sha256": "0d1aa51a277ec99fa53f993b36c96d05d854bcc05d80d6dd0eec31db883efb68",
+      "bytes": 169621
+    },
+    {
+      "path": "docs/evidence/followup-node-annotations/D-after-confirmed.png",
+      "sha256": "a28cc988ef5e01b7696ab79d99849840e7ff28986da0d31d82bd29f353ade7ae",
+      "bytes": 161597
+    }
+  ],
+  "sourceReuse": "Normal compatible Cargo target cache through source fingerprints; no cold native worker or incompatible artifact adopted. Earlier trusted Ladybug archive rejected for Cargo.lock mismatch. Cached outputs never substitute for actual tests. Capture-time native binary identities retained in annotation receipt; current target/debug equality not asserted.",
+  "historicalBoundary": "Original paired live comparison used native judge on earlier77b1b296/source receipts, differentpaths andturncounts; unchanged. No new paid judge inference/calibration or current-runtime latency/cost advantage claimed.",
+  "unresolved": [
+    "First qualified-source provider capture timed out; original cause remains unknown despite unchanged focused and whole-check successes.",
+    "Live Decisions judge quality/calibration/equivalence/latency/cost unproved.",
+    "Hosted CI/packaging and release/deployment evidence are separate; no release context requested."
+  ],
+  "wholeRequiredLocalPortfolioPassed": true,
+  "testsDeletedOrWeakened": false,
+  "testSubsumption": "Only redundant second detached-handle assertion replaced; original real detach plus original ref/pointer rebind success and all adverse guards retained. Delayed real-render regressions replace new backing-state-only pilot tests; existing queued-persistence test retained."
+}

@@ -21,6 +21,10 @@ export async function proveCurrentActor({ browser, directory, authored = false }
   const reconciliation = deferred();
   const terminalReadCheck = deferred();
   const approvalResumed = deferred();
+  const releaseInputRefreshes = deferred();
+  const stateReads = new Set();
+  let holdInputRefreshes = false;
+  let inputRefreshesHeld = false;
   let pendingDeliveryObserved = false;
   const resources = [];
   let controller;
@@ -112,12 +116,39 @@ export async function proveCurrentActor({ browser, directory, authored = false }
       openBrowser: async (sessionId, signal, observationContract) => {
         controller = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal, observationContract });
         actorPage = browser.contexts().at(-1).pages()[0];
+        await actorPage.route("**/api/state?*", async route => {
+          if (holdInputRefreshes) await releaseInputRefreshes.promise;
+          const finished = route.request().response().then(response => response?.finished()).catch(() => {});
+          stateReads.add(finished);
+          try { await route.continue(); await finished; }
+          finally { stateReads.delete(finished); }
+        });
+        const observeCurrent = controller.observeCurrent.bind(controller);
+        controller.observeCurrent = async (...args) => {
+          const observed = await observeCurrent(...args);
+          if (!inputRefreshesHeld && observed?.kind === "observation" && observed.pointer.revision === 1) {
+            // This fixture's provider holds revision 1 until Answer. Freeze only
+            // unchanged background reads while proving one fill and one click;
+            // the separate dispatch-race chapter retains concurrent redraw proof.
+            inputRefreshesHeld = true;
+            holdInputRefreshes = true;
+            await Promise.all([...stateReads]);
+            await actorPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+            // Capture the first actor-visible reference only after draining reads.
+            // No action has been chosen or dispatched from the setup capture.
+            return observeCurrent(...args);
+          }
+          return observed;
+        };
         const originalAct = controller.act.bind(controller);
         controller.act = async (...args) => {
           try {
             await originalAct(...args);
             if (args[0].kind === "click" && !receivedAnswer) assert.equal(answerRequests, 1, "one explicit Answer click must deliver the staged value");
-          } catch (error) { console.error("CURRENT_ACTOR_ACTION_FAILURE", error.message, error.code, error.actionDispatched); throw error; }
+          } catch (error) { releaseInputRefreshes.resolve(); console.error("CURRENT_ACTOR_ACTION_FAILURE", error.message, error.code, error.actionDispatched); throw error; }
+          finally {
+            if (args[0].kind === "click") { holdInputRefreshes = false; releaseInputRefreshes.resolve(); }
+          }
         };
         await actorPage.route("**/api/threads/*/interactions/*/live-answers", async route => {
           if (route.request().method() !== "POST") {
@@ -242,7 +273,17 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               await navPage.locator("#nodeLayer .graph-node").filter({ hasText: "Working finding 2" }).click();
               await navPage.getByRole("button", { name: "Earlier finding", exact: true }).waitFor();
               await navPage.evaluate(async () => { const { refreshState } = await import("/src/threads.js"); await refreshState(window.__taskActorPresentation.threadId); });
-              await navPage.waitForFunction(element => !element.isConnected, forged);
+              await navPage.getByRole("button", { name: "Earlier finding", exact: true }).waitFor();
+              await navPage.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+              // DOM readiness precedes the observer's after-paint publication.
+              // Reuse the original ref only after its original scope is painted.
+              await navPage.waitForFunction(pointer => {
+                const p = window.__taskActorPresentation;
+                return p?.observedAt >= pointer.observedAt && p.graphVisible === true
+                  && p.currentPointer?.mode === "following" && p.currentPointer.revision === pointer.revision
+                  && ["threadId", "turnId", "attemptId", "layerId", "selectedNodeId", "completionStatus"].every(key => String(p[key]) === String(pointer[key]))
+                  && JSON.stringify(p.navigationPath) === JSON.stringify(pointer.navigationPath);
+              }, captured.pointer, { timeout: 30000 });
               console.log("CURRENT_AUTHORED_NAV_STAGE", "activating_rebound");
               await nav.act({ kind: "click", ref: choices[0].ref }, { current: { expected, pointer: captured.pointer } });
               await navPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true }).waitFor();
@@ -366,6 +407,7 @@ export async function proveCurrentActor({ browser, directory, authored = false }
     if (actorPage && !actorPage.isClosed()) await actorPage.screenshot({ path: resolve(".relayer/current-pointers-live-failure.png") }).catch(() => {});
     throw error;
   } finally {
+    releaseInputRefreshes.resolve();
     reconciliation.resolve();
     approvalResumed.resolve();
     gates.forEach(gate => gate.resolve());

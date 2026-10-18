@@ -1,0 +1,158 @@
+{
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "priorSourceDigest": "c67a5acedc3f370141c46ac4ffcea27d14f81e2795f43586b49fd3e5a4957dc1",
+  "digestMethod": "sorted repository-relative path + NUL + file bytes",
+  "workspaceDigest": "49ff4b49989d73b31ac207d785c9a146863e8231039d9700c5d756e74bb52bfb",
+  "files": [
+    {
+      "path": "desktop/eval-main/decision-task-actor.mjs",
+      "sha256": "ee07cd27af5ff43e97b56b2e6e3dfeca7cbdd29634d1d7756883ac955937eeb3"
+    },
+    {
+      "path": "desktop/eval-main/evaluator-selection.mjs",
+      "sha256": "ddb8a7f9a9c87a9e8be17fb34ca5e43a4b446d3e70efbf81990f534df87bb8aa"
+    },
+    {
+      "path": "desktop/eval-main/human-task-service.mjs",
+      "sha256": "285d0a98d49af00885aa24f48ee19bda2d419d64785373748e7c967715d5121b"
+    },
+    {
+      "path": "desktop/eval-main/index.mjs",
+      "sha256": "aff1a593b6281d7af5659122e1c6ff4318a4ff1ed8e4de1836f7e4ad896baa16"
+    },
+    {
+      "path": "desktop/eval-main/provider-setup.mjs",
+      "sha256": "212aca1739293affdaef0605c16d8decc7355d3ff5c0303e91602c7c7bbacd5b"
+    },
+    {
+      "path": "desktop/eval-main/setup-registry.mjs",
+      "sha256": "d1ed9b1696fa0f85b4834f6b0c60ceb38f305f691631271c046197e9d667b324"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-browser.mjs",
+      "sha256": "19e2ed3bf7dec3615ba8179adceccfd8fe9e6799c8394c040d3cce0308b7c7ca"
+    },
+    {
+      "path": "desktop/eval-main/task-actor-service.mjs",
+      "sha256": "fd7938af1a981dd6fdb4ce94df37dc39f8b555632fb20ff7b6c02aca990f6c63"
+    },
+    {
+      "path": "desktop/eval-main/task-actor.mjs",
+      "sha256": "ae42c9de2f247f468a7557c9ba3953cec70d29c75dabbd3a21528f43723019f6"
+    },
+    {
+      "path": "desktop/eval-main/task-completion-judge.mjs",
+      "sha256": "2a1c9deca35c9d47e3f2d715c8cde6fdc54f9acb7680a1ad3e466256b4ced4c0"
+    },
+    {
+      "path": "desktop/eval-main/web-host.mjs",
+      "sha256": "4eaa97708439efa448121eb73efdd83bbd83f8330406f05353d2ea41dfb2145a"
+    },
+    {
+      "path": "desktop/eval-renderer/human-tasks.js",
+      "sha256": "5682a357650ff80ab9eee1c745669d94118b7d7a5eab6097b93a5d2b9e65cb75"
+    },
+    {
+      "path": "desktop/eval-renderer/index.html",
+      "sha256": "81fae771bfd2af1b65750f90601a1cb05513d48a66d8e0395a90764564903b27"
+    },
+    {
+      "path": "desktop/eval-renderer/setup-editor.js",
+      "sha256": "537163add5a76bebc021f35d13753c9074f9dd1eae9120ab7652975e6ef0c815"
+    },
+    {
+      "path": "desktop/eval-renderer/web-bridge.js",
+      "sha256": "8bac030b3a16eb500f7868386740baf7ccc94a12cb5b6253d759cdb237e8b3cb"
+    },
+    {
+      "path": "desktop/renderer/src/graph.js",
+      "sha256": "b111c43aa2379a02177918f8df0a4a64c7837d953a53d25beb655ee0f138f26e"
+    },
+    {
+      "path": "desktop/renderer/src/human-task-observer.js",
+      "sha256": "78fc94eb804a36b02283baf80915a86bf1f5bb36062d4bd5f901c2d9c6b17161"
+    },
+    {
+      "path": "desktop/renderer/src/main.js",
+      "sha256": "bc0fcdc18245dd44dc87f4a5f2c546c78bf100876a7d9ec4d90300f7fbdfc935"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/node-detail-runtime.js",
+      "sha256": "4ea386e09e20ca0c06ed4000586c130b6fcc0dc126d752717289a4be4c6386c7"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/view.js",
+      "sha256": "b7b2f65a263214b5a0b8559a560d49d956c16c94c677f08a1e11a5444f5ad441"
+    },
+    {
+      "path": "desktop/renderer/src/product-workspace/workspace.js",
+      "sha256": "9f85bf400053dcb6552fecdac0141300d08940756c0a8040b387d62eb7aeeac5"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "4feff5d2dbb5b32c8f9576f20ca2b5c9f77bb589a380592b6f5ab33033bdff4c"
+    },
+    {
+      "path": "eval-configs/completion-judges/README.md",
+      "sha256": "e4bc1591285953a215547dd73eea0fe1dbe172664e353c9575aff12cafabc5f9"
+    },
+    {
+      "path": "eval-configs/completion-judges/completion-judge-v3-decisions.yaml",
+      "sha256": "c0d3918435be312eb555791340c32807e45aedb25ca96ec5a49de54f2c39e0f4"
+    },
+    {
+      "path": "package.json",
+      "sha256": "327cc770b1c75ae3e25f37856c9945589c9ff768992abe1240703d73c2a755cd"
+    },
+    {
+      "path": "scripts/eval-actor-inputs-proof.mjs",
+      "sha256": "10accafe1945629b7fea29fbe757f3a41368e23bfbe64b9608251906d3cbc959"
+    },
+    {
+      "path": "scripts/test-eval-web.mjs",
+      "sha256": "2a3fb4a67f8433ecfd0f79b676ffbe5331e9da58cf76244452029414d1824f12"
+    },
+    {
+      "path": "test/eval-actor-inputs.test.mjs",
+      "sha256": "f0f180eee5510ed6ee5bffac128c2ee052de39a57315ccbf8c3216640e285825"
+    },
+    {
+      "path": "test/eval-decision-task-actor.test.mjs",
+      "sha256": "c7899ab60f3a683d259f701af21dd69bbd80f2e64734855fe8001ff69c03c40d"
+    },
+    {
+      "path": "test/eval-decisions-completion-judge.test.mjs",
+      "sha256": "0bfa30276b0f0a9260bc72a0de711e9d02452bc03975c1cb91c7edc6fa97b153"
+    },
+    {
+      "path": "test/eval-endpoint-benchmark.test.mjs",
+      "sha256": "2dd41d00ee12a8b49545341a63bf415598cb83081f35e72237b26a108add6b69"
+    },
+    {
+      "path": "test/eval-human-task-observer.test.mjs",
+      "sha256": "2a595de84a7dd5bb1164e652b31af3e1ab182f72d02292caa465de703e34ba0d"
+    },
+    {
+      "path": "test/eval-human-task.test.mjs",
+      "sha256": "1e9abe38b1a4afa44345c0283c2e94d0191aa82d510714518eff03954f9121ee"
+    },
+    {
+      "path": "test/eval-provider-setup.test.mjs",
+      "sha256": "64d64e57d2bb2e9bf19da82a5d3e75ab3e58f7489006d3bb2bafd4112ad753f1"
+    },
+    {
+      "path": "test/eval-setup-registry.test.mjs",
+      "sha256": "e8804ddad8b0e3c17af36bc862c8cddbb6524b58fa544d2a1b1eef2ee36f8882"
+    },
+    {
+      "path": "test/eval-task-actor.test.mjs",
+      "sha256": "ba394df99d90dd4cde9ac6c174a27483417b15b4423d9f6c35a95945464ab976"
+    },
+    {
+      "path": "test/node-detail-runtime.test.mjs",
+      "sha256": "edd5cd59d35aeb6df41e0fa8a5dd7c46f330a22d95b22b108b95b2eb544f19a3"
+    }
+  ],
+  "priorAppliedSourceDigest": "a7efcc805937df254a9ff69658c9fbef7c82336ef6741a98ca94e25a88569d81",
+  "priorStableSourceDigest": "85ab792153ed7ca89542688aff0e6644fa706cfdeb0b722dfa0a8adfde0c20e3"
+}

@@ -1,0 +1,18 @@
+{
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16",
+  "implementationWorkspaceDigest": "dedd1cc66f3d41a06250a6c9274b16f79cace9184a5df83c7b572f79f958d5d2",
+  "reportSha256": "99f448110d483096baed482d08b3b1be6f470e16e4ec080aa4c9071e543955e9",
+  "metricsSha256": "f656ab0c737b8d05d252894704927f6c28f94aaf1f0a2a957bdc3fbd3987ed96",
+  "judgeProposalSha256": "51fd9d62a7d419d23ddfed4f7c0bba46013a5c828239bb8cd8d38f3dba0e732d",
+  "scope": "Report, metrics and judge proposal against raw timing/actions, coverage audits, all29 screenshot bindings, sampled rendered screenshots, native rollout counters and official pricing. Shared semantic navigation operations, incremental usage, complete versus incomplete exposure, rejected finish, completion-cap termination, counterfactual API cost and preserved judge authority.",
+  "verdict": "No material mismatch or blocking design finding. No unresolved material audit finding.",
+  "unresolvedMaterialAuditFindings": [],
+  "limitations": [
+    "Non-certifying without a PR.",
+    "The hybrid's incomplete exposure and unequal history prevent a claim of faster successful task completion.",
+    "API-equivalent cost estimates are not native subscription charges or measured subscription savings.",
+    "The judge navigation design is a proposal, not an implemented or tested judge execution contract.",
+    "Invalidated if a reviewed report, metrics or proposal file changes."
+  ]
+}

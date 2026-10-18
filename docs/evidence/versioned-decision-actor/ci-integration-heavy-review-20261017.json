@@ -1,0 +1,217 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-17T16:09:47.058217+00:00",
+  "pullRequest": 755,
+  "reviewType": "Final adversarial CI-integration heavy evidence, rendered artifacts and scoped source-reuse review",
+  "workspaceDigest": "74c67233704dfd80f2be3c21f18c4f4ed55e1911c77098a78642183d81917d3d",
+  "baseCommit": "c8225db3139f1c944022b50d2293c14d7f5862f0",
+  "priorPrHead": "862125fcfc9238d6bfe1ce429cc27c746937fb9a",
+  "integratedMain": "6bc1e76c83ddbc165a5f2cdf2b63152c9ba2f5ed",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-desktop-source-20261017.json",
+    "sha256": "d420d9ff9804383bdc49177f104840a1048cb706e1b466c6257ccdd8c87c0b80",
+    "files": 157,
+    "allFileHashesAndAggregateIndependentlyVerified": true
+  },
+  "originalTestedSourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-source-20261017.json",
+    "sha256": "240cf74f80f039bcff9cb77651745adcf53dde7fa3c6aa31673518aa0169ad81",
+    "workspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e",
+    "all152FileHashesUnchanged": true
+  },
+  "verificationReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-verification-20261017.json",
+    "sha256": "ce5292e08f166ad24eebe8899019fbfb6d278920c55788e73ca61d700f0bdd0b",
+    "logs": 16,
+    "artifacts": 9,
+    "allRecordedLogArtifactHashesAndByteSizesIndependentlyVerified": true
+  },
+  "resultsProse": {
+    "path": "docs/evidence/versioned-decision-actor/ci-integration-results-20261017.md",
+    "sha256": "c59cecf1523236fcab5a37e716b935f0fe1821dec930774dd0ac1d0cb51d4bb8"
+  },
+  "outerExitAttestation": {
+    "path": ".relayer/verification/pr755-ci-20261017/outer-exits.json",
+    "sha256": "961fd13d1c9150520cdc8f6987f391fc65bf834108b7f246919c92b4f9ff5695",
+    "basis": "Parent attests actual closed unified-exec/write_stdin process results; reviewer independently checked every recorded exit against this attestation and inspected required positive inner results. No exit inferred from filenames."
+  },
+  "priorStaticReviews": [
+    {
+      "path": "docs/evidence/versioned-decision-actor/ci-integration-review-20261017.json",
+      "sha256": "b1f2fc8e4b1cdbc1ba091b3676c349d98d3ebf89d6eab5d3ecc96ed43e8d3bb0"
+    },
+    {
+      "path": "docs/evidence/versioned-decision-actor/ci-integration-desktop-review-20261017.json",
+      "sha256": "64f8347fcceae8096ff0c828cabf9b047f8ea4d2dc61ce337bcc7717e347e31c"
+    }
+  ],
+  "reviewedScope": [
+    "MCI-001..007 source/checkpoint mapping, conflict integration, authority assertions and fixture subsumption from exact static reviews",
+    "Actual complete native/Rust/doc/crash/package/TypeScript/default Vitest/secret/Python/lint/readability outcomes, standalone build and compiled runtime",
+    "Whole browser sequence including exact nine-action native result navigation, three candidate admissions, judge rejection/recovery, Decisions actor/judge stages and request reconstruction, billing guards, inputs/Send, settled and working scroll, dispatch races, both current variants, compiled input/artifact capture, judge and restart",
+    "All five declared desktop entries on final consumed inputs; post-fixture nested builds; initial node/context failures remain separate",
+    "Actual regenerated canonical SOC/annotation receipts and six PNGs; source set, renderer inventory/aggregate, baseline/fixed script and PNG hashes, durable occurrence/reload",
+    "Actual visual-node-details manifest, all eight registered tile hashes/dimensions, positive read-only/asset/export/import/theme assertions and representative rendered images",
+    "Telemetry native panic capability, explicit nineteen-file184-test privacy portfolio and local evidence ok result",
+    "Unchanged-input reuse eligibility from157-source consumer audit; historical pre-merge capture HEAD distinguished from actual content identity; fresh hosted authorization remains separate"
+  ],
+  "completedOutcomes": {
+    "warmTests": {
+      "files": 9,
+      "testsPassed": 294,
+      "scope": "277tests in6files plus17 in3additional files; counts kept separate in original logs"
+    },
+    "rootCheck": {
+      "exitCode": 0,
+      "testedWorkspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e",
+      "nativeAndCrashStagesPassed": true,
+      "vitestFilesPassed": 336,
+      "vitestFilesSkipped": 1,
+      "vitestTestsPassed": 4428,
+      "vitestTestsSkipped": 3,
+      "secretBoundaryTestsPassed": 2,
+      "pythonTestsPassed": 99,
+      "finalLintAndReadabilityPassed": true,
+      "workerPolicy": "isolated3/process-bound1; no worker CLI/environment override",
+      "providerCaptureDurationsMs": [
+        51820,
+        24911
+      ]
+    },
+    "standaloneBuild": {
+      "exitCode": 0,
+      "testedWorkspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e",
+      "postFixtureNestedBuildsAlsoPassed": true
+    },
+    "compiledRuntime": {
+      "exitCode": 0,
+      "testsPassed": 12,
+      "durationSeconds": 21.14,
+      "testedWorkspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e"
+    },
+    "fullBrowser": {
+      "exitCode": 0,
+      "wholeRunnerPositive": true,
+      "nativeActorActions": 9,
+      "candidateCompletions": 3,
+      "judgeIncompleteToCompleteRecovery": true,
+      "bothCurrentVariantsAndScrollProofsPassed": true,
+      "artifactCompiledInputCapturePassed": true,
+      "judgeAndRestartPassed": true,
+      "testedWorkspaceDigest": "d4803c3ca4c3b0f3a6269d2b817fa1f33ec0d8964ed306abf2ce07070256d58e"
+    },
+    "desktopNodeInputs": {
+      "exitCode": 0,
+      "positiveInferenceFreeMarker": true,
+      "exactFamilyReplayRetained": true,
+      "timing": "Pass precedes only unrelated context-selector correction; consumed node-driver inputs unchanged"
+    },
+    "desktopInteractionContext": {
+      "exitCode": 0,
+      "positiveInferenceFreeMarker": true,
+      "selectedFamilyOrchestratorCloseAndFocusRetained": true
+    },
+    "desktopProjectNewThread": {
+      "exitCode": 0,
+      "positiveResult": true,
+      "restartPersistence": true,
+      "projectCollapse": true,
+      "layerSelectionRestartPersistence": true
+    },
+    "desktopArtifactViewer": {
+      "exitCode": 0,
+      "passed": 44,
+      "failed": 0,
+      "isolationNavigationAnnotationScreenshotAndExportShareAssertionsPassed": true
+    },
+    "desktopVisualNodeDetails": {
+      "exitCode": 0,
+      "positiveWrapperResult": true,
+      "manifestAssertionsVerified": true,
+      "readOnlyMutationRejected": true,
+      "acceptedPackageUnchanged": true,
+      "reopened": true,
+      "portableAssetReopenedAndImported": true
+    },
+    "telemetry": {
+      "exitCode": 0,
+      "nativePanicTestsPassed": 5,
+      "portfolioFilesPassed": 19,
+      "portfolioTestsPassed": 184,
+      "localEvidenceOk": true,
+      "liveReceiverOrSymbolicationClaim": false
+    },
+    "canonicalCaptures": {
+      "socialExitCode": 0,
+      "annotationExitCode": 0,
+      "socialImagesInspected": 2,
+      "annotationImagesInspected": 4,
+      "socialSourceFilesVerified": 10,
+      "servedRendererFilesVerified": 101,
+      "exactRendererFileSetAndAggregateVerified": true,
+      "generatedSocialReceiptMatchesCanonical": true,
+      "annotationAHasNoPlus": true,
+      "annotationBHasPlus": true,
+      "annotationCEditableDuringGeneration": true,
+      "annotationDHasOneConfirmedAttachment": true,
+      "canonicalOccurrenceAndReloadVerified": true
+    }
+  },
+  "supplementalVisualManifest": {
+    "path": ".relayer/evidence/visual-node-details/run-2026-10-17T16-06-25.407Z-ee3ff044/manifest.json",
+    "sha256": "c37b13a09266390fe491ce7860e4caccd516b44a6914755dad1d8cfe75a062ea",
+    "loggedDigestMethod": "SHA256(JSON.stringify(parsed manifest)), not pretty-printed file bytes",
+    "compactJsonSha256": "f9e485e605325389befbb8c92b7619ce906b76f8cdee899be8ec0425e941b161",
+    "loggedCompactDigestIndependentlyVerified": true,
+    "registeredCaptures": 8,
+    "allRegisteredTileHashesAndDimensionsVerified": true,
+    "representativeImagesVisuallyInspected": [
+      "accepted read-only full detail",
+      "light Product window with input and illustration",
+      "imported read-only full detail with portable illustration"
+    ],
+    "scope": "Supplemental actual manifest inspected directly; raw file hash differs from the logged compact JSON hash by documented serialization only. Representative images are not a claim to have visually inspected every manifest image."
+  },
+  "reuseVerdict": {
+    "approved": true,
+    "basis": "All152 original source hashes remain identical. Only four standalone desktop drivers and MCI007 mapping addendum are added. Prior root/browser/compiled/telemetry/captures retain d480 identity; consumer audit found no changed content input for them. Actual five desktop runs and nested builds observe repaired final drivers. No pre-fixture runner is relabeled as a fresh157-file invocation.",
+    "captureHeadBoundary": "Capture sourceHead correctly remains pre-merge Git HEAD862125fc; actual merged scripts,101served-renderer files, images and capture-time native binaries are independently bound. Current target/debug byte equality is not asserted.",
+    "cacheBoundary": "Compatible Cargo source fingerprints reused while changed main Rust source compiled; no new worker/third-party binary artifact adopted and no cached result substitutes for tests."
+  },
+  "preservedFailures": [
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-node-inputs.log",
+      "sha256": "c5a499b75ea712133ae77e38e5d6e25ce41b99867d742231c938b5e57bb55d21",
+      "exitCode": 1,
+      "cause": "Custom singleton family fixture omitted required explicit orchestrator and was rejected before candidate execution; corrected real node proof passes without relaxing product admission."
+    },
+    {
+      "path": ".relayer/verification/pr755-ci-20261017/desktop-interaction-context.log",
+      "sha256": "e36c8f9b1165601c3f0f537a2ccdeb85d3e3aee0f3db1225baf4fbd302c147c0",
+      "exitCode": 1,
+      "cause": "Retired per-model radio selector timed out while the actual selected family/orchestrator UI was present; current family/member-card proof keeps close/focus and lifecycle assertions."
+    },
+    {
+      "scope": "Prior October16 query-budget/capture failures and unknown causes remain in their original records/commits. Current integration success neither resolves their causes nor relabels old snapshots."
+    }
+  ],
+  "testSubsumptionVerdict": "No test deleted or budget/deadline weakened. Strong exact applied invocation lifecycle supersedes main timestamp-only source fallback while retaining source/privacy/wrong-scope checks; both input-capture and draft-preservation cases remain. Family-only request JSON preserves exact selected-family replay under merged product meaning. Independent ambiguous-dispatch/redraw authority remains intact.",
+  "verdict": "No blocking source, authority, mapping, test-subsumption, source-reuse or heavy-evidence mismatch found within the reviewed integration scope. All declared local gates have completed positive inner outcomes with explicit tested identities and reviewed unchanged-input reuse. This is a bounded PR755 local assertion, not hosted merge authorization.",
+  "findings": [],
+  "unresolvedBoundaries": [
+    "Fresh pushed-head hosted CI and merge freshness remain pending and must qualify the new merge commit; merge is manual.",
+    "Skipped files/tests remain skipped. Native/IPC/CSP/GPU warnings are retained; no warning-free application claim.",
+    "No paid application inference, live Decisions-judge calibration/equivalence, general quality/latency/cost advantage, arbitrary cross-provider specialist routing, live telemetry receiver/symbolication, signed release or deployment proof.",
+    "Scope covers combined conflict/composition behavior, not an independent re-audit of every incoming main hunk. Any bound-source/addendum change invalidates the assertion."
+  ],
+  "reviewerActions": {
+    "productionEdits": false,
+    "testEdits": false,
+    "boundEvidenceEdits": false,
+    "historicalReceiptEdits": false,
+    "heavyOrPaidRuns": false,
+    "separateReviewReceiptsOnly": true
+  },
+  "certification": "Bounded adversarial heavy-evidence assertion for PR755 qualified workspace digest74c67233704dfd80f2be3c21f18c4f4ed55e1911c77098a78642183d81917d3d and hashed completed local proof; hosted authorization remains separate."
+}

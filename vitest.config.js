@@ -8,8 +8,10 @@ const exclude = ["**/node_modules/**", "**/.git/**", "**/.relayer/**"];
 // Native Mach-O closure sealing and calibration Git/npm verifier journeys also
 // exceed their individual bounds under portfolio-wide subprocess contention.
 // These files run one at a time after the isolated group so they never share
-// the machine with other workers. Every other file owns its temporary state and runs with the
-// default file-level workers.
+// the machine with other workers. Every other file owns its temporary state and
+// shares at most three file workers, matching the shared 4-vCPU CI runner.
+// Larger hosts retain this cap because native query budgets do not scale with
+// portfolio parallelism.
 const processBound = [
   "test/desktop-shell.test.mjs",
   "test/provider-electron-evidence.test.mjs",
@@ -31,7 +33,7 @@ export default defineConfig({
     projects: [
       {
         extends: true,
-        test: { name: "isolated", exclude: [...exclude, ...processBound] },
+        test: { name: "isolated", maxWorkers: 3, exclude: [...exclude, ...processBound] },
       },
       {
         extends: true,

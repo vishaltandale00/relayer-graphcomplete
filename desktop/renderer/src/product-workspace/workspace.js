@@ -1745,6 +1745,7 @@ export function createProductWorkspace({
   let composerContextState = createComposerContextState();
   let contextEditor = null;
   let nodeSelectionSequence = 0;
+  let appliedInvocationPresentation = null;
   let mountedAuthoredDetail = null;
   let openComposerContextKey = null;
   let contextPopoverOpen = false;
@@ -6693,6 +6694,16 @@ export function createProductWorkspace({
     const inputActions = actions.filter((action) => action.kind === "input" && action.control);
     const ordinaryActions = actions.filter((action) => action.kind !== "input");
     const visibleLayer = state.visibleLayer ?? interaction?.completionOutput?.rootLayer;
+    // Freeze only call correlation metadata used by this render. Fetched state
+    // can change while authored assets mount; it is not yet painted evidence.
+    const renderedInvocations = (state.actionInvocations ?? []).filter(call => isDurableActionInvocation(call)
+      && call.occupancyOnly !== true && String(call.sourceInteractionId) === String(interaction?.id)
+      && ordinaryActions.some(action => String(action.id) === String(call.actionId))
+      && call.resultInteractionId != null).map(call => {
+      const attempt = state.interactions.find(turn => String(turn.id) === String(call.resultInteractionId))?.latestAttempt;
+      return { actionId: call.actionId, turnId: call.resultInteractionId, completionStatus: call.resultCompletionStatus ?? null,
+        attemptId: attempt?.id ?? null, attemptOutcome: attempt?.outcome ?? null };
+    });
     const detailContextTarget = String(selectedContextTarget?.nodeId) === String(node.id)
       ? selectedContextTarget : null;
     const assetInteraction = detailContextTarget
@@ -7234,6 +7245,8 @@ export function createProductWorkspace({
     updateAttachContextControl();
     reveal();
     if (focusInspector) $("#closeInspector").focus({ preventScroll: true });
+    appliedInvocationPresentation = { requestSequence, threadId: sourceThread?.id, turnId: interaction?.id,
+      layerId: visibleLayer?.layer?.id, nodeId: node.id, results: renderedInvocations };
     return true;
   }
 
@@ -7308,6 +7321,18 @@ export function createProductWorkspace({
       compositionRevisions: [...inputCompositionRevisions],
     }),
     setInputOperatorCommitted,
+    // Eval synchronizes its next screenshot with the source controls actually
+    // applied, without following a child or exposing its graph to the actor.
+    invocationResults: () => {
+      const applied = appliedInvocationPresentation;
+      const state = getState();
+      if (disposed || !applied || applied.requestSequence !== nodeSelectionSequence
+        || String(applied.threadId) !== String(getThread()?.id)
+        || String(applied.turnId) !== String(state.currentInteractionId)
+        || String(applied.layerId) !== String(currentLayerId(state, getThread()))
+        || String(applied.nodeId) !== String(selection.selectedNodeId)) return [];
+      return structuredClone(applied.results);
+    },
     prepareSelectionChange: prepareNodeContextSelectionChange,
     // Artifact notes are confirmed outside the workspace; pull them into the composer (PRD 6.6.8).
     reloadConfirmedContexts: (threadId) => contextDraftController

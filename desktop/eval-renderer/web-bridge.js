@@ -168,7 +168,7 @@
           cases: [{ name: task.prepared.name, status: task.status, threadIds: task.threadIds, threads: task.threadIds.map((id, index) => ({ id, name: task.prepared.plan[index]?.name || `Step ${index + 1}` })) }] };
       },
       present: (snapshot) => {
-        if (new URLSearchParams(location.search).get("taskActor") === "1") window.__taskActorPresentation = { threadId: snapshot.threadId, turnId: snapshot.turnId, layerId: snapshot.layerId, selectedNodeId: snapshot.selectedNodeId, navigationPath: snapshot.navigationPath, completionStatus: snapshot.completionStatus, attemptId: snapshot.attemptId, attemptOutcome: snapshot.attemptOutcome, currentPointer: snapshot.currentPointer, graphVisible: snapshot.graphVisible, observedAt: snapshot.observedAt };
+        if (new URLSearchParams(location.search).get("taskActor") === "1") window.__taskActorPresentation = { threadId: snapshot.threadId, turnId: snapshot.turnId, layerId: snapshot.layerId, selectedNodeId: snapshot.selectedNodeId, navigationPath: snapshot.navigationPath, completionStatus: snapshot.completionStatus, attemptId: snapshot.attemptId, attemptOutcome: snapshot.attemptOutcome, currentPointer: snapshot.currentPointer, invocationResults: snapshot.invocationResults, graphVisible: snapshot.graphVisible, observedAt: snapshot.observedAt };
       },
       observe: (snapshot) => fetch("/eval-api/observe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(snapshot) }).then(result),
     };

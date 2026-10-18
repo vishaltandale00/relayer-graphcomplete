@@ -1,5 +1,12 @@
 // Only installed for an explicit Eval live-task capability. No product behavior
 // depends on this observer, and it never supplies feedback to the acting user.
+export function humanTaskInvocationResults(state, turnId, rendered = []) {
+  // Render-applied metadata only, never a newly fetched child's graph or status.
+  return rendered.filter(result => (state.actionInvocations ?? []).some(call =>
+    String(call.sourceInteractionId) === String(turnId) && call.occupancyOnly !== true
+    && String(call.actionId) === String(result.actionId) && String(call.resultInteractionId) === String(result.turnId)));
+}
+
 export function observeHumanTaskPresentation({ bridge, getState, documentObject = document, windowObject = window }) {
   let stopped = false;
   let scheduled = false;

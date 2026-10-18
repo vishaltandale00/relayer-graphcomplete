@@ -1,0 +1,30 @@
+{
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16",
+  "implementationWorkspaceDigest": "96fa71926cb61a62e0d7f397b8ed5db0272147d161ce3385b88681f18d2a4d2b",
+  "artifacts": {
+    "navigation-recovery-20261016.md": "7187300316282def9d1756634026aa1817b988e74bacc26b332352044cc32c21",
+    "navigation-recovery-20261016.json": "290d0f99cbc55ed38ce2470bf6b1af22e4b3b51cfd00d761ad9e9a45effc7fd2",
+    "multiturn-comparison-20261016.md": "ee9a98457fbbcf3719b51a80fd239867ad58b1e6769074c650997c1e4940b9f2",
+    "multiturn-comparison-20261016.json": "d91c4f6b18280db3f756f2f022ab533e5d3dd20d69e266c17065ff88cda23ef1",
+    "budget-recovery-20261016.md": "d2acd2e1f5788d616c4a94c0d2225f72c32a6a2d57a1f182d3a0a62025b0c3b4",
+    "budget-recovery-verification-20261016.json": "8f74aee7aa84a7e21cdd16c291862f7c391e5cb0335d98cb6414606d78a181d0"
+  },
+  "scope": "Response-cap continuation, intervening-interaction and admission boundaries, obsolete-test retirement, checkpoint mapping, frozen navigation recovery, visible coverage and screenshot bindings, unmatched/unstable observations, native cumulative usage and incremental navigation accounting, Decisions usage and cost arithmetic, preserved multi-turn failures, accepted inputs, later incorporation absence, candidate traces and failed preflight diagnosis.",
+  "verdict": "No material mismatch or unresolved blocking finding in reviewed source, reports or metrics. Heavy command results are separately recorded by the executing agent.",
+  "unresolvedMaterialAuditFindings": [],
+  "limitations": [
+    "Non-certifying without a PR; agent review is not independent certification of the root agent's command execution.",
+    "Visual detail exposure does not establish comprehension or an accepted hybrid endpoint.",
+    "The unchanged completion judge cannot reliably reconstruct hybrid coverage from its current evidence packet.",
+    "One unequal sequential pair does not establish general latency, cost or quality results.",
+    "Native standard API-rate proxies are counterfactual estimates, not subscription invoices or measured subscription savings.",
+    "Successful multi-turn submission and later rendered incorporation remain unproved for both unchanged actor revisions.",
+    "Changes to reviewed source or artifact bytes invalidate the corresponding receipt."
+  ],
+  "verificationAudit": {
+    "verdict": "No remaining material mismatch. All retained log hashes and source digest verify. Required portfolio remains not fully green.",
+    "scope": "Command-result reporting, broad failure versus isolated and separate passes, unreached chapters and source identity.",
+    "correction": "The 398-test Rust suite belongs to app-server; the corrected document is bound above."
+  }
+}

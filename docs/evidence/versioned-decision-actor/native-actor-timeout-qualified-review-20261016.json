@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/review_versioned_actor",
+  "reviewedAt": "2026-10-16T22:26:41.115161+00:00",
+  "pullRequest": 755,
+  "reviewType": "Adversarial qualified-source and worker-resource policy review",
+  "workspaceDigest": "1c93b250db31571086e0f25c7f9047d4cdbecd74145a2e29aff003a682a7f074",
+  "baseCommit": "14d60da93ad5bfdda6b2a0188261d9674594a794",
+  "sourceReceipt": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-qualified-source-20261016.json",
+    "sha256": "7c384894e33654abeb28cd321f8eacfa2bbc8732d4d16467e449d8bb11721624",
+    "files": 40,
+    "allFileHashesAndAggregateVerified": true
+  },
+  "predecessorWorkspaceDigest": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+  "changedOrAddedSincePredecessor": [
+    "docs/agents/ci.md",
+    "vitest.config.js"
+  ],
+  "productionAndStandaloneBrowserDesktopBytesUnchanged": true,
+  "priorStaticReview": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-finalized-review-20261016.json",
+    "sha256": "75e65897ec3147fa721f6a5fc0e404b5e81abda0ee57574f628bfc994887dcad"
+  },
+  "workerPolicyMapping": {
+    "path": "docs/evidence/versioned-decision-actor/native-actor-timeout-worker-policy-20261016.md",
+    "sha256": "af43f1664336723d2682fdfc4e484beef8ef986919b480491df6778738cd35e9"
+  },
+  "reviewedScope": [
+    "NAT-011 explicit isolated-project file-worker cap3; unchanged process-bound maxWorkers1/groupOrder1 and exact four-file membership",
+    "Unchanged isolated exclusions, default include discovery, all test files/assertions/native query limits and global15000ms test timeout",
+    "Configuration-only import confirms isolated3, process-bound1/later group and no VITEST_MAX_WORKERS environment override; no test or inference executed by reviewer",
+    "CI guide explicitly records reduced parallelism on larger hosts and retains config ownership rather than CLI chapter pinning",
+    "Existing native search-target integration observes actual capability outcome; unchanged250ms engine limit remains distinct from60s test and5s index-write ceiling",
+    "Reuse finalized5a browser/current proofs and7288 node-input proof only because all their executable production and standalone inputs are unchanged",
+    "Prior NAT-001..010 source/authority/test-subsumption and actual SOC/annotation artifact review remains applicable to identical bytes"
+  ],
+  "availableEvidence": [
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/check-finalized.log",
+      "sha256": "a68a402fb79aeb273046f08511c2f38873a4c973b5ac84a6bf94e36bf1b1724e",
+      "snapshot": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "observed": "Default concurrency root check failed one native search outcome assertion: wall_time_exceeded versus granted at test/eval-app-integration.test.mjs652;4367pass1fail3skip; downstream secret/Python/final lint stages unreached"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/search-deadline-focused.log",
+      "sha256": "35c0a76d555294e8d70ff3ff1cc6e75ecc65aa96d3df6ebcb2aa0826f915593b",
+      "observed": "Unchanged two-target search cases passed alone6.74s,20 other tests skipped; not default-portfolio proof"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/search-worker-policy-green.log",
+      "sha256": "cc42129a1fde1ddf14f38a768eb2a64c3b36a0670fb4305e03f063004c1386ff",
+      "observed": "Same two-target cases passed3.78s under new policy,20 other tests skipped; not full-run or causality proof"
+    },
+    {
+      "path": ".relayer/verification/native-actor-timeout-20261016/web-finalized.log",
+      "sha256": "11a6004d76028d6ade9bda0adf794fee883d7f7f48f2f306a5beb6232520236f",
+      "snapshot": "5a760ba458b7c1069c4bc4b0be7918489c53ab642f03100eb755ddc7c6ae1e13",
+      "observed": "Previously reviewed complete positive standalone browser entry; its executable inputs unchanged"
+    }
+  ],
+  "verdict": "No blocking static correctness, authority, selection or mapping finding. Explicit three-worker isolated policy is a defensible bounded resource contract while keeping every test and native deadline intact. It trades larger-host throughput for the documented shared-runner profile; it does not establish the cause of the prior failure.",
+  "findings": [],
+  "unresolvedProofLimits": [
+    "Exact qualified-source default root check is still running and is not certified here; its complete outcomes require separate heavy-evidence review.",
+    "Final qualified build and compiled-runtime command outcomes/verification JSON remain pending.",
+    "Default5a failure remains failed; focused successes do not prove flakiness or replace full portfolio verification.",
+    "No paid inference, judge calibration/equivalence, current-runtime speed/cost, hosted CI/packaging or release readiness claim."
+  ],
+  "reviewerActions": {
+    "sourceEdits": false,
+    "testEdits": false,
+    "testExecution": false,
+    "configurationOnlyInspection": true,
+    "paidInference": false,
+    "historicalReceiptEdits": false
+  },
+  "certification": "Bounded static assertion for PR755 exact qualified source; invalidated by bound-source changes. Final heavy outcome review pending separate receipt."
+}
