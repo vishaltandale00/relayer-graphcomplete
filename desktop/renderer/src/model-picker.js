@@ -7,6 +7,7 @@ import {
   pickerSelectionIsAvailable,
   reconcilePickerSelection,
   resolveUnsentModelIntent,
+  routablePickerFamilies,
   validateCandidateHarness,
 } from "./model-picker-model.js";
 import { escapeHtml, escapeHtmlAttribute } from "./ui.js";
@@ -42,8 +43,8 @@ export function modelPickerModelSetup(settings, selection) {
   return setup;
 }
 
-export function modelPickerFamilyPresentation(settings, harnessId, selection) {
-  const families = settings ? availablePickerFamilies(settings, harnessId) : [];
+export function modelPickerFamilyPresentation(settings, harnessId, selection, options = {}) {
+  const families = settings ? routablePickerFamilies(settings, harnessId, options) : [];
   const modelSetup = modelPickerModelSetup(settings, selection);
   const selectedFamily = families.find((family) => (
     String(family.id) === String(selection?.familyId)
@@ -260,6 +261,11 @@ export function createModelPicker({
       : currentSelection?.harnessId ?? currentSettings?.defaults?.harnessId;
   }
 
+  function familyPresentation() {
+    return modelPickerFamilyPresentation(currentSettings, selectedHarnessId(), currentSelection,
+      { allowHarnessChange: mode === "new" });
+  }
+
   function commit(nextSelection) {
     harnessValidationGate.invalidate();
     validatingHarness = false;
@@ -283,7 +289,8 @@ export function createModelPicker({
     if (!family && !families.length) return "";
     const canCycle = families.length > 1 || (families.length === 1 && !selectedFamily);
     const arrow = (direction, label, glyph) => `<button type="button" class="model-family-cycle" data-family-cycle="${direction}" aria-label="${label}" title="${label}" ${canCycle ? "" : "disabled"}><span aria-hidden="true">${glyph}</span></button>`;
-    const available = family ? availableFamilyMembers(currentSettings, family, selectedHarnessId()) : [];
+    const available = family?.availableMembers
+      ?? (family ? availableFamilyMembers(currentSettings, family, selectedHarnessId()) : []);
     return `<div class="model-family-roster" data-family-roster>${arrow("previous", "Previous model family", "‹")}<div class="model-family-viewport"><ul class="model-family-members" aria-label="Family models and roles">${[...(family?.members ?? [])]
       .sort((left, right) => left.position - right.position)
       .map((member) => {
@@ -298,20 +305,29 @@ export function createModelPicker({
       }).join("")}</ul></div>${arrow("next", "Next model family", "›")}</div>`;
   }
 
-  function chooseFamily(nextFamily) {
+  function chooseFamily(nextFamily, onCommitted = () => {}) {
     const member = nextFamily?.orchestrator;
     if (!member) return;
     onUserTakeover();
-    commit({
-      harnessId: selectedHarnessId(),
+    const selection = {
+      harnessId: nextFamily.harnessId ?? selectedHarnessId(),
       familyId: nextFamily.id,
       providerId: member.providerId,
       modelId: member.modelId,
-    });
+    };
+    if (selection.harnessId === selectedHarnessId()) {
+      commit(selection);
+      onCommitted();
+      return;
+    }
+    void changeHarnessSelection(async () => {
+      await validateSelection(selection);
+      return { selection, error: null };
+    }, onCommitted);
   }
 
   function cycleFamily(direction, { focus = true } = {}) {
-    const { families, selectedFamily } = modelPickerFamilyPresentation(currentSettings, selectedHarnessId(), currentSelection);
+    const { families, selectedFamily } = familyPresentation();
     if (!families.length || (families.length === 1 && selectedFamily)) return;
     const currentIndex = families.findIndex((family) => String(family.id) === String(currentSelection?.familyId));
     const nextIndex = currentIndex < 0
@@ -319,34 +335,35 @@ export function createModelPicker({
       : (currentIndex + (direction === "next" ? 1 : -1) + families.length) % families.length;
     const outgoing = root.querySelector(".model-family-members")?.cloneNode(true);
     clearFamilyMotion();
-    chooseFamily(families[nextIndex]);
-    const incoming = root.querySelector(".model-family-members");
-    if (outgoing && incoming?.animate && !reducedFamilyMotion()) {
-      const sign = direction === "next" ? 1 : -1;
-      outgoing.setAttribute("data-family-outgoing", "");
-      outgoing.setAttribute("aria-hidden", "true");
-      outgoing.inert = true;
-      incoming.parentElement.append(outgoing);
-      const timing = { duration: 240, easing: "cubic-bezier(.2,.8,.2,1)" };
-      const exit = outgoing.animate([
-        { transform: outgoing.style.transform || "translateX(0)", opacity: 1 },
-        { transform: `translateX(${-sign * 100}%)`, opacity: 0 },
-      ], timing);
-      exit.onfinish = () => outgoing.remove();
-      familyAnimations = [exit, incoming.animate([
-        { transform: `translateX(${sign * 100}%)`, opacity: 0.3 },
-        { transform: "translateX(0)", opacity: 1 },
-      ], timing)];
-    }
-    if (!focus) return;
-    const nextButton = root.querySelector(`[data-family-cycle="${direction}"]`);
-    (nextButton?.disabled ? root.querySelector("[data-model-family]") : nextButton)?.focus();
+    chooseFamily(families[nextIndex], () => {
+      const incoming = root.querySelector(".model-family-members");
+      if (outgoing && incoming?.animate && !reducedFamilyMotion()) {
+        const sign = direction === "next" ? 1 : -1;
+        outgoing.setAttribute("data-family-outgoing", "");
+        outgoing.setAttribute("aria-hidden", "true");
+        outgoing.inert = true;
+        incoming.parentElement.append(outgoing);
+        const timing = { duration: 240, easing: "cubic-bezier(.2,.8,.2,1)" };
+        const exit = outgoing.animate([
+          { transform: outgoing.style.transform || "translateX(0)", opacity: 1 },
+          { transform: `translateX(${-sign * 100}%)`, opacity: 0 },
+        ], timing);
+        exit.onfinish = () => outgoing.remove();
+        familyAnimations = [exit, incoming.animate([
+          { transform: `translateX(${sign * 100}%)`, opacity: 0.3 },
+          { transform: "translateX(0)", opacity: 1 },
+        ], timing)];
+      }
+      if (!focus) return;
+      const nextButton = root.querySelector(`[data-family-cycle="${direction}"]`);
+      (nextButton?.disabled ? root.querySelector("[data-model-family]") : nextButton)?.focus();
+    });
   }
 
   function bindFamilyChange(panel, families) {
     panel.querySelector("[data-model-family]").onchange = (event) => {
-      chooseFamily(families.find((family) => String(family.id) === event.target.value));
-      close({ returnFocus: true });
+      chooseFamily(families.find((family) => String(family.id) === event.target.value),
+        () => close({ returnFocus: true }));
     };
     panel.querySelectorAll("[data-family-cycle]").forEach((button) => {
       button.onclick = () => {
@@ -408,11 +425,7 @@ export function createModelPicker({
 
   function renderModelPanel() {
     const panel = root.querySelector('[data-model-picker-panel="model"]');
-    const { families, selectedFamily, modelSetup } = modelPickerFamilyPresentation(
-      currentSettings,
-      selectedHarnessId(),
-      currentSelection,
-    );
+    const { families, selectedFamily, modelSetup } = familyPresentation();
     if (!selectedFamily && modelSetup) {
       renderModelSetupPanel(panel, families, modelSetup);
       return;
@@ -450,7 +463,9 @@ export function createModelPicker({
     const harnesses = (currentSettings?.harnesses ?? []).filter((harness) => (
       harness.available !== false
       && (
-        availablePickerFamilies(currentSettings, harness.id).length > 0
+        availablePickerFamilies(currentSettings, harness.id).some(family => (
+          currentSelection?.familyId == null || String(family.id) === String(currentSelection.familyId)
+        ))
         || harnessUsesConfigurationModel(currentSettings, harness.id)
       )
     ));
@@ -469,50 +484,48 @@ export function createModelPicker({
       button.onclick = async () => {
         onUserTakeover();
         const candidateHarnessId = button.dataset.harnessOption;
-        const validationSequence = harnessValidationGate.begin();
-        validatingHarness = true;
-        error = null;
-        render();
-        onSelectionChange(null);
-        const result = await validateCandidateHarness(
+        await changeHarnessSelection(() => validateCandidateHarness(
           currentSettings,
           currentSelection,
           candidateHarnessId,
           validateSelection,
-        );
-        if (!harnessValidationGate.isCurrent(validationSequence)) return;
-        if (result.error) {
-          validatingHarness = false;
-          error = result.error;
-          render();
-          onSelectionChange(selectionReady() ? currentSelection : null);
-          [...root.querySelectorAll("[data-harness-option]")]
-            .find((candidate) => candidate.dataset.harnessOption === candidateHarnessId)
-            ?.focus();
-          return;
-        }
-        let applyHarnessChange;
-        try {
-          applyHarnessChange = await prepareHarnessChange(candidateHarnessId);
-          if (!harnessValidationGate.isCurrent(validationSequence)) return;
-          if (typeof applyHarnessChange !== "function") {
-            throw new Error("Harness change preparation must return an apply function.");
-          }
-          applyHarnessChange();
-        } catch (changeError) {
-          if (!harnessValidationGate.isCurrent(validationSequence)) return;
-          validatingHarness = false;
-          error = changeError instanceof Error ? changeError.message : String(changeError);
-          render();
-          onSelectionChange(selectionReady() ? currentSelection : null);
-          return;
-        }
-        commit(result.selection);
-        requestAnimationFrame(() => [...root.querySelectorAll("[data-harness-option]")]
+        ), () => requestAnimationFrame(() => [...root.querySelectorAll("[data-harness-option]")]
           .find((candidate) => candidate.dataset.harnessOption === candidateHarnessId)
-          ?.focus());
+          ?.focus()));
       };
     });
+  }
+
+  async function changeHarnessSelection(resolveSelection, onCommitted) {
+    const validationSequence = harnessValidationGate.begin();
+    validatingHarness = true;
+    error = null;
+    render();
+    onSelectionChange(null);
+    try {
+      const result = await resolveSelection();
+      if (!harnessValidationGate.isCurrent(validationSequence)) return;
+      if (result.error) throw new Error(result.error);
+      if (!pickerSelectionIsAvailable(currentSettings, result.selection)) {
+        throw new Error("Choose an available model family before changing harnesses.");
+      }
+      const applyHarnessChange = await prepareHarnessChange(result.selection.harnessId);
+      if (!harnessValidationGate.isCurrent(validationSequence)) return;
+      if (typeof applyHarnessChange !== "function") {
+        throw new Error("Harness change preparation must return an apply function.");
+      }
+      applyHarnessChange();
+      commit(result.selection);
+      onCommitted();
+    } catch (changeError) {
+      if (!harnessValidationGate.isCurrent(validationSequence)) return;
+      validatingHarness = false;
+      error = changeError instanceof Error ? changeError.message : String(changeError);
+      render();
+      onSelectionChange(selectionReady() ? currentSelection : null);
+      root.querySelector(activeTab === "advanced"
+        ? '[data-harness-option][aria-checked="true"]' : "[data-model-family]")?.focus();
+    }
   }
 
   function render() {
@@ -521,7 +534,7 @@ export function createModelPicker({
     const configurationOwnedModel = ready
       && harnessUsesConfigurationModel(currentSettings, selectedHarnessId());
     const hasAvailableModels = currentSettings
-      ? availablePickerFamilies(currentSettings, selectedHarnessId()).length > 0
+      ? familyPresentation().families.length > 0
       : false;
     const modelSetup = ready ? null : modelPickerModelSetup(currentSettings, currentSelection);
     triggerLabel.textContent = labels?.compact
@@ -635,7 +648,7 @@ export function createModelPicker({
       }
       return;
     }
-    const { families, selectedFamily } = modelPickerFamilyPresentation(currentSettings, selectedHarnessId(), currentSelection);
+    const { families, selectedFamily } = familyPresentation();
     if (!families.length || (families.length === 1 && selectedFamily)) return;
     event.preventDefault();
     const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? popover.clientWidth || 300 : 1;

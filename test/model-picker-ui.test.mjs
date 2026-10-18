@@ -270,23 +270,11 @@ describe("composer model picker UI contract", () => {
     expect(main).toContain("if (productApiAvailable && !newThreadModelSelectionReady())");
   });
 
-  it("server-validates Advanced harness candidates before committing them", async () => {
-    const [picker, composerPicker, permissions] = await Promise.all([
-      readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8"),
+  it("wires composer harness changes to permission preparation", async () => {
+    const [composerPicker, permissions] = await Promise.all([
       readFile(new URL("../desktop/renderer/src/composer-model-picker.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/permission-profiles.js", import.meta.url), "utf8"),
     ]);
-    expect(picker).toContain("await validateCandidateHarness(");
-    expect(picker.indexOf("await validateCandidateHarness(")).toBeLessThan(
-      picker.indexOf("commit(result.selection);"),
-    );
-    expect(picker.indexOf("validatingHarness = true;")).toBeLessThan(
-      picker.indexOf("await validateCandidateHarness("),
-    );
-    expect(picker).toContain("onSelectionChange(null);");
-    expect(picker.indexOf("await prepareHarnessChange(candidateHarnessId)")).toBeLessThan(
-      picker.indexOf("commit(result.selection);"),
-    );
     expect(composerPicker).toContain("prepareHarnessChange: preparePermissionProfiles");
     expect(permissions).toContain("/api/permission-profiles?harnessId=${encodeURIComponent(harnessId)}");
   });

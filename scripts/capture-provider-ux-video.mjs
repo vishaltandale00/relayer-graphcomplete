@@ -308,8 +308,19 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         if (harnessRepairState.attempts !== 2) throw new Error("Repair did not use one refresh per click.");
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#settingsBackButton').click()" });
         await waitFor("document.querySelector('#settingsView').classList.contains('hidden')");
+        await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#newModelControl [data-model-picker-tab=model]').click()" });
+        await waitFor("Array.from(document.querySelector('#newModelControl [data-model-family]')?.options ?? []).some(option => option.value === '13')");
+        await cdp.call("Runtime.evaluate", { expression: "const family=document.querySelector('#newModelControl [data-model-family]');family.value='13';family.dispatchEvent(new Event('change',{bubbles:true}))" });
+        await waitFor("document.querySelector('#newModelControl [data-model-picker-label]')?.textContent === 'Router coding'");
+        const selection = await cdp.call("Runtime.evaluate", {
+          expression: "import('/desktop/renderer/src/composer-model-picker.js').then(({newThreadModelSelectionPayload}) => newThreadModelSelectionPayload())",
+          awaitPromise: true, returnByValue: true,
+        });
+        if (selection.result.value?.harnessId !== "prime-agent-basic" || selection.result.value?.modelSelection?.familyId !== 13) {
+          throw new Error("Choosing the repaired family did not automatically select Prime.");
+        }
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#newModelControl [data-model-picker-tab=advanced]').click()" });
-        await waitFor("document.querySelector('#newModelControl [data-harness-option=prime-agent-basic]')?.disabled === false && !document.querySelector('#newModelControl [data-model-picker-panel=advanced]').classList.contains('hidden')");
+        await waitFor("document.querySelector('#newModelControl [data-harness-option=prime-agent-basic]')?.getAttribute('aria-checked') === 'true' && !document.querySelector('#newModelControl [data-model-picker-panel=advanced]').classList.contains('hidden')");
         await record("composer");
         // Return to the Harness Settings surface for the existing scene audit.
         await cdp.call("Runtime.evaluate", { expression: "document.querySelector('#newModelControl [data-model-picker-trigger]').click();document.querySelector('#settingsButton').click()" });
@@ -318,7 +329,7 @@ async function captureBrowserScene(url, frame, profile, width = 1280, { forcedCo
         await writeFile(join(outputDirectory, "harness-repair-journey.json"), JSON.stringify({
           renderer: "production", provider: "deterministic fixture", exactProviderId: "router",
           phases: ["connected", "missing", "failure", "success", "composer"], attempts: harnessRepairState.attempts,
-          composerAdmitted: true, defaultsPreserved: true, keyboardRepair: true, focusPreserved: true,
+          composerAdmitted: true, automaticHarnessSelected: true, defaultsPreserved: true, keyboardRepair: true, focusPreserved: true,
         }, null, 2));
         await writeFile(join(outputDirectory, "harness-repair-frames.txt"), ["connected", "missing", "failure", "success", "composer"].map(phase => `file 'harness-repair-${phase}.png'\nduration 2`).join("\n") + "\nfile 'harness-repair-composer.png'\n");
         await run(ffmpeg, ["-y", "-f", "concat", "-safe", "0", "-i", join(outputDirectory, "harness-repair-frames.txt"), "-vf", "fps=15,format=yuv420p", "-c:v", "libx264", join(outputDirectory, "harness-repair.mp4")]);
@@ -1148,6 +1159,15 @@ const server = createServer(async (request, response) => {
       return json(response, { refreshed: true });
     }
     if (url.pathname === "/api/model-settings") return json(response, modelSettings(scene));
+    if (url.pathname === "/api/model-selection/validate" && request.method === "POST") {
+      const selection = await requestJson(request);
+      if (scene === "harness-repair" && harnessRepairState.ready
+        && selection.harnessId === "prime-agent-basic" && selection.familyId === 13
+        && selection.providerId === "router" && selection.modelId === "qwen/qwen3-coder") {
+        return json(response, selection);
+      }
+      return json(response, { error: "Unsupported fixture model selection." }, 422);
+    }
     if (url.pathname === "/api/provider-onboarding/projection") {
       return json(response, onboardingProjection(scene, url.searchParams.get("providerId") ?? "openai-work"));
     }

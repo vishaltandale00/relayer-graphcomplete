@@ -211,6 +211,22 @@ export function availablePickerFamilies(settings, harnessId) {
     .filter((family) => family.orchestrator);
 }
 
+// Family selection in a new composer may choose a harness, but never another
+// family or orchestrator. Existing conversations use only their pinned harness.
+export function routablePickerFamilies(settings, harnessId, { allowHarnessChange = false } = {}) {
+  const harnessIds = allowHarnessChange
+    ? [...new Set([harnessId, settings.defaults?.harnessId,
+      ...settings.harnesses.map(harness => harness.id).sort()])]
+    : [harnessId];
+  const routes = new Map();
+  for (const id of harnessIds) {
+    for (const family of availablePickerFamilies(settings, id)) {
+      if (!routes.has(family.id)) routes.set(family.id, { ...family, harnessId: id });
+    }
+  }
+  return [...routes.values()].sort((left, right) => left.position - right.position);
+}
+
 // Automatic selection resolves the default family. While that family is in recovery it refuses,
 // rather than running another family the user did not choose (PROV-008).
 export function firstAvailableSelection(settings, harnessId) {

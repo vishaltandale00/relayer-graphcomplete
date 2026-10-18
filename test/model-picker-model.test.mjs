@@ -14,6 +14,7 @@ import {
   pickerSelectionIsAvailable,
   pickerSelectionPayload,
   reconcilePickerSelection,
+  routablePickerFamilies,
   selectCandidateHarness,
   selectionForInteraction,
   validateCandidateHarness,
@@ -61,6 +62,31 @@ function settings() {
 }
 
 describe("composer model picker selection", () => {
+  it("routes the chosen family through the current, default, then first available harness", () => {
+    const catalog = settings();
+    catalog.providers[1].connected = true;
+    catalog.families.push({
+      id: 3, name: "Future", enabled: true, position: 2,
+      members: [{ providerId: "future", modelId: "three", position: 0, roles: [{ name: "orchestrator" }] }],
+    });
+    catalog.harnesses.push(
+      { id: "aaa-unavailable", available: false, compatibleProviderIds: ["future"] },
+      { id: "both", available: true, compatibleProviderIds: ["codex", "future"] },
+    );
+    catalog.defaults.harnessId = "cooked";
+    const routes = () => routablePickerFamilies(catalog, "codex-basic", { allowHarnessChange: true });
+    expect(routes().map(family => [family.id, family.harnessId])).toEqual([[1, "codex-basic"], [3, "cooked"]]);
+    expect(routablePickerFamilies(catalog, "both", { allowHarnessChange: true }).every(family => family.harnessId === "both")).toBe(true);
+    catalog.harnesses.find(harness => harness.id === "cooked").available = false;
+    expect(routes().find(family => family.id === 3).harnessId).toBe("both");
+    expect(routablePickerFamilies(catalog, "codex-basic").map(family => family.id)).toEqual([1]);
+    catalog.conversationCompatibility = { status: "compatible", harnessId: "codex-basic", providerId: "codex" };
+    expect(routes().map(family => family.id)).toEqual([1]);
+    catalog.conversationCompatibility = { status: "unrestricted" };
+    catalog.providers[1].connected = false;
+    expect(routes().map(family => family.id)).toEqual([1]);
+  });
+
   it.each([
     { compatibleProviderIds: ["future"] },
     { modelCompatibility: [{ providerId: "codex", modelIds: ["two"] }] },
