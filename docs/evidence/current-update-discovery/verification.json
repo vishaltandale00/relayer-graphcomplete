@@ -1,0 +1,390 @@
+{
+  "schemaVersion": 1,
+  "recordedAt": "2026-10-19T03:30:48.106410+00:00",
+  "baseCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+  "sourceDigest": "ac48dd755f689c137e5148729d908819150bb6a8456591ae0032a1e338226ffc",
+  "sourceManifest": "source.json",
+  "scopeQualification": "Final integrated source binds38 changed paths on main2ef4f7a4. All required local gates reran; fresh renderer receipts replace conflicting outputs. Source/verification/review records are excluded from the aggregate. Prior live and failed/earlier execution records retain their original scope; no new live inference or exhaustive observation claim.",
+  "checks": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/check.log",
+        "sha256": "238d6c5208e84466886ac9309b027cd834a3ad352ef685a507ea720e31ba6f7a"
+      },
+      "results": {
+        "vitest": {
+          "filesPassed": 341,
+          "filesSkipped": 1,
+          "testsPassed": 4591,
+          "testsSkipped": 3
+        },
+        "separateCodexSecretBoundary": {
+          "testsPassed": 2
+        },
+        "python": {
+          "testsPassed": 100
+        },
+        "nativeAndCrashRecovery": "All reported groups passed; aggregate exit0.",
+        "receiptsAndReadability": "passed"
+      }
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/build-restored.log",
+        "sha256": "557a1ceae7622b213cef4bdc4e8f628194fe5846ebd5cfd2019a634d0dbadb88"
+      },
+      "scope": "Source rebuild with compatible warm Cargo dependencies after restoring own npm dependencies offline; no release or paid inference."
+    },
+    {
+      "command": "focused integrated UI/navigation/family/details files",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/focused.log",
+        "sha256": "9e301d1a6fb11be2418f8f6a549ede397a3d24b024084b8532d47fdc89e72316"
+      },
+      "passed": 167,
+      "scope": "Five production-seam test files unchanged after this run. The later browser-only modal checkpoint and evidence mapping are covered by the final full/browser gates."
+    },
+    {
+      "command": "npm run test:eval-web",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/eval-web.log",
+        "sha256": "d2c0c403834b1ce14525b077ff82d0e19f0739e6f1aff8f27286037f8b64e6b1"
+      },
+      "environment": {
+        "CARGO_TARGET_DIR": "/Volumes/2T-SSD/worktrees/vacation-live-main/relayer-graphcomplete/.relayer/current-update-pr-runtime"
+      },
+      "scope": "All original browser chapters; new real modal occlusion/stale-click refusal/fresh observation/Escape/preserved draft-pin-admission checkpoint plus existing narrow keyboard/Return/final-refresh/live-answer cases.",
+      "results": {
+        "native": {
+          "observedRevisions": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2
+          ],
+          "captureGaps": []
+        },
+        "authored": {
+          "observedRevisions": [
+            1,
+            1,
+            1,
+            1,
+            1,
+            1,
+            2
+          ],
+          "captureGaps": [
+            {
+              "reason": "presentation_changed_during_capture",
+              "revision": 1
+            }
+          ]
+        },
+        "qualification": "Declared chapters pass; the one authored capture gap remains explicit uncertainty, not a viewed-update or exhaustive/gap-free claim."
+      }
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/compiled.log",
+        "sha256": "ebae130416df7e5f0d6f3d336f667c28f31e37f39177b775e8f7ba051c1a0417"
+      },
+      "passed": 12,
+      "environment": {
+        "CARGO_TARGET_DIR": "/Volumes/2T-SSD/worktrees/vacation-live-main/relayer-graphcomplete/.relayer/current-update-pr-runtime"
+      },
+      "scope": "After final build; source frozen. Rust checks ran in parallel but no package artifact generation overlapped this proof."
+    },
+    {
+      "command": "npm run evidence:share-preview",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/share-preview.log",
+        "sha256": "16004b77c3fff6734e7842c65bc09d33d5b90cd44615986ea4a358974bd4525a"
+      },
+      "scope": "Real light/dark Electron captures of combined renderer, inspected images, cancellation and positive cleanup. Generated receipt/PNGs copied without alteration to tracked evidence."
+    },
+    {
+      "command": "documented follow-up annotation Electron capture",
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-main-20261018/followup.log",
+        "sha256": "27e969ed85331fec7c9840cfe1142eab5d3044533d71b7a9f10af7c1d64b16e2"
+      },
+      "scope": "Real A/B/C/D combined-source capture, context draft API and reload, positive cleanup, zero paid inference; existing project-sidebar-read fixture warnings retained."
+    }
+  ],
+  "nativeBuild": {
+    "mode": "Current-source rebuild using stable warm Cargo dependency outputs; private runtime binaries explicitly selected for capture/browser/compiled proof.",
+    "historicalCacheRejection": "Earlier prebuilt Ladybug bundle had a Cargo.lock identity mismatch and was not restored. Current native binaries were rebuilt from rebased Rust source.",
+    "runtimeBinaries": [
+      {
+        "name": "relayer-app-server",
+        "sha256": "bbefacacfedfe9e48bfccea512d01eb1ad2804ca26282cd3e2a6c7a592ac5d65"
+      },
+      {
+        "name": "relayer-graph-server",
+        "sha256": "416e2fb31631cbb46c641a39ab2a0d9f30705a4a3930139ef0287cf6f566718d"
+      }
+    ]
+  },
+  "failuresRetained": {
+    "historicalSnapshot": {
+      "sourceDigest": "078958472ff897464d937ee72721bbeb0ce97b945b16410ffacf8414f4f1e281",
+      "fullCheck": [
+        {
+          "command": "npm run check",
+          "exitCode": 1,
+          "evidence": {
+            "path": ".relayer/current-navigation-diagnosis-20261018/check-handoff.log",
+            "sha256": "285b0ebba2692096ad102d497eae80ccf042f72a6a7b3d6f40f9d72cbc909a33"
+          },
+          "runtimeResult": "All Rust, clippy/format, package, TS, 4548 Vitest tests, 2 separate secret-boundary tests, 100 Python tests and receipt gates passed; 3 Vitest tests skipped.",
+          "failure": "Final PRD readability gate: one 26-word sentence. Preserved outer failure; not a pass for npm run check.",
+          "followup": "Only PRD semicolon changed to a sentence break; no product, test or runner behavior changed. Re-ran the exact failed documentation gate below instead of repeating runtime proof."
+        }
+      ],
+      "otherFailures": [
+        "Initial stale visual receipts",
+        "Compiled runtime target/debug ENOENT setup",
+        "Build cleanup overlapped browser startup; generated dependencies restored before rerun",
+        "Expected red cue style and navigation synchronization reproductions",
+        "Busy cleanup test fixture initially injected unsupported toast callback; corrected to real production DOM",
+        "Earlier and final full-check readability failures"
+      ]
+    },
+    "mergePreparation": [
+      {
+        "evidence": {
+          "path": ".relayer/current-update-pr-20261018/trusted-chrome-red.log",
+          "sha256": "a00ef2666115104b3d4a336b3a714107a6f2b87fd91a50e8fcca9996d1b855b6"
+        },
+        "outcome": "Expected authored-collision failure plus cargo ENOENT from an incomplete test PATH; not a pass. PATH was corrected before planner red/green."
+      },
+      {
+        "evidence": {
+          "path": ".relayer/current-update-pr-20261018/mapping-red.log",
+          "sha256": "f8ac7a4aecd48d23ed189d7182b47b5bc198a699c3edd561abda2368863f43bf"
+        },
+        "outcome": "Two expected production-owner mapping failures; other 91 planner cases passed. Both mappings repaired before final focused/full checks."
+      }
+    ]
+  },
+  "historicalLive": {
+    "record": "live-20261018/confirmation.json",
+    "baseCommit": "24de17f22db3df8c4d6b5bd162c269964881be3a",
+    "sourceDigest": "078958472ff897464d937ee72721bbeb0ce97b945b16410ffacf8414f4f1e281",
+    "finding": "One controlled native model run noticed the visible new-update cue while pinned, requested a fresh decision after a certified non-dispatch refusal, opened Current and described its new facts.",
+    "limits": "Pre-rebase evidence; one controlled opportunity; fixture candidate; no natural discovery rate, exhaustive observation, calibrated quality or causal claim. No paid inference in merge-preparation checks."
+  },
+  "hostedCI": "Exact-head check and freshness required after publication; hosted status is reported by the PR, not inferred from local results.",
+  "automatedReviewCorrections": {
+    "initialPrCommit": "39f2f4ff161344855a3fe3460e1259957ced6a94",
+    "initialPrSourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
+    "initialHostedCi": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/39165623458",
+    "redReproduction": {
+      "path": ".relayer/current-update-pr-review-20261018/red.log",
+      "sha256": "63d7860f8192effb0306e32fc8db0cbd5397593b9c1877c302da651804d7c2f1"
+    },
+    "fixedBoundaries": [
+      "v5 accepted and reconciled live-answer receipts in completion-judge evidence",
+      "Fresh turn/history/Invoke pin baselines; legacy unknown preservation and completion-scoped inheritance"
+    ],
+    "compiledInitialFailure": {
+      "exitCode": 1,
+      "failed": 8,
+      "passed": 4,
+      "evidence": {
+        "path": ".relayer/current-update-pr-review-20261018/compiled.log",
+        "sha256": "12ae36e146bb1f930f186ade8aec1ca9f7c0c30fe132fbaf681366b8f68204e5"
+      },
+      "qualification": "Initial concurrent run failed recipe cases before useful harness diagnostics. Package artifact timestamps overlapped the run. Root cause is not proven; the failure is retained. Final proof is a separately isolated run after the final build, with no source edits."
+    }
+  },
+  "review": "review.json; source review assertions and independent execution qualifications remain separate.",
+  "additionalReviewCorrections": {
+    "previousCommit": "4bc2f6944e0aeeac8be80cbc3f398a700333bf85",
+    "previousSourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+    "previousHostedCi": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/39167340322",
+    "previousVerification": {
+      "path": ".relayer/current-update-pr-a11y-20261018/previous-head-verification.json",
+      "sha256": "4183954812479300f5fcda60169c15b37a0d546ac56f752dac27c695a8f3b2d9"
+    },
+    "redReproductions": [
+      {
+        "path": ".relayer/current-update-pr-a11y-20261018/red.log",
+        "sha256": "71d37e7dafe39c056f0f3f32dba537ba04bf635f3314896a07f1e55aa184ffe3"
+      },
+      {
+        "path": ".relayer/current-update-pr-a11y-20261018/root-rail-red.log",
+        "sha256": "a6153459ea525498dd73a179ec39ea3233a8080df78c950592595f22f2bd93fa"
+      }
+    ],
+    "fixedBoundaries": [
+      "Working action phase and exact observation link persist through reopen/export and bounded judge evidence. Projection corrects old mismatched phase using its linked immutable observation; raw events and prior judge evidence stay unchanged.",
+      "Accessible cue name matches generic/new visible status; a status change invalidates old control identity.",
+      "Root-history with annotations and an update cue uses the full normal rail; annotation-only layout returns without the cue.",
+      "Narrow horizontally scrolled cue is hit-testable and native Enter follows Current without input or new admission."
+    ],
+    "fixtureQualification": "The native phase test supplies its completion-judge prerequisite so its registry actually selects v12/v5; persisted observation v5 is asserted. This fixture-only refinement happened while the full check was still running Rust, before JavaScript tests loaded. Rust and all other earlier inputs were unchanged."
+  },
+  "visibleDedupCorrection": {
+    "previousCommit": "c9f42a73c966ef9c31c949403dd2d37c18611df8",
+    "previousSourceDigest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
+    "previousHostedCi": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/39169368571",
+    "previousVerification": {
+      "path": ".relayer/current-update-pr-dedup-20261018/previous-head-verification.json",
+      "sha256": "e7e8f5cfd1dc93819e01aba577346103140be5beae73fad35f6ed224332191b5"
+    },
+    "redReproduction": {
+      "path": ".relayer/current-update-pr-dedup-20261018/red.log",
+      "sha256": "299708dec2566d6b30656343512e25a7ebb2f6368c8d98958cf77761f639b273"
+    },
+    "fixedBoundary": "Pinned observation dedup uses rendered cue text and disabled state, never hidden scope/revision. Repeated same-label publications remain deduplicated for known/legacy pins; visible label/disabled/occlusion changes remain observable. Exact scope/revision remains mandatory for click rebinding and preflight. No default or prior raw event changes."
+  },
+  "runtimeEnvironmentCorrection": {
+    "failure": "Original browser attempts timed out before artifact fixture acceptance; diagnostic fixture also reproduced. Host graph-history bootstrap received an empty404 and was categorized model_not_found before fixture/model execution.",
+    "cause": "Login shell inherited CARGO_TARGET_DIR=/Volumes/2T-SSD/cargo/relayer-graphcomplete. The runner and fixture prioritize it over target and selected incompatible serving binaries. The earlier binary inspections/refreshes and route smoke used a different private directory. No cache corruption or Cargo freshness defect established.",
+    "failedOriginalRuns": [
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-dedup-20261018/eval-web.log",
+          "sha256": "7baf9669369eb03e7f8dbcb25f520e00bfe0cd4037c74a2f0afc0fd9647a4dcf"
+        }
+      },
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-dedup-20261018/eval-web-final.log",
+          "sha256": "7baf9669369eb03e7f8dbcb25f520e00bfe0cd4037c74a2f0afc0fd9647a4dcf"
+        }
+      },
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-dedup-20261018/eval-web-relinked.log",
+          "sha256": "7baf9669369eb03e7f8dbcb25f520e00bfe0cd4037c74a2f0afc0fd9647a4dcf"
+        }
+      }
+    ],
+    "diagnosticLogs": [
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/browser-diagnostic.log",
+        "sha256": "ed77647cbafa951b80371222a611272f02905a663780bae6b4f98dfcd9634bf4"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca.log",
+        "sha256": "ff1bb43c4b37f2c43b38ab757175da00b885a294109469a8b5ee70bd5675f312"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-host.log",
+        "sha256": "145e25ea51c3da7d64142da87f48467d1cca5dcaf4f4d801f39ce2a68d4653a8"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-read.log",
+        "sha256": "64565b80a9bd4431275c648dd3cd0dc3bf2946d47a504cb750ad76a10a212cac"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-route.log",
+        "sha256": "9fa36b26aa54df8eab992f836259e7cebb2ef77b09c5add44db0738f4e3b33e8"
+      },
+      {
+        "path": ".relayer/current-update-pr-dedup-20261018/artifact-rca-http.log",
+        "sha256": "cabc3abdd4853b239a3bb108387146c07d8b931d4bb5da158b5eef11a0643386"
+      }
+    ],
+    "environmentAndHashes": {
+      "path": ".relayer/current-update-pr-dedup-20261018/runtime-environment.json",
+      "sha256": "2a241c8d1f04719387d46bee7d67e802585ef6bf7e21d2c90f610852b9be16ba"
+    },
+    "binaryRefresh": {
+      "path": ".relayer/current-update-pr-dedup-20261018/runtime-refresh.json",
+      "sha256": "6b182d5f6205d1eb1f84bb6a0095da3398ac5e22642e551fb562a9668760055e"
+    },
+    "warmGraphRelink": {
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-dedup-20261018/graph-rebuild.log",
+        "sha256": "295908e7a4204840b8ae775e553bd83f818f543a729b8361ecdd46c9809dfc45"
+      },
+      "qualification": "Source-byte-preserving graph-server warm rebuild; this alone did not correct the runner environment. Explicit target pinning did."
+    },
+    "routeSmoke": {
+      "exitCode": 0,
+      "evidence": {
+        "path": ".relayer/current-update-pr-dedup-20261018/route-smoke.log",
+        "sha256": "9b84197378f74895e516c52906e05ad37e0bfe58958163a08b14191394d2f4de"
+      },
+      "outcome": "Private rebuilt server returns401 JSON for unauthenticated input and history routes."
+    },
+    "finalProof": "Unmodified browser suite and compiled suite explicitly pin the private runtime and pass; independent transport_prompt_review audited the corrected environment explanation and hashes.",
+    "failedLogQualification": "Three failure log paths contain byte-identical output. They document the same reproduced symptom; their bytes alone do not establish independent run identities.",
+    "sourceDigest": "f6934c3ddf1f1e157ce284082f463a9beb9b3de8903d08cbab5b8161c2d51f99",
+    "snapshotQualification": "Historical merge-preparation diagnosis and execution on the preceding source. Final integrated execution/binaries are recorded separately in checks and nativeBuild."
+  },
+  "mainIntegration": {
+    "previousCommit": "550133d642ca1d7924f6e28c1b7e6fcaae75fe65",
+    "previousSourceDigest": "f6934c3ddf1f1e157ce284082f463a9beb9b3de8903d08cbab5b8161c2d51f99",
+    "mainParent": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+    "previousVerification": {
+      "path": ".relayer/current-update-pr-main-20261018/previous-head-verification.json",
+      "sha256": "d64d48e23e7d32873e96fdfb30b3ee0abcbc52ff5fa6780a4553696c9c1fea20"
+    },
+    "resolution": "Preserve independent sticky Current cue and Thread details CSS; workspace auto-merge retains both native UI contracts. Generated receipt/image conflicts resolved through actual combined-source captures. No product behavior or prior actor default/revision changed.",
+    "newCheckpoint": "Real native modal occludes the pinned cue: old activation refused before dispatch, fresh actor observation omits cue, Escape restores same layer/pointer/path and draft without new Answer/admission."
+  },
+  "buildEnvironmentRecovery": {
+    "failures": [
+      {
+        "exitCode": 101,
+        "evidence": {
+          "path": ".relayer/current-update-pr-main-20261018/build.log",
+          "sha256": "b4b7bdb7e423c004dba7f98e2bf67a3f35951ada233b419c88fe565db6f4f018"
+        },
+        "failure": "Graph-server dep-info write failedENOENT in the previously shared target; its fingerprint directory was absent on inspection."
+      },
+      {
+        "exitCode": 1,
+        "evidence": {
+          "path": ".relayer/current-update-pr-main-20261018/build-final.log",
+          "sha256": "505946aa87f7571ba51b887bb6b64f0a25407be66c263a359106ece7f4890c1d"
+        },
+        "failure": "Shared worktree dependency removal left454 broken top-level package links; prebuild could not import rolldown."
+      }
+    ],
+    "recovery": {
+      "dependencyRestore": {
+        "exitCode": 0,
+        "evidence": {
+          "path": ".relayer/current-update-pr-main-20261018/dependency-restore.log",
+          "sha256": "3ea8af246f2239d5efcbe3a2fdb6fd670b49138cd3ac82deb5d70406eda22e1b"
+        },
+        "scope": "npm ci --ignore-scripts --offline from local cache; own lockfile-bound dependency tree."
+      },
+      "electronRestore": {
+        "exitCode": 0,
+        "evidence": {
+          "path": ".relayer/current-update-pr-main-20261018/electron-restore.log",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "runtimeInventory": {
+        "path": ".relayer/current-update-pr-main-20261018/runtime-binaries.json",
+        "sha256": "4f24b764c5fe3e3f993d5b364a6f6bb94b288c6722971e4759eb5fc12a471021"
+      }
+    },
+    "qualification": "Prior shared worktree backing directories became unavailable. Changed build-resource paths and restored dependencies before final build/proofs. Failures are retained, not product failures or passes; no cache-corruption claim."
+  }
+}

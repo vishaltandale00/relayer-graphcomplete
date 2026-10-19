@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "baseCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+  "sourceManifest": "source.json",
+  "sourceDigest": "ac48dd755f689c137e5148729d908819150bb6a8456591ae0032a1e338226ffc",
+  "verificationSha256": "69324d33f63a705d431812e1ff56bc15a1c6938b0d698ed1fb6ddca06d665f21",
+  "supersedes": [
+    {
+      "sourceDigest": "bf064f84e823df5417615d42afebe00c35fb1406700090407c50626b7cbb7f8c",
+      "reason": "Missing v5 judge-receipt inclusion and fresh pin transitions were reproduced and corrected."
+    },
+    {
+      "sourceDigest": "c8ee14eb4d4a3a47e7099b87402b38a4ac70034665639862a25ed3b4b58173ec",
+      "reason": "Working-action phase/linkage, accessible cue naming and root-history rail layout were reproduced and corrected."
+    },
+    {
+      "sourceDigest": "6d77997f15ab638013e23ae45c85dffaa3b5aeb9ead956fe6c19c30e35ce314c",
+      "reason": "Hidden scope/revision in pinned observation dedup was reproduced and removed; exact click validation remains intact. Final runtime proofs explicitly select compatible binaries."
+    },
+    {
+      "sourceDigest": "f6934c3ddf1f1e157ce284082f463a9beb9b3de8903d08cbab5b8161c2d51f99",
+      "reason": "Integrated main2ef4f7a4, preserved independent CSS blocks, recaptured combined renderer and added actual modal occlusion/Escape checkpoint. All required local gates reran."
+    }
+  ],
+  "assertions": [
+    {
+      "reviewer": "design_authority_review",
+      "scope": "Integrated source/checkpoint mapping, preserved Current cue and main family-only composer/Thread details contract, modal top-layer authority, stale-control refusal, Escape pin/draft preservation, six fresh inspected visuals and receipt binding; qualified final local results.",
+      "verdict": "PASS",
+      "unresolvedFindings": [],
+      "executionQualification": "Independently inspected38 source hashes, source mappings, all referenced hashes, six images and actual inner outcomes; no independent tests or inference."
+    },
+    {
+      "reviewer": "actor_renderer_review",
+      "scope": "Integrated actor/renderer/authority/trajectory/checkpoint boundaries; prior production actor behavior and immutable history/defaults, new actual modal exclusion/refusal/restoration proof, exact phase/delivery evidence, fresh visual/runtime bindings and historical live limits.",
+      "verdict": "PASS for source, mapping and qualified recorded local evidence",
+      "unresolvedFindings": [],
+      "executionQualification": "Independently verified38 source entries/aggregate,36 referenced records,119 capture receipt/source/image references and both private binary hashes. Inner outcomes support focused167/full4591/3skip/native60groups/secret2/Python100/build/browser/compiled12. Native capture gaps[], authored one presentation_changed_during_capture rev1; not exhaustive. Read-only audit; no tests or inference executed."
+    }
+  ],
+  "snapshotQualification": "38 changed paths on main2ef4f7a4. Combined workspace/CSS integration preserves both parent intents; actor production is unchanged versus550133d6. The added browser checkpoint and fresh captures are included in final reviewed source. All required local gates ran on those executable bytes. Generated source/verification/review records are excluded to avoid self-reference.",
+  "compiledQualification": "An earlier concurrent compiled run failed 8 and passed 4; cause remains unproven. Failed log retained. Final isolated post-build run passed all 12 on this source; no general stability or proven root-cause claim.",
+  "liveQualification": "Controlled historical live proof is bound to base24de17f2/source07895847, not this snapshot. No natural discovery-rate, calibrated quality, causal improvement, exhaustive observation or release claim.",
+  "hostedQualification": "Required exact-head check and merge-freshness-status must pass after publication. PR statuses report the hosted outcome; local proof does not imply it.",
+  "excludedGeneratedEvidence": [
+    "docs/evidence/current-update-discovery/review.json",
+    "docs/evidence/current-update-discovery/source.json",
+    "docs/evidence/current-update-discovery/verification.json"
+  ],
+  "captureQualification": "Final browser native reactions[1,1,1,1,1,1,2] have no reported gaps; authored same sequence retains one presentation_changed_during_capture revision1 gap. Both chapters pass their declared predicates; no exhaustive or gap-free system claim.",
+  "runtimeQualification": "Final build restores own offline lockfile dependencies and uses stable warm Cargo compilation outputs. Capture/browser/compiled runners explicitly pin private current-source binaries. Shared target/dependency setup failures are retained separately. Earlier inherited-target diagnosis remains historical to sourcef693; no cache-defect claim.",
+  "historicalTransportReview": {
+    "reviewer": "transport_prompt_review",
+    "sourceDigest": "f6934c3ddf1f1e157ce284082f463a9beb9b3de8903d08cbab5b8161c2d51f99",
+    "scope": "Previously audited inherited target versus private artifact paths/hashes; not an assertion about final integrated execution."
+  }
+}

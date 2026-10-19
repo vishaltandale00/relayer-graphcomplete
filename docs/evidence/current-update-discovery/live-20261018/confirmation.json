@@ -1,0 +1,409 @@
+{
+  "schemaVersion": 1,
+  "kind": "historical controlled live simulated-user confirmation",
+  "baseCommit": "24de17f22db3df8c4d6b5bd162c269964881be3a",
+  "sourceDigest": "078958472ff897464d937ee72721bbeb0ce97b945b16410ffacf8414f4f1e281",
+  "taskId": "human-fae268df-8698-4c2f-897b-8543b49f9e79",
+  "case": "Vacation: new Current arrives while browsing an earlier comparison",
+  "candidate": "Deterministic graph fixture; publication gated on actual pinned historical pixels. Fixture only activates Earlier comparison before publication, never latest-update.",
+  "actor": {
+    "model": "gpt-5.6-luna",
+    "modelReasoningEffort": "low",
+    "promptVersion": "task-actor-v12"
+  },
+  "actorRevisionId": "setup-5b87c9fe-9864-41c1-bca2-166d784800be",
+  "observationContractId": "task-actor-observation-v5",
+  "billingMode": "subscription-only; no API/Decisions route",
+  "budget": {
+    "completions": 1,
+    "deadlineMs": 180000,
+    "liveAttempts": 1
+  },
+  "before": {
+    "revision": 2,
+    "mode": "pinned",
+    "layerId": 8,
+    "displayedLayerId": 7
+  },
+  "after": {
+    "revision": 3,
+    "mode": "pinned",
+    "layerId": 9,
+    "displayedLayerId": 7
+  },
+  "criteria": {
+    "newPublicationWhilePinned": true,
+    "modelChoosesLatest": true,
+    "actualNewCurrentViewed": true,
+    "uniqueFactsRead": [
+      "Lake Bled",
+      "\u20ac84 for two",
+      "10:15 departure",
+      "18:40 return"
+    ]
+  },
+  "successfulIntent": 14,
+  "completedEvent": 16,
+  "actualNewCurrentObservation": 18,
+  "reactionEvent": 19,
+  "certifiedNonDispatchRefusals": 1,
+  "initialCurrentRevisionsUnobserved": 2,
+  "hostReplay": false,
+  "termination": {
+    "reason": "endpoint_reached",
+    "at": "2026-10-18T20:23:26.794Z",
+    "success": null,
+    "endpointAttainment": "judge_reported",
+    "completionJudgeEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:25",
+    "actorClaim": {
+      "kind": "finish",
+      "ref": "",
+      "value": "",
+      "reason": "endpoint_reached",
+      "satisfaction": 4,
+      "comment": "The updated plan keeps the Ljubljana hotel base, uses a 10:15 train and local bus to Lake Bled, returns at 18:40, and estimates \u20ac84 total transport for two adults. Figures are illustrative, not live bookings or quotes.",
+      "endpointStatus": "reached",
+      "remainingWork": ""
+    }
+  },
+  "review": {
+    "reviewer": "actor_renderer_review",
+    "verdict": "pass for narrow notices/chooses/actually views and reads claim",
+    "sourceDigest": "078958472ff897464d937ee72721bbeb0ce97b945b16410ffacf8414f4f1e281",
+    "bindings": {
+      "task.json": "c475a80a5158b7c799af11a3acd7aebe395190fb511dd3e0d4e4fb44afcc664a",
+      "export.json": "91f4f615d3110dfbff3c2cf184f9cbda9a884ff75ceec19100b4f61763b57ea2",
+      "result.json": "26ce8dfac62c426fca55cf37a9b5eb5eb39a5d79530272a6fe0ef8a334a146cb",
+      "plan.json": "419e482c9161ae59847f877832b74fb94421ffaa849df7e2fb9d0b6a6441c599",
+      "source.json": "c16f47670dabc21b15897ac326157413b95935fee5b418f4ad6e4ed7f0300533",
+      "executed-script.mjs": "4310de4120e78cce24dcd1350ba5daea52f3e3dc7575f8fc92f8ea3e500cc294"
+    },
+    "scope": "All six PNGs viewed; four model screenshot identities matched; event chronology, native usages and diagnostic trace checked.",
+    "findings": "First target detached during validate_target; certified non-dispatch at10. Fresh native decision13/intent14 succeeded; actual layer9 paint15 precedes completed16 and observation18. Reaction19 quotes all unique facts. No host latest-button click or automatic replay in executed live branch.",
+    "qualification": "Independent read-only review, no inference/edits; non-certifying beyond this exact bounded evidence.",
+    "unresolvedBlockers": []
+  },
+  "rawEvidenceHashes": {
+    "task.json": "c475a80a5158b7c799af11a3acd7aebe395190fb511dd3e0d4e4fb44afcc664a",
+    "export.json": "91f4f615d3110dfbff3c2cf184f9cbda9a884ff75ceec19100b4f61763b57ea2",
+    "executed-script.mjs": "4310de4120e78cce24dcd1350ba5daea52f3e3dc7575f8fc92f8ea3e500cc294",
+    "plan.json": "419e482c9161ae59847f877832b74fb94421ffaa849df7e2fb9d0b6a6441c599",
+    "result.json": "26ce8dfac62c426fca55cf37a9b5eb5eb39a5d79530272a6fe0ef8a334a146cb"
+  },
+  "screenshots": {
+    "before-publication.png": {
+      "bytes": 87088,
+      "sha256": "7e5532ecd5fcd5c5b12f699f98e2f3f0882db21edafb95f23071eb659999ed78"
+    },
+    "after-publication.png": {
+      "bytes": 88951,
+      "sha256": "330ffee3c17bce13e49948f96ff9ee8b05142a19e195e47d84e1f49d5d6c4816"
+    },
+    "model-pinned.png": {
+      "bytes": 88931,
+      "sha256": "f0c46fac7f298d6c5eaefe4bbc367a162dc0e198c084d83974b094c919d5ef8c"
+    },
+    "model-fresh-pinned.png": {
+      "bytes": 88960,
+      "sha256": "38e21d4f9004c7177de3a58c8281ea57c1e47532ddf78b32b0230886a958bb84"
+    },
+    "model-new-current.png": {
+      "bytes": 90236,
+      "sha256": "4cf7780edadab6b6be0eabcad2fa2afb1dccbfb81783da7132f3813444ea420a"
+    },
+    "model-settled.png": {
+      "bytes": 86625,
+      "sha256": "dc2f7ac1dda5b293a985e6b370058375890ad845dcab99911c628414af53a3f7"
+    }
+  },
+  "timeline": [
+    {
+      "sequence": 7,
+      "at": "2026-10-18T20:23:07.585Z",
+      "kind": "actor_observation",
+      "phase": "pinned",
+      "pointer": {
+        "threadId": "1",
+        "turnId": 1,
+        "attemptId": null,
+        "revision": 3,
+        "layerId": 7,
+        "observedAt": 1792354987407,
+        "completionStatus": "running",
+        "selectedNodeId": 28,
+        "navigationPath": [
+          {
+            "layerId": 8,
+            "viaActionId": null
+          },
+          {
+            "layerId": 7,
+            "viaActionId": 8
+          }
+        ],
+        "answerPresentation": "[]",
+        "viewingCurrent": false,
+        "visibleUpdate": "[\"[1,1,27,null]\",\"3\",\"New update available \u00b7 View latest update\",false]"
+      },
+      "screenshotSha256": "f0c46fac7f298d6c5eaefe4bbc367a162dc0e198c084d83974b094c919d5ef8c"
+    },
+    {
+      "sequence": 8,
+      "at": "2026-10-18T20:23:10.993Z",
+      "kind": "actor_current_reaction",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:7",
+      "comment": "The earlier comparison only says Lake Bled looks promising, but its transport cost and departure time were still unchecked. I\u2019m opening the latest update to see whether those details are now available.",
+      "usage": {
+        "input_tokens": 10182,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 122,
+        "reasoning_output_tokens": 17
+      }
+    },
+    {
+      "sequence": 9,
+      "at": "2026-10-18T20:23:10.994Z",
+      "kind": "actor_action",
+      "phase": "current",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:7",
+      "action": {
+        "kind": "click",
+        "ref": "52b3ac37-c2b1-45d2-8dcc-b0c50282efab",
+        "value": "",
+        "reason": "",
+        "satisfaction": null,
+        "comment": "",
+        "endpointStatus": null,
+        "remainingWork": ""
+      },
+      "usage": {
+        "input_tokens": 10182,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 122,
+        "reasoning_output_tokens": 17
+      }
+    },
+    {
+      "sequence": 10,
+      "at": "2026-10-18T20:23:11.095Z",
+      "kind": "actor_action_failed",
+      "actionEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:9",
+      "actionDispatched": false,
+      "category": "unavailable_control",
+      "retryAllowed": true,
+      "message": "Working control changed before dispatch. Obtain a fresh observation."
+    },
+    {
+      "sequence": 12,
+      "at": "2026-10-18T20:23:11.295Z",
+      "kind": "actor_observation",
+      "phase": "pinned",
+      "pointer": {
+        "threadId": "1",
+        "turnId": 1,
+        "attemptId": null,
+        "revision": 3,
+        "layerId": 7,
+        "observedAt": 1792354987407,
+        "completionStatus": "running",
+        "selectedNodeId": 28,
+        "navigationPath": [
+          {
+            "layerId": 8,
+            "viaActionId": null
+          },
+          {
+            "layerId": 7,
+            "viaActionId": 8
+          }
+        ],
+        "answerPresentation": "[]",
+        "viewingCurrent": false,
+        "visibleUpdate": "[\"[1,1,27,null]\",\"3\",\"New update available \u00b7 View latest update\",false]"
+      },
+      "screenshotSha256": "38e21d4f9004c7177de3a58c8281ea57c1e47532ddf78b32b0230886a958bb84"
+    },
+    {
+      "sequence": 13,
+      "at": "2026-10-18T20:23:14.348Z",
+      "kind": "actor_current_reaction",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:12",
+      "comment": "The latest result still hasn\u2019t opened; the visible comparison remains the older, incomplete information. I\u2019m trying the update control again.",
+      "usage": {
+        "input_tokens": 22500,
+        "cached_input_tokens": 10112,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 225,
+        "reasoning_output_tokens": 28
+      }
+    },
+    {
+      "sequence": 14,
+      "at": "2026-10-18T20:23:14.349Z",
+      "kind": "actor_action",
+      "phase": "current",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:12",
+      "action": {
+        "kind": "click",
+        "ref": "60e224f3-9155-4238-a71b-1b58ab937bab",
+        "value": "",
+        "reason": "",
+        "satisfaction": null,
+        "comment": "",
+        "endpointStatus": null,
+        "remainingWork": ""
+      },
+      "usage": {
+        "input_tokens": 22500,
+        "cached_input_tokens": 10112,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 225,
+        "reasoning_output_tokens": 28
+      }
+    },
+    {
+      "sequence": 15,
+      "at": "2026-10-18T20:23:14.448Z",
+      "kind": "presentation",
+      "snapshot": {
+        "threadId": 1,
+        "turnId": 1,
+        "layerId": 9,
+        "navigationPath": [
+          {
+            "layerId": 9,
+            "viaActionId": null
+          }
+        ],
+        "observedAt": 1792354994441,
+        "content": "Vacation \u00b7 notice new Current while browsing an earlier comparison \u00b7 human \u00b7 Vacation \u00b7 notice new Current while browsin\nUpdated lake outing plan\nScroll or pinch to zoom \u00b7 Drag canvas to pan \u00b7 Drag nodes for this view\n\u2212\n125%\n+\nFit\n\u233e\nconcept\nUpdated lake outing plan\n\nThe updated proposal keeps your Ljubljana hotel base. Take the 10:15 train and local bus to Lake Bled; return at 18:40. Total transport is \u20ac84 for two adults. Keep a relaxed morning and a short lakeside walk, with no car. These are fictional illustrative fixture figures, not live schedules or quotes.\n\nPrevious checking update\n",
+        "completionStatus": "running",
+        "source": "renderer-after-paint"
+      }
+    },
+    {
+      "sequence": 16,
+      "at": "2026-10-18T20:23:14.616Z",
+      "kind": "actor_action_completed",
+      "actionEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:14"
+    },
+    {
+      "sequence": 17,
+      "at": "2026-10-18T20:23:14.859Z",
+      "kind": "actor_current_gap",
+      "pointer": {
+        "threadId": 1,
+        "turnId": 1,
+        "attemptId": null,
+        "revision": 3,
+        "layerId": 9,
+        "observedAt": 1792354994441,
+        "completionStatus": "running",
+        "selectedNodeId": 30,
+        "navigationPath": [
+          {
+            "layerId": 9,
+            "viaActionId": null
+          }
+        ],
+        "answerPresentation": "[]",
+        "viewingCurrent": true,
+        "visibleUpdate": "null"
+      },
+      "reason": "revisions_not_observed",
+      "missingRevisions": 2
+    },
+    {
+      "sequence": 18,
+      "at": "2026-10-18T20:23:14.860Z",
+      "kind": "actor_observation",
+      "phase": "current",
+      "pointer": {
+        "threadId": 1,
+        "turnId": 1,
+        "attemptId": null,
+        "revision": 3,
+        "layerId": 9,
+        "observedAt": 1792354994441,
+        "completionStatus": "running",
+        "selectedNodeId": 30,
+        "navigationPath": [
+          {
+            "layerId": 9,
+            "viaActionId": null
+          }
+        ],
+        "answerPresentation": "[]",
+        "viewingCurrent": true,
+        "visibleUpdate": "null"
+      },
+      "screenshotSha256": "4cf7780edadab6b6be0eabcad2fa2afb1dccbfb81783da7132f3813444ea420a"
+    },
+    {
+      "sequence": 19,
+      "at": "2026-10-18T20:23:17.976Z",
+      "kind": "actor_current_reaction",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:18",
+      "comment": "This update answers the key questions: keep the Ljubljana hotel, leave on the 10:15 train plus local bus to Lake Bled, return at 18:40, and budget \u20ac84 total transport for two adults. It\u2019s explicitly an illustrative plan rather than live timetable or quote.",
+      "usage": {
+        "input_tokens": 36900,
+        "cached_input_tokens": 22400,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 327,
+        "reasoning_output_tokens": 53
+      }
+    },
+    {
+      "sequence": 21,
+      "at": "2026-10-18T20:23:18.647Z",
+      "kind": "actor_observation",
+      "screenshotSha256": "dc2f7ac1dda5b293a985e6b370058375890ad845dcab99911c628414af53a3f7"
+    },
+    {
+      "sequence": 22,
+      "at": "2026-10-18T20:23:21.898Z",
+      "kind": "actor_action",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:21",
+      "action": {
+        "kind": "finish",
+        "ref": "",
+        "value": "",
+        "reason": "endpoint_reached",
+        "satisfaction": 4,
+        "comment": "The updated plan keeps the Ljubljana hotel base, uses a 10:15 train and local bus to Lake Bled, returns at 18:40, and estimates \u20ac84 total transport for two adults. Figures are illustrative, not live bookings or quotes.",
+        "endpointStatus": "reached",
+        "remainingWork": ""
+      },
+      "usage": {
+        "input_tokens": 53717,
+        "cached_input_tokens": 22400,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 436,
+        "reasoning_output_tokens": 66
+      }
+    },
+    {
+      "sequence": 25,
+      "at": "2026-10-18T20:23:26.764Z",
+      "kind": "actor_completion_judgment",
+      "observationEventId": "human-fae268df-8698-4c2f-897b-8543b49f9e79:21",
+      "verdict": "complete",
+      "evidenceExplanation": "The visible node details explain the updated plan: keep the Ljubljana hotel base, take the 10:15 train and local bus to Lake Bled, return at 18:40, and budget \u20ac84 total transport for two adults. It also confirms a relaxed morning, short lakeside walk, no car, and that the figures are illustrative rather than live quotes.",
+      "usage": {
+        "input_tokens": 10937,
+        "cached_input_tokens": 0,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 177,
+        "reasoning_output_tokens": 76
+      }
+    }
+  ],
+  "limits": [
+    "This source predates rebase onto main a7985983. Fresh assembled deterministic verification covers the rebased change.",
+    "One refused detached target required a fresh model decision; not a first-attempt reliability result.",
+    "One controlled integration path, not natural browsing frequency, calibrated task quality or causal improvement.",
+    "Earlier inference-free fixture failures and raw private diagnostics remain local; none were replaced by this record."
+  ]
+}
