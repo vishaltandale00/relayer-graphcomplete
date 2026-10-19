@@ -2201,6 +2201,19 @@ export function createProductWorkspace({
   const settingsControl = $("#conversationSettings");
   const settingsButton = $("#conversationSettingsButton");
   const settingsMenu = $("#conversationSettingsMenu");
+  const detailsButton = $("#openThreadDetails");
+  const detailsDialog = $("#threadDetailsDialog");
+  let detailsThreadId = null;
+  const renderThreadDetails = (thread) => {
+    if (detailsDialog.open && detailsThreadId !== thread?.id) detailsDialog.close();
+    const harnessId = thread?.harnessId ?? thread?.harnessConfigurationName;
+    const harness = getState().modelSettings?.harnesses?.find((item) => item.id === harnessId);
+    $("#threadDetailsName").textContent = thread?.title || "Untitled thread";
+    $("#threadDetailsHarness").textContent = harness?.label ?? harnessId ?? "Unknown";
+  };
+  detailsDialog.onclose = () => {
+    if (!disposed && !detailsDialog.open && getThread()?.id === detailsThreadId) settingsButton.focus();
+  };
   const exportButton = $("#exportConversation");
   const archiveButton = $("#archiveConversation");
   const stopAllButton = $("#stopAllRuns");
@@ -2307,9 +2320,13 @@ export function createProductWorkspace({
     settingsMenuOpen = true;
     settingsMenu.classList.remove("hidden");
     settingsButton.setAttribute("aria-expanded", "true");
-    (archiveAvailable ? archiveButton : shareAvailable ? $("#shareConversationMenu") : exportButton).focus();
+    (archiveAvailable ? archiveButton : !detailsButton.disabled ? detailsButton : shareAvailable ? $("#shareConversationMenu") : exportButton).focus();
   };
   const renderExportControl = (thread = getThread()) => {
+    const detailsAvailable = mode === "interactive" && thread?.id != null;
+    detailsButton.classList.toggle("hidden", !detailsAvailable);
+    detailsButton.disabled = !detailsAvailable;
+    renderThreadDetails(thread);
     archiveButton.classList.toggle("hidden", !archiveAvailable);
     archiveButton.textContent = thread?.archivedAt ? "Unarchive" : "Archive";
     archiveButton.disabled = !thread || (!thread.archivedAt && (thread.archiveBlocked || ["running", "stopping", "needs_approval"].includes(thread.activity)));
@@ -2326,19 +2343,29 @@ export function createProductWorkspace({
     $("#threadArchivedLabel").classList.toggle("hidden", !thread?.archivedAt);
     const available = capabilities.canExportConversation
       && typeof onExportConversation === "function";
-    settingsControl.classList.toggle("hidden", !available && !shareAvailable && !archiveAvailable && stoppable === 0);
+    settingsControl.classList.toggle("hidden", !detailsAvailable && !available && !shareAvailable && !archiveAvailable && stoppable === 0);
     exportButton.classList.toggle("hidden", !available);
     exportButton.disabled = !available || exportPending || thread?.id == null;
-    settingsButton.disabled = (!available && !shareAvailable && !archiveAvailable && stoppable === 0) || exportPending;
+    settingsButton.disabled = (!detailsAvailable && !available && !shareAvailable && !archiveAvailable && stoppable === 0) || exportPending;
     settingsButton.setAttribute("aria-busy", String(exportPending));
     exportButton.setAttribute("aria-busy", String(exportPending));
     exportButton.textContent = exportPending ? "Exporting…" : "Export conversation…";
-    if (!available && !shareAvailable && !archiveAvailable && stoppable === 0) closeSettingsMenu();
+    if (!detailsAvailable && !available && !shareAvailable && !archiveAvailable && stoppable === 0) closeSettingsMenu();
   };
   settingsButton.onclick = () => {
     if (settingsMenuOpen) closeSettingsMenu();
     else openSettingsMenu();
   };
+  detailsButton.onclick = () => {
+    const thread = getThread();
+    if (detailsButton.disabled || !thread) return;
+    closeSettingsMenu();
+    renderThreadDetails(thread);
+    detailsThreadId = thread.id;
+    detailsDialog.showModal();
+    $("#closeThreadDetails").focus();
+  };
+  $("#closeThreadDetails").onclick = () => detailsDialog.close();
   exportButton.onclick = async () => {
     const thread = getThread();
     if (
@@ -2377,7 +2404,13 @@ export function createProductWorkspace({
     if (settingsMenuOpen && !settingsControl.contains(event.target)) closeSettingsMenu();
   };
   const closeSettingsMenuOnEscape = (event) => {
-    if (event.key !== "Escape" || !settingsMenuOpen) return;
+    if (event.key !== "Escape" || (!settingsMenuOpen && !detailsDialog.open)) return;
+    if (detailsDialog.open) {
+      event.preventDefault?.();
+      event.stopImmediatePropagation?.();
+      detailsDialog.close();
+      return;
+    }
     event.preventDefault?.();
     event.stopImmediatePropagation?.();
     closeSettingsMenu({ restoreFocus: true });
@@ -4981,6 +5014,7 @@ export function createProductWorkspace({
     const state = getState();
     const thread = getThread();
     if (!thread) {
+      if (detailsDialog.open) detailsDialog.close();
       nodeSelectionSequence += 1;
       // A request still waiting for a draft belongs to the thread left.
       userRequestTicket += 1;
@@ -7404,6 +7438,10 @@ export function createProductWorkspace({
 
   function dispose() {
     disposed = true;
+    if (detailsDialog.open) detailsDialog.close();
+    detailsDialog.onclose = null;
+    detailsButton.onclick = null;
+    $("#closeThreadDetails").onclick = null;
     implicitInputEntries.clear();
     inputScopeObservations.clear();
     implicitSendSnapshots.clear();

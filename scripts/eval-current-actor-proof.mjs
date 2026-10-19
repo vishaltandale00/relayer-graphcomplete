@@ -348,12 +348,40 @@ export async function proveCurrentActor({ browser, directory, authored = false }
                 assert.ok(!["transparent", "rgba(0, 0, 0, 0)"].includes(cueStyle.background), "sticky cue has an opaque background so scrolled breadcrumbs cannot overlap its text");
                 await discoveryPage.screenshot({ path: join(data, "update-discovery.png") });
                 console.log("CURRENT_DISCOVERY_SCREENSHOT", join(data, "update-discovery.png"));
-                const historical = await discovery.observeCurrent(expected);
+                let historical = await discovery.observeCurrent(expected);
                 assert.equal(historical.pointer.viewingCurrent, false);
                 assert.equal(historical.observation.displayedView, "historical");
                 assert.equal(historical.observation.currentUpdate, undefined);
-                const latestControl = historical.observation.controls.find(control => control.name.endsWith("View latest update"));
+                let latestControl = historical.observation.controls.find(control => control.name.endsWith("View latest update"));
                 assert.ok(latestControl, "pinned actor can select the real visible latest-update control");
+                await discoveryPage.locator("#threadPrompt").fill("Draft retained across thread details");
+                const pinnedBeforeDetails = await discoveryPage.evaluate(() => {
+                  const p = window.__taskActorPresentation;
+                  return { layerId: p.layerId, currentPointer: p.currentPointer, navigationPath: p.navigationPath };
+                });
+                await discoveryPage.locator("#conversationSettingsButton").click();
+                await discoveryPage.locator("#openThreadDetails").click();
+                await discoveryPage.locator("#threadDetailsDialog").waitFor();
+                await assert.rejects(discovery.act({ kind: "click", ref: latestControl.ref }, { current: { expected, pointer: historical.pointer } }),
+                  { code: "actor_control_unavailable", actionDispatched: false });
+                const covered = await discovery.observeCurrent(expected);
+                assert.equal(covered.kind, "observation");
+                assert.ok(!covered.observation.controls.some(control => control.name.endsWith("View latest update")),
+                  "modal top layer excludes the background Current cue from actor controls");
+                assert.equal(covered.pointer.visibleUpdate, "null");
+                await discoveryPage.keyboard.press("Escape");
+                await discoveryPage.locator("#threadDetailsDialog").waitFor({ state: "hidden" });
+                assert.deepEqual(await discoveryPage.evaluate(() => {
+                  const p = window.__taskActorPresentation;
+                  return { layerId: p.layerId, currentPointer: p.currentPointer, navigationPath: p.navigationPath };
+                }), pinnedBeforeDetails);
+                assert.equal(await discoveryPage.locator("#threadPrompt").inputValue(), "Draft retained across thread details");
+                historical = await discovery.observeCurrent(expected);
+                latestControl = historical.observation.controls.find(control => control.name.endsWith("View latest update"));
+                assert.ok(latestControl, "Escape restores ordinary Current cue observation without navigation");
+                assert.equal(answerRequests, 1);
+                assert.equal(tasks.get(sessionId).completions, 1);
+                console.log("PASS thread details over Current: modal excludes background observation/activation; Escape restores cue with draft/pin retained and no input submission");
                 await discoveryPage.route(`**/layers/${layers[1].ref.id}`, async route => {
                   if (!held) { held = true; loading.resolve(); await release.promise; }
                   await route.continue();

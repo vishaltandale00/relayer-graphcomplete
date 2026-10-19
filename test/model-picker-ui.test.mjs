@@ -13,9 +13,7 @@ import {
   createModelPickerRequestGate,
   interactionModelSelection,
   modelPickerClickIsOutside,
-  modelPickerCycleIndex,
   modelPickerFamilyPresentation,
-  modelPickerKeyIntent,
   modelPickerMarkup,
   modelPickerMemberIsSelected,
   modelSelectionLabels,
@@ -46,11 +44,13 @@ describe("composer model picker UI contract", () => {
     );
   });
 
-  it("renders Model and Advanced tabs for new and ongoing pickers", () => {
+  it("offers only family selection in new and ongoing composers", () => {
     for (const mode of ["new", "ongoing"]) {
       const markup = modelPickerMarkup({ mode });
-      expect(markup).toContain('data-model-picker-tab="model"');
-      expect(markup).toContain('data-model-picker-tab="advanced"');
+      expect(markup).toContain('data-model-picker-panel="model"');
+      expect(markup).not.toContain('role="tab"');
+      expect(markup).not.toContain("Advanced");
+      expect(markup).not.toContain("data-harness-option");
       expect(markup).toContain(`data-model-picker="${mode}"`);
     }
   });
@@ -83,18 +83,6 @@ describe("composer model picker UI contract", () => {
     }, member)).toBe(false);
   });
 
-  it("maps escape, tab arrows, and option arrows deterministically", () => {
-    const tabTarget = { matches: (selector) => selector === '[role="tab"]' };
-    expect(modelPickerKeyIntent({ key: "Escape", target: {} }, "model")).toBe("close");
-    expect(modelPickerKeyIntent({ key: "ArrowRight", target: tabTarget }, "model")).toBe("advanced");
-    expect(modelPickerKeyIntent({ key: "ArrowLeft", target: tabTarget }, "model")).toBe("advanced");
-    expect(modelPickerKeyIntent({ key: "Home", target: tabTarget }, "advanced")).toBe("model");
-    expect(modelPickerKeyIntent({ key: "End", target: tabTarget }, "model")).toBe("advanced");
-    expect(modelPickerCycleIndex(0, 3, "ArrowUp")).toBe(2);
-    expect(modelPickerCycleIndex(2, 3, "ArrowDown")).toBe(0);
-    expect(modelPickerCycleIndex(0, 0, "ArrowDown")).toBeNull();
-  });
-
   it("distinguishes inside clicks from outside-click dismissal", () => {
     const inside = {};
     const outside = {};
@@ -108,7 +96,7 @@ describe("composer model picker UI contract", () => {
     const root = { contains: (target) => target === option };
     const watcher = createModelPickerDismissWatcher(root);
     watcher.observe({ target: option });
-    // Choosing a harness re-renders the Advanced panel, which detaches the clicked option
+    // Choosing a family re-renders the panel, which detaches the clicked option
     // before the document-level dismissal listener sees the same click.
     root.contains = () => false;
     expect(watcher.shouldDismiss()).toBe(false);
@@ -130,7 +118,7 @@ describe("composer model picker UI contract", () => {
     );
   });
 
-  it("ignores stale asynchronous Advanced harness validation results", () => {
+  it("ignores stale asynchronous family routing results", () => {
     const gate = createModelPickerRequestGate();
     const first = gate.begin();
     const second = gate.begin();
@@ -270,23 +258,11 @@ describe("composer model picker UI contract", () => {
     expect(main).toContain("if (productApiAvailable && !newThreadModelSelectionReady())");
   });
 
-  it("server-validates Advanced harness candidates before committing them", async () => {
-    const [picker, composerPicker, permissions] = await Promise.all([
-      readFile(new URL("../desktop/renderer/src/model-picker.js", import.meta.url), "utf8"),
+  it("wires composer harness changes to permission preparation", async () => {
+    const [composerPicker, permissions] = await Promise.all([
       readFile(new URL("../desktop/renderer/src/composer-model-picker.js", import.meta.url), "utf8"),
       readFile(new URL("../desktop/renderer/src/permission-profiles.js", import.meta.url), "utf8"),
     ]);
-    expect(picker).toContain("await validateCandidateHarness(");
-    expect(picker.indexOf("await validateCandidateHarness(")).toBeLessThan(
-      picker.indexOf("commit(result.selection);"),
-    );
-    expect(picker.indexOf("validatingHarness = true;")).toBeLessThan(
-      picker.indexOf("await validateCandidateHarness("),
-    );
-    expect(picker).toContain("onSelectionChange(null);");
-    expect(picker.indexOf("await prepareHarnessChange(candidateHarnessId)")).toBeLessThan(
-      picker.indexOf("commit(result.selection);"),
-    );
     expect(composerPicker).toContain("prepareHarnessChange: preparePermissionProfiles");
     expect(permissions).toContain("/api/permission-profiles?harnessId=${encodeURIComponent(harnessId)}");
   });

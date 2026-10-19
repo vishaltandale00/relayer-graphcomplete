@@ -5,17 +5,16 @@ import {
   defaultFamilySelection,
   defaultFamilySelectionForProvider,
   firstAvailableSelection,
+  familyModelSetup,
   harnessUsesConfigurationModel,
   isModelSelectionCatalogError,
   modelPickerContextCandidate,
-  NO_MODELS_FOR_HARNESS,
   normalizePickerSelection,
   pickerSelectionIsAvailable,
   pickerSelectionPayload,
   reconcilePickerSelection,
-  selectCandidateHarness,
+  routablePickerFamilies,
   selectionForInteraction,
-  validateCandidateHarness,
 } from "../desktop/renderer/src/model-picker-model.js";
 import {
   modelPickerFamilyPresentation,
@@ -60,6 +59,62 @@ function settings() {
 }
 
 describe("composer model picker selection", () => {
+  it("routes the chosen family through the current, default, then first available harness", () => {
+    const catalog = settings();
+    catalog.providers[1].connected = true;
+    catalog.families.push({
+      id: 3, name: "Future", enabled: true, position: 2,
+      members: [{ providerId: "future", modelId: "three", position: 0, roles: [{ name: "orchestrator" }] }],
+    });
+    catalog.harnesses.push(
+      { id: "aaa-unavailable", available: false, compatibleProviderIds: ["future"] },
+      { id: "aaa-configured", available: true, modelCompatibility: [] },
+      { id: "both", available: true, compatibleProviderIds: ["codex", "future"] },
+    );
+    catalog.defaults.harnessId = "cooked";
+    const routes = () => routablePickerFamilies(catalog, "codex-basic", { allowHarnessChange: true });
+    expect(routes().map(family => [family.id, family.harnessId])).toEqual([[1, "codex-basic"], [3, "cooked"]]);
+    expect(routablePickerFamilies(catalog, "both", { allowHarnessChange: true }).every(family => family.harnessId === "both")).toBe(true);
+    catalog.harnesses.find(harness => harness.id === "cooked").permissionAvailable = false;
+    expect(routes().find(family => family.id === 3).harnessId).toBe("both");
+    catalog.harnesses.find(harness => harness.id === "cooked").permissionAvailable = true;
+    catalog.harnesses.find(harness => harness.id === "codex-basic").permissionAvailable = false;
+    expect(routes().find(family => family.id === 1).harnessId).toBe("both");
+    catalog.harnesses.find(harness => harness.id === "codex-basic").permissionAvailable = true;
+    catalog.harnesses.find(harness => harness.id === "aaa-unavailable").available = true;
+    catalog.harnesses.find(harness => harness.id === "aaa-unavailable").permissionAvailable = false;
+    catalog.harnesses.find(harness => harness.id === "cooked").available = false;
+    expect(routes().find(family => family.id === 3).harnessId).toBe("both");
+    expect(routablePickerFamilies(catalog, "codex-basic").map(family => family.id)).toEqual([1]);
+    catalog.conversationCompatibility = { status: "compatible", harnessId: "codex-basic", providerId: "codex" };
+    expect(routes().map(family => family.id)).toEqual([1]);
+    catalog.conversationCompatibility = { status: "unrestricted" };
+    catalog.providers[1].connected = false;
+    expect(routes().map(family => family.id)).toEqual([1]);
+  });
+
+  it.each([
+    { compatibleProviderIds: ["future"] },
+    { modelCompatibility: [{ providerId: "codex", modelIds: ["two"] }] },
+    { modelRules: { allow: [{ adapterId: "claude-subscription", modelIdRegex: ".*" }], deny: [] } },
+    { modelRules: { allow: [], deny: [{ adapterId: "codex-subscription", modelIdExact: "one" }] } },
+  ])("explains a mismatch under the harness compatibility policy %j", policy => {
+    const catalog = settings();
+    catalog.providers[0].adapterId = "codex-subscription";
+    catalog.harnesses[0] = { id: "codex-basic", label: "Restricted harness", available: true, ...policy };
+    expect(familyModelSetup(catalog, 1)).toMatchObject({
+      reason: "harness-mismatch", label: "Harness mismatch", action: "family-settings", choiceName: null,
+    });
+    expect(familyModelSetup(catalog, 1).message).toContain("Codex cannot run with Restricted harness");
+    // Disconnection and model availability remain their own recovery boundary, even if
+    // this harness also refuses the model. A mismatch must not hide the underlying outage.
+    catalog.providers[0].connected = false;
+    expect(familyModelSetup(catalog, 1)).toMatchObject({ action: "settings", label: "Orchestrator unavailable" });
+    catalog.providers[0].connected = true;
+    catalog.providers[0].models[0].available = false;
+    expect(familyModelSetup(catalog, 1)).toMatchObject({ action: "family-settings", label: "Orchestrator unavailable" });
+  });
+
   it("requires an explicit model whenever a harness declares model rules", () => {
     const catalog = settings();
     const harness = catalog.harnesses.find((item) => item.id === "codex-basic");
@@ -108,13 +163,7 @@ describe("composer model picker selection", () => {
     expect(pickerSelectionPayload({ harnessId: "prime-agent-basic" }))
       .toEqual({ harnessId: "prime-agent-basic" });
     expect(modelSelectionLabels(catalog, { harnessId: "prime-agent-basic" })).toBeNull();
-    const validate = async () => { throw new Error("model validation must not run"); };
-    await expect(validateCandidateHarness(
-      catalog,
-      normalizePickerSelection(catalog, { harnessId: "codex-basic" }),
-      "prime-agent-basic",
-      validate,
-    )).resolves.toEqual({ selection: { harnessId: "prime-agent-basic" }, error: null });
+
   });
 
   it("respects explicit cross-provider member order instead of the default provider", () => {
@@ -197,10 +246,7 @@ describe("composer model picker selection", () => {
     const current = normalizePickerSelection(catalog, null);
     expect(current).toMatchObject({ harnessId: "codex-basic", familyId: 1 });
     expect(availablePickerFamilies(catalog, "prime-agent-basic").map(({ id }) => id)).toEqual([3]);
-    expect(selectCandidateHarness(catalog, current, "prime-agent-basic")).toEqual({
-      selection: { harnessId: "prime-agent-basic", familyId: null, providerId: null, modelId: null },
-      error: null,
-    });
+
   });
 
   it("keeps the first family's first available member authoritative over a later preferred model", () => {
@@ -319,31 +365,6 @@ describe("composer model picker selection", () => {
     expect(defaultFamilySelectionForProvider(catalog, "codex-basic", "codex")).toMatchObject({
       familyId: 1,
       providerId: "codex",
-    });
-  });
-
-  it("rolls back the complete selection when a candidate harness has no models", () => {
-    const catalog = settings();
-    const current = normalizePickerSelection(catalog, null);
-    expect(selectCandidateHarness(catalog, current, "cooked")).toEqual({
-      selection: current,
-      error: NO_MODELS_FOR_HARNESS,
-    });
-  });
-
-  it("rolls back a stale candidate when trusted server validation rejects it", async () => {
-    const catalog = settings();
-    catalog.harnesses.push({
-      id: "stale",
-      label: "Stale",
-      available: true,
-      compatibleProviderIds: ["codex"],
-    });
-    const current = normalizePickerSelection(catalog, null);
-    const validateSelection = async () => { throw new Error("stale catalog"); };
-    await expect(validateCandidateHarness(catalog, current, "stale", validateSelection)).resolves.toEqual({
-      selection: current,
-      error: NO_MODELS_FOR_HARNESS,
     });
   });
 
