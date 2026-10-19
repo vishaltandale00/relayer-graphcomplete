@@ -102,7 +102,7 @@ The audit checks environment branch policies, target-required secret and variabl
 2. Increment `desktop/package.json` to one numeric version shared by all targets.
 3. Run `npm run check` and `npm run build` from the exact commit.
 4. Run `Desktop Signed Preview Candidates` manually to build the enabled signed candidates without publication. Its validate job does not rerun `npm run check`; it requires a completed, successful `push` run of `ci.yml` on `main` for the exact commit, whose `check` context is the full verification portfolio, and fails closed until that run exists. Each signed release receipt seals its producing workflow run ID and attempt. Record the run ID and attempt, plus each enabled target artifact's numeric ID and `sha256:` digest from the GitHub Actions artifact API. A target remains eligible when its package job and artifact succeed even if an independent sibling target fails.
-5. Review every release receipt and installer signature from that manual run.
+5. Review every release receipt and installer signature from that manual run. Complete the [existing-profile candidate qualification](#existing-profile-candidate-qualification) for each enabled target before approving publication.
 6. After explicit publication approval, create one protected annotated tag on that exact `main` commit. Pin the reviewed manual run in the annotation; do not choose it by recency:
 
    ```sh
@@ -115,6 +115,69 @@ The audit checks environment branch policies, target-required secret and variabl
 7. Push the tag once. The tagged workflow verifies that each pinned target job succeeded in the named manual attempt for the same `main` commit, resolves one unexpired artifact ID and SHA-256 digest per enabled target, downloads by that immutable artifact ID, and matches the run and attempt sealed inside the signed release receipt before publication. It does not rebuild, re-sign, re-notarize, rerun repository checks, or re-upload telemetry. The publisher records the candidate run, attempt, artifact ID, and artifact digest; it revalidates the release receipt, checksums, artifact bytes, existing immutable publication receipt, and public objects before moving the Preview pointer last.
 
 A lightweight tag, a malformed or repeated `Candidate-Run` annotation, or a run from another attempt, workflow, event, repository, branch, commit, or artifact set fails closed. Never move or recreate a tag to repair that failure. If the tag annotation is wrong, leave the tag and version unpublished and prepare a new version. A workflow retry is valid only while it remains pinned to the same candidate run attempt and artifact identity; immutable-object and publication-receipt checks still reject different bytes.
+
+### Existing-profile candidate qualification
+
+This is a required operator checkpoint before creating the Preview tag. The
+fresh-profile updater canary cannot certify connected-provider recovery or a
+saved graph's usability. The checkpoint currently requires a repeatable human
+run; the publisher does not automatically collect or validate this evidence.
+Missing observations remain a publication blocker, even when CI and signing
+pass. Do not label a disconnected profile as connected-profile proof.
+
+Use an isolated, versioned test profile created by the previous supported
+release, with dedicated Codex and Claude subscription test accounts, enabled
+model families, saved chats and an accepted local website artifact. Record the
+fixture version and seed application version/source. Keep credentials and raw
+profile databases private; commit only redacted observations and evidence.
+Install the exact reviewed signed candidate over the seed application and open
+that same profile. This local application replacement exercises upgrade startup
+before publication; it does not replace the real updater canary after Preview
+publication.
+
+| Checkpoint | Required observation |
+| --- | --- |
+| Connected-provider upgrade | Both subscriptions remain connected. Automatic runtime preparation is visible as Preparing. Each healthy route becomes available without clicking Repair or reconnecting. Record pending and terminal states, elapsed time and diagnostics; a timeout or required manual recovery fails the checkpoint. |
+| Independent recovery | In deterministic production-coordinator tests, hold one unrelated harness pending, then fail it; Codex and Claude become available independently. Capture the named test and exact source result beside the native observation. The native check must report any unrelated failure separately. |
+| Existing state | Enabled families, pinned execution identity, chats and saved accepted graph identities survive. Open a saved chat, use its graph navigation and inspect the model chooser's available routes for both subscriptions. This proves readiness and UI availability; it does not claim an inference ran. |
+| Artifact journey | From the saved graph, click its ordinary navigate action into the accepted artifact layer. Observe the exact artifact node and content in the isolated viewer, return to the same source graph with Graph or Esc, close and reopen the chat, then repeat without a new interaction. Record source/action/layer/node IDs and screenshots of graph, content and return. A plain URL in prose is not an artifact layer. |
+| Interrupted preparation | On a disposable copy of the seed test fixture, close and relaunch while preparation is pending. Automatic preparation resumes, healthy routes become available without manual Repair, and saved chats still open. Record both process identities and terminal states. |
+
+The evidence must bind the exact candidate source, target, version, workflow run
+and attempt, immutable artifact ID/archive SHA-256, installer SHA-256, profile
+fixture version, OS/architecture, actual observations, failures and unknowns.
+Hash the screenshots and redacted diagnostics. A previous candidate's pass,
+fixture-only Electron run, green outer command or connected account alone does
+not satisfy this checkpoint. Repeat qualification when candidate bytes change.
+
+For the deterministic artifact path, run
+`npm run test:desktop:artifact-viewer` from the exact source. It uses the real
+graph-client authoring and acceptance boundary, clicks the accepted navigate
+action, checks the viewer's exact identity and source-graph return, reloads the
+saved thread and opens the same artifact without another execution. Its
+`results.json` records the source workspace digest, journey IDs, every result
+and its limits. The fixture replaces model execution and bypasses provider
+readiness/authentication; it proves neither connected-profile upgrade recovery
+nor a model's choice to author artifact layers. The reload is a renderer reload,
+not a native process restart.
+
+### Live artifact authoring checkpoint
+
+Run a bounded live authoring smoke only with separate explicit authorization
+for the selected provider and paid inference. Keep it outside default tests.
+On the exact candidate, ask the ordinary composer to create one local website
+or document without preauthoring its graph. Inspect the persisted accepted
+output, then follow its action into the viewer, verify content, return, close
+and reopen the saved chat, and verify the same action still works. Preserve
+the prompt, provider/model/configuration identity, accepted graph IDs, trace,
+screenshots and candidate binding; redact credentials and private content.
+
+Record this checkpoint separately as passed, failed or not run. A fixture
+authoring pass must never become a live authoring claim. If a release changes
+artifact guidance or claims live artifact authoring qualification, obtain the
+authorization and pass this checkpoint before publication; otherwise leave
+that claim explicitly unqualified. Generic URL-to-viewer conversion is not the
+artifact contract and is not introduced by this release procedure.
 
 ### Native cache proof for future candidates
 

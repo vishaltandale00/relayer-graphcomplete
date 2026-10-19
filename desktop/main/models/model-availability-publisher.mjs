@@ -1,5 +1,5 @@
-// Announce only committed product state. The announcement contains no catalog or
-// readiness authority; renderers reread the app server, including after startup.
+// Announcements contain no catalog or readiness authority. Progress only changes
+// presentation; renderers still reread committed availability before admitting use.
 export function createModelAvailabilityPublisher({ publishCatalog, publishReadiness, getWindow }) {
   function announce() {
     try {
@@ -14,6 +14,7 @@ export function createModelAvailabilityPublisher({ publishCatalog, publishReadin
     return result;
   };
   return Object.freeze({
+    notifyReadinessProgress: announce,
     publishCatalog: afterCommit(publishCatalog),
     publishReadiness: afterCommit(publishReadiness),
   });

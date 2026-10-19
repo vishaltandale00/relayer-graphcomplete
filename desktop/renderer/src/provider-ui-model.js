@@ -61,6 +61,9 @@ export function providerDefinitionStatus(definition) {
     && definition?.connected === true
     && definition?.unavailableReason?.code === "provider_no_available_execution_configurations";
   if (needsExecutionSetup) {
+    if (definition.executionPreparing === true) {
+      return { lifecycle: "preparing_execution", label: "Preparing", usable: false };
+    }
     return {
       lifecycle: "needs_execution_setup",
       label: "Needs execution setup",
@@ -135,6 +138,9 @@ export function providerConnectionErrors(descriptor, values, definitions = []) {
 
 export function firstRunGateState({ hasCompletedOnboarding, providers, defaultResolution }) {
   if (hasCompletedOnboarding) return { blocked: false, reason: null };
+  if (providers.some(provider => providerDefinitionStatus(provider).lifecycle === "preparing_execution")) {
+    return { blocked: true, reason: "Preparing execution configurations for the connected provider." };
+  }
   if (providers.some((provider) => providerDefinitionStatus(provider).recovery === "refresh_models")) {
     return { blocked: true, reason: "Refresh models and set up defaults for the connected provider." };
   }

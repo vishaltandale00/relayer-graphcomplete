@@ -138,6 +138,7 @@ export function createHarnessReadinessCoordinator({
   recipeInstalled = null,
   recipeSupported = async () => false,
   diagnostics = null,
+  onProgressChanged = () => {},
 }) {
   if (!(configurations instanceof Map) || typeof digestConfiguration !== "function"
     || typeof prepareRecipe !== "function" || typeof publishAvailability !== "function") {
@@ -154,6 +155,15 @@ export function createHarnessReadinessCoordinator({
   let publication = Promise.resolve();
   // The generation of each harness's last result the app server accepted in this process.
   const publishedGenerations = new Map();
+  const preparing = new Map();
+  function progressChanged() {
+    // Progress is presentation only. A renderer rereads persisted readiness for use.
+    try { onProgressChanged(); } catch { /* A closed window cannot fail setup. */ }
+  }
+  function isPreparingForProvider(providerId) {
+    return [...preparing.values()].some(({ routes, current }) => current()
+      && routes.some(route => route.providerDefinition.id === providerId && routeCurrent(route)));
+  }
 
   function routeProviders(configuration, providers) {
     return providers.filter((route) => {
@@ -171,7 +181,10 @@ export function createHarnessReadinessCoordinator({
     const controller = new AbortController();
     const sources = [...new Set([signal, ...routes.map((route) => route.signal)].filter(Boolean))];
     const isCurrent = () => !signal?.aborted && routes.some(routeCurrent);
-    const check = () => { if (!isCurrent()) controller.abort(signal?.reason ?? new DOMException("Provider routes changed.", "AbortError")); };
+    const check = () => {
+      if (!isCurrent()) controller.abort(signal?.reason ?? new DOMException("Provider routes changed.", "AbortError"));
+      progressChanged();
+    };
     for (const source of sources) source.addEventListener("abort", check);
     check();
     return { signal: sources.length ? controller.signal : undefined, isCurrent,
@@ -200,9 +213,15 @@ export function createHarnessReadinessCoordinator({
     try {
       for (const configuration of candidates) {
         harnessGenerations.set(configuration.name, currentGeneration);
+        preparing.set(configuration.name, {
+          routes: candidateRoutes.get(configuration.name),
+          current: () => harnessGenerations.get(configuration.name) === currentGeneration && guards.get(configuration.name).isCurrent(),
+          generation: currentGeneration,
+        });
         const recipeId = runtimeRequirements[configuration.implementation]?.recipeId;
         if (recipeId) recipeRoutes.set(recipeId, [...(recipeRoutes.get(recipeId) ?? []), ...candidateRoutes.get(configuration.name)]);
       }
+      progressChanged();
       for (const [recipeId, recipeConsumers] of recipeRoutes) {
         const guard = routeGuard(recipeConsumers, signal);
         recipeGuards.push(guard);
@@ -210,7 +229,36 @@ export function createHarnessReadinessCoordinator({
         recipes.set(recipeId, !guard.isCurrent() ? Promise.reject(guard.signal?.reason)
           : prepareRecipe(recipeId, ...(guard.signal ? [{ signal: guard.signal }] : [])));
       }
-      const routeResults = await Promise.all(candidates.map(async (configuration) => {
+      const current = ({ harnessId }) => harnessGenerations.get(harnessId) === currentGeneration && guards.get(harnessId).isCurrent();
+      function publishResult(result) {
+        const publish = publication.catch(() => undefined).then(async () => {
+          if (signal?.aborted || !current(result)) return null;
+          const configuration = configurations.get(result.harnessId);
+          const routes = candidateRoutes.get(result.harnessId);
+          const connections = routes.filter(routeCurrent)
+            .filter(route => route.connectionGeneration !== undefined).map(route => ({
+              providerId: route.providerDefinition.id, generation: route.connectionGeneration,
+              modelIds: route.models.filter(model => modelAvailable(model) && harnessAllowsModel(configuration.modelRules, {
+                adapterId: route.providerDefinition.adapterId, modelId: model.id,
+              })).map(({ id }) => id),
+            }));
+          const update = Object.freeze({ ...result,
+            ...(routes.some(route => route.connectionGeneration !== undefined) ? { providerConnections: connections } : {}),
+          });
+          const guard = guards.get(result.harnessId);
+          try {
+            await publishAvailability([update], ...(guard.signal ? [{ signal: guard.signal }] : []));
+          } catch (error) {
+            if (!guard.isCurrent() || error?.code === "provider_connection_superseded") return null;
+            throw error;
+          }
+          publishedGenerations.set(result.harnessId, currentGeneration);
+          return current(result) ? update : null;
+        });
+        publication = publish;
+        return publish;
+      }
+      const outcomes = await Promise.allSettled(candidates.map(async (configuration) => {
         const requirement = runtimeRequirements[configuration.implementation];
         const guard = guards.get(configuration.name);
         let result;
@@ -229,54 +277,24 @@ export function createHarnessReadinessCoordinator({
             harnessId: configuration.name, code: result.reason.code,
           }).catch(() => undefined);
         }
-        return { harnessId: configuration.name, configurationDigest: digestConfiguration(configuration), generation: currentGeneration,
+        return publishResult({ harnessId: configuration.name, configurationDigest: digestConfiguration(configuration), generation: currentGeneration,
           available: result.available, unavailableReason: result.available ? null : (result.reason ?? unavailableReason()),
-        };
-      }));
-      const current = ({ harnessId }) => harnessGenerations.get(harnessId) === currentGeneration && guards.get(harnessId).isCurrent();
-      const currentRouteResults = routeResults.filter((result) => result !== null).filter(current);
-      if (currentRouteResults.length === 0 || signal?.aborted) return Object.freeze({ readyHarnessIds: [], routeResults: [] });
-      const publish = publication.catch(() => undefined).then(async () => {
-        if (signal?.aborted) return [];
-        const publishable = currentRouteResults.filter(current).map((result) => {
-          const configuration = configurations.get(result.harnessId);
-          const connections = candidateRoutes.get(result.harnessId).filter(routeCurrent)
-            .filter((route) => route.connectionGeneration !== undefined).map((route) => ({
-              providerId: route.providerDefinition.id, generation: route.connectionGeneration,
-              modelIds: route.models.filter((model) => modelAvailable(model) && harnessAllowsModel(configuration.modelRules, {
-                adapterId: route.providerDefinition.adapterId, modelId: model.id,
-              })).map(({ id }) => id),
-            }));
-          return Object.freeze({ ...result, ...(candidateRoutes.get(result.harnessId).some(route => route.connectionGeneration !== undefined) ? { providerConnections: connections } : {}) });
+        }).finally(() => {
+          if (preparing.get(configuration.name)?.generation === currentGeneration) preparing.delete(configuration.name);
+          progressChanged();
         });
-        if (publishable.length === 0) return [];
-        const accepted = [];
-        if (publishable.some(result => result.providerConnections)) {
-          // Each guarded harness commits independently: one expired route cannot roll back
-          // another harness's valid result in the backend transaction.
-          for (const result of publishable) {
-            const guard = guards.get(result.harnessId);
-            if (!current(result)) continue;
-            try {
-              await publishAvailability([result], ...(guard.signal ? [{ signal: guard.signal }] : []));
-            } catch (error) {
-              if (!guard.isCurrent() || error?.code === "provider_connection_superseded") continue;
-              throw error;
-            }
-            publishedGenerations.set(result.harnessId, currentGeneration);
-            accepted.push(result);
-          }
-        } else {
-          await publishAvailability(publishable, ...(signal ? [{ signal }] : []));
-          accepted.push(...publishable);
-        }
-        for (const { harnessId } of accepted) publishedGenerations.set(harnessId, currentGeneration);
-        return accepted.filter(current);
-      });
-      publication = publish;
-      const published = await publish;
+      }));
+      // Drain every sibling even if one publication failed. Guards must remain live until
+      // its own check and serialized commit settle; a failure cannot strand healthy routes.
+      const failure = outcomes.find(outcome => outcome.status === "rejected");
+      if (failure) throw failure.reason;
+      const published = outcomes.map(outcome => outcome.value).filter(result => result !== null).filter(current);
       return Object.freeze({ readyHarnessIds: published.filter(({ available }) => available).map(({ harnessId }) => harnessId), routeResults: published });
     } finally {
+      for (const { name } of candidates) {
+        if (preparing.get(name)?.generation === currentGeneration) preparing.delete(name);
+      }
+      progressChanged();
       for (const guard of [...guards.values(), ...recipeGuards]) guard.dispose();
     }
   }
@@ -324,5 +342,5 @@ export function createHarnessReadinessCoordinator({
     .filter(([, published]) => published > mark)
     .map(([harnessId]) => harnessId);
 
-  return Object.freeze({ evaluate, evaluateRecipeUpdate, recipeUpdateTargets, publicationMark, publishedSince });
+  return Object.freeze({ evaluate, evaluateRecipeUpdate, recipeUpdateTargets, publicationMark, publishedSince, isPreparingForProvider });
 }

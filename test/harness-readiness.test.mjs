@@ -8,6 +8,9 @@ import {
 import { managedRecipeInstalled, managedRecipeSupported } from "../desktop/main/managed-runtimes/resolver.mjs";
 import { resolveManagedRuntimeRecipe } from "../desktop/main/managed-runtimes/recipes.mjs";
 import { checkPrimeManagedRuntime } from "../desktop/main/services/prime-managed-runtime.mjs";
+import { ProviderDefinitionService } from "../desktop/main/providers/provider-definition-service.mjs";
+import { providerDefinitionStatus, firstRunGateState } from "../desktop/renderer/src/provider-ui-model.js";
+import { providerDefinitionsMarkup } from "../desktop/renderer/src/provider-ui.js";
 
 function configuration(name, implementation, adapterId) {
   return {
@@ -23,6 +26,77 @@ function configuration(name, implementation, adapterId) {
 }
 
 describe("production harness readiness", () => {
+  it("makes healthy subscriptions usable during an upgrade while unrelated Prime remains pending", async () => {
+    let releasePrime;
+    const primePending = new Promise(resolve => { releasePrime = resolve; });
+    const specs = [
+      ["codex-basic", "codex.basic", "codex-subscription", "managed-runtime@1"],
+      ["claude-basic", "claude.basic", "claude-subscription", "managed-runtime@1"],
+      ["prime-agent-basic", "prime.agent", "openrouter", "secret@1"],
+    ];
+    const due = new Set(specs.map(([name]) => name));
+    const committed = new Map();
+    const progress = vi.fn();
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: new Map(specs.map(([name, implementation, adapterId, contract]) => [name, {
+        ...configuration(name, implementation, adapterId), executionAccessContracts: [contract],
+      }])),
+      digestConfiguration: ({ name }) => `sha256:${name}`,
+      runtimeRequirements: Object.fromEntries(specs.map(([, implementation]) => [implementation, { recipeId: implementation }])),
+      recipeInstalled: async () => true,
+      onProgressChanged: progress,
+      prepareRecipe: async recipeId => ({ recipeId }),
+      checkers: {
+        "codex.basic": async () => ({ available: true }),
+        "claude.basic": async () => ({ available: true }),
+        "prime.agent": async () => { await primePending; throw new Error("Prime probe failed"); },
+      },
+      publishAvailability: async updates => {
+        for (const update of updates) { committed.set(update.harnessId, update); due.delete(update.harnessId); }
+      },
+    });
+    const definitions = new ProviderDefinitionService({
+      registry: {}, credentialStore: {},
+      definitionStore: { load: async () => specs.map(([, , id]) => ({ id, adapterId: id, label: id, lifecycleState: "active" })) },
+      providerStatuses: async () => new Map(specs.map(([name, , id]) => [id, {
+        connected: true,
+        unavailableReason: committed.get(name)?.available ? null : { code: "provider_no_available_execution_configurations" },
+        executionPreparing: readiness.isPreparingForProvider(id),
+      }])),
+    });
+    const subscriptionStatus = async () => (await definitions.list()).slice(0, 2).map(providerDefinitionStatus);
+    expect((await subscriptionStatus()).map(status => status.recovery)).toEqual(["repair_execution", "repair_execution"]);
+    const upgrade = startPostUpgradeReadiness({
+      readiness,
+      updatesDue: async () => [...due],
+      routes: async () => specs.map(([, , adapterId, accessContract]) => ({
+        providerDefinition: { id: adapterId, adapterId, accessContract },
+        connectionGeneration: 1,
+        models: [{ id: "fixture-model", visible: true, available: true }],
+      })),
+    });
+    try {
+      await vi.waitFor(() => expect(progress).toHaveBeenCalled(), { timeout: 250, interval: 1 });
+      await vi.waitFor(() => {
+        expect([...committed.keys()].sort()).toEqual(["claude-basic", "codex-basic"]);
+      }, { timeout: 250, interval: 1 });
+      expect([...due]).toEqual(["prime-agent-basic"]);
+      expect((await subscriptionStatus()).every(status => status.usable)).toBe(true);
+      const prime = (await definitions.list())[2];
+      expect(providerDefinitionStatus(prime)).toEqual({ lifecycle: "preparing_execution", label: "Preparing", usable: false });
+      expect(firstRunGateState({ hasCompletedOnboarding: false, providers: [prime] }).reason).toContain("Preparing");
+      const markup = providerDefinitionsMarkup([prime], {}, [{ adapterId: prime.adapterId, connection: { mode: "managed-login" } }]);
+      expect(markup).not.toContain("data-provider-family-recovery");
+      expect(markup).toMatch(/data-provider-logout="openrouter" >Sign out/);
+    } finally {
+      releasePrime();
+      await upgrade.evaluation;
+    }
+    expect(committed.get("prime-agent-basic")).toMatchObject({ available: false, unavailableReason: { code: "harness_readiness_failed" } });
+    expect([...due]).toEqual([]);
+    expect(providerDefinitionStatus((await definitions.list())[2]).recovery).toBe("repair_execution");
+  });
+
   it("prepares shared recipes once and publishes independent compatible route results", async () => {
     const configurations = new Map([
       ["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")],
@@ -60,7 +134,8 @@ describe("production harness readiness", () => {
     expect(prepareRecipe).toHaveBeenCalledTimes(1);
     expect(prepareRecipe).toHaveBeenCalledWith("codex@0.147.0");
     expect(result.readyHarnessIds).toEqual(["codex-basic"]);
-    expect(publishAvailability).toHaveBeenCalledWith([
+    expect(publishAvailability.mock.calls.every(([updates]) => updates.length === 1)).toBe(true);
+    expect(publishAvailability.mock.calls.flatMap(([updates]) => updates).sort((a, b) => a.harnessId.localeCompare(b.harnessId))).toEqual([
       { harnessId: "codex-basic", configurationDigest: "sha256:codex-basic", generation: 1, available: true, unavailableReason: null },
       { harnessId: "prime-agent-basic", configurationDigest: "sha256:prime-agent-basic", generation: 1, available: false, unavailableReason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." } },
       { harnessId: "prime-agent-deep", configurationDigest: "sha256:prime-agent-deep", generation: 1, available: false, unavailableReason: { code: "prime_managed_kernel_unavailable", message: "Prime is unavailable." } },
@@ -579,4 +654,113 @@ it("remembers a committed guarded result when a later independent publication fa
     models: [{ id: "qwen" }], connectionGeneration: 1, signal: new AbortController().signal, isCurrent: () => true }] })).rejects.toThrow("backend unavailable");
   expect(accepted).toEqual(["prime-agent-basic"]);
   expect(readiness.publishedSince(mark)).toEqual(accepted);
+});
+
+describe("independent readiness progress under failure and supersession", () => {
+  function gate() {
+    let release;
+    const promise = new Promise(resolve => { release = resolve; });
+    return { promise, release };
+  }
+
+  function fixture({ codex, prime = async () => ({ available: true }), publishAvailability = async () => {}, onProgressChanged } = {}) {
+    const readiness = createHarnessReadinessCoordinator({
+      configurations: new Map([
+        ["codex-basic", configuration("codex-basic", "codex.basic", "openai-api")],
+        ["prime-agent-basic", configuration("prime-agent-basic", "prime.agent", "openrouter")],
+      ]),
+      digestConfiguration: ({ name }) => `sha256:${name}`,
+      runtimeRequirements: {}, prepareRecipe: async () => ({}), recipeInstalled: async () => true,
+      checkers: { "codex.basic": codex, "prime.agent": prime }, publishAvailability, onProgressChanged,
+    });
+    const providers = ["openai-api", "openrouter"].map(adapterId => ({
+      providerDefinition: { id: adapterId, adapterId, accessContract: "secret@1" },
+      models: [{ id: "fixture-model" }], connectionGeneration: 1,
+    }));
+    return { readiness, providers, request: { trigger: "recipe-update", providers } };
+  }
+
+  it("drains a still-checking healthy sibling after the first publication fails", async () => {
+    const healthy = gate(); const attempted = gate(); const committed = [];
+    const { readiness, request } = fixture({
+      codex: async () => { await healthy.promise; return { available: true }; },
+      publishAvailability: async ([update]) => {
+        if (update.harnessId === "prime-agent-basic") { attempted.release(); throw new Error("backend unavailable"); }
+        committed.push(update.harnessId);
+      },
+    });
+    const mark = readiness.publicationMark();
+    let settled = false;
+    const outcome = readiness.evaluate(request).then(
+      result => { settled = true; return result; },
+      error => { settled = true; return error; },
+    );
+    try {
+      await attempted.promise;
+      await vi.waitFor(() => expect(readiness.isPreparingForProvider("openrouter")).toBe(false));
+      expect(settled).toBe(false);
+      expect(readiness.isPreparingForProvider("openai-api")).toBe(true);
+    } finally {
+      healthy.release();
+    }
+    expect(await outcome).toMatchObject({ message: "backend unavailable" });
+    expect(committed).toEqual(["codex-basic"]);
+    expect(readiness.publishedSince(mark)).toEqual(committed);
+    expect(readiness.isPreparingForProvider("openai-api")).toBe(false);
+  });
+
+  it("keeps a newer preparation owner when the older evaluation finishes", async () => {
+    const oldCheck = gate(); const newCheck = gate(); const oldEntered = gate(); const newEntered = gate();
+    let calls = 0;
+    const { readiness, request } = fixture({ codex: async () => {
+      const current = ++calls === 1 ? [oldEntered, oldCheck] : [newEntered, newCheck];
+      current[0].release(); await current[1].promise; return { available: true };
+    } });
+    const scoped = { ...request, harnessIds: ["codex-basic"] };
+    const older = readiness.evaluate(scoped);
+    await oldEntered.promise;
+    const newer = readiness.evaluate(scoped);
+    try {
+      await newEntered.promise;
+      oldCheck.release();
+      expect(await older).toEqual({ readyHarnessIds: [], routeResults: [] });
+      expect(readiness.isPreparingForProvider("openai-api")).toBe(true);
+    } finally {
+      oldCheck.release(); newCheck.release();
+    }
+    expect((await newer).readyHarnessIds).toEqual(["codex-basic"]);
+    expect(readiness.isPreparingForProvider("openai-api")).toBe(false);
+  });
+
+  it("retains a committed sibling and ends visible preparation when stopping a cancellation-ignoring checker", async () => {
+    const check = gate(); const entered = gate(); const progress = [];
+    const due = new Set(["codex-basic", "prime-agent-basic"]);
+    const committed = [];
+    const publishAvailability = vi.fn(async ([update]) => {
+      committed.push(update.harnessId); due.delete(update.harnessId);
+    });
+    const { readiness, providers } = fixture({
+      codex: async () => { entered.release(); await check.promise; return { available: true }; },
+      publishAvailability,
+      onProgressChanged: () => { progress.push(readiness.isPreparingForProvider("openai-api")); },
+    });
+    const mark = readiness.publicationMark();
+    const upgrade = startPostUpgradeReadiness({ readiness,
+      updatesDue: async () => [...due], routes: async () => providers,
+    });
+    try {
+      await entered.promise;
+      await vi.waitFor(() => expect(committed).toEqual(["prime-agent-basic"]));
+      expect(readiness.isPreparingForProvider("openai-api")).toBe(true);
+      upgrade.stop();
+      expect(readiness.isPreparingForProvider("openai-api")).toBe(false);
+      expect(progress.at(-1)).toBe(false);
+    } finally {
+      upgrade.stop(); check.release(); await upgrade.evaluation;
+    }
+    expect(publishAvailability).toHaveBeenCalledOnce();
+    expect(committed).toEqual(["prime-agent-basic"]);
+    expect(readiness.publishedSince(mark)).toEqual(committed);
+    expect([...due]).toEqual(["codex-basic"]);
+  });
 });
