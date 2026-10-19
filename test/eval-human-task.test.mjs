@@ -607,7 +607,7 @@ it("only the versioned participant-stop contract permits a judged unfinished sto
   expect(finished.termination).toMatchObject({ reason: "satisfied", endpointAttainment: "not_claimed", success: null, completionJudgeEventId: input.completionJudgeEventId, actorClaim: { endpointStatus: "incomplete", remainingWork: "User thinks work remains" } });
 });
 
-it.each(["task-actor-observation-v3", "task-actor-observation-v4"])("%s stopping evidence separates live delivery receipts from intents, ambiguity and incorporation", async observationId => {
+it.each(["task-actor-observation-v3", "task-actor-observation-v4", "task-actor-observation-v5"])("%s stopping evidence separates live delivery receipts from intents, ambiguity and incorporation", async observationId => {
   const f = await gatedTask(); const id = f.session.id;
   const session = f.tasks.find(id);
   session.actorSetup.behaviorContract.observationContract = { id: observationId };
@@ -850,4 +850,64 @@ it("reconciles through an annotated operator workspace with the same graph read 
   expect(f.tasks.get(f.session.id).events.filter(event => event.kind === "live_answer_reconciled")).toHaveLength(1);
   expect(f.tasks.get(f.session.id).status).toBe("interrupted");
   expect(f.posts()).toBe(1);
+});
+
+it("keeps v12 gateway Answer receipts in stopping evidence after Current advances", async () => {
+  const f = await gatedTask();
+  const session = f.tasks.find(f.session.id);
+  session.actorSetup = (await import("../desktop/eval-main/setup-registry.mjs")).updateAwareActorSetup();
+  f.options.evalService.completionJudgeArtifactEvidence = async () => ({ files: [] });
+  f.threads.get(1)[0].completionStatus = "running";
+  const receipt = { sequence: 1, completionId: 7, attemptId: 8, authorityEpoch: 2, currentRevision: 3,
+    operationKey: "v12-answer", occurrence: { presentingInteractionNodeId: 7, presentingLayerId: 9, actionId: 11 },
+    question: { prompt: "Which city?" }, value: { text: "Boston" } };
+  let posts = 0;
+  const upstream = f.tasks.fetchImpl;
+  f.tasks.fetchImpl = async (url, init) => {
+    if (!url.pathname.endsWith("/live-answers")) return upstream(url, init);
+    if (init.method === "POST") { posts++; return Response.json(receipt); }
+    return Response.json({ current: { completionId: 7, revision: 4, layerId: 12 }, answers: [receipt], currentAnswers: [] });
+  };
+  const surface = await createHumanTaskSurface({ tasks: f.tasks, sessionId: session.id,
+    productSession: f.options.productSession, actor: true });
+  cleanups.push(() => surface.close());
+  const path = "/api/threads/1/interactions/10/live-answers";
+  const headers = { Authorization: `Bearer ${new URL(surface.url).hash.slice(1)}`, "Content-Type": "application/json" };
+  await f.tasks.actorEvent(session.id, "actor_action", { phase: "current", action: { kind: "fill", value: "Boston" } });
+  const answer = await fetch(new URL(path, surface.url), { method: "POST", headers,
+    body: JSON.stringify({ operationKey: receipt.operationKey, attemptId: 8, authorityEpoch: 2,
+      expectedRevision: 3, occurrence: receipt.occurrence, value: receipt.value }) });
+  expect(answer.status).toBe(200);
+  expect(await answer.json()).toEqual(receipt);
+  expect((await (await fetch(new URL(path, surface.url), { headers })).json()).current.revision).toBe(4);
+  f.threads.get(1)[0].completionStatus = "accepted";
+  const trajectory = (await f.tasks.completionJudgeEvidence(session.id)).trajectory;
+  expect(trajectory.find(item => item.phase === "current")).toMatchObject({ delivery: "intent_only" });
+  expect(trajectory.find(item => item.kind === "live_answer")).toMatchObject({
+    delivery: "accepted", incorporation: "not_established", currentRevision: 3,
+    occurrence: receipt.occurrence, prompt: "Which city?", value: { text: "Boston" } });
+  expect(posts).toBe(1);
+  expect(f.tasks.get(session.id)).toMatchObject({ completions: 1, status: "active" });
+});
+
+it("keeps pinned navigation intents distinct in judge evidence, including old mislabeled actions", async () => {
+  const f = await gatedTask();
+  const id = f.session.id;
+  f.tasks.find(id).actorSetup = (await import("../desktop/eval-main/setup-registry.mjs")).updateAwareActorSetup();
+  f.options.evalService.completionJudgeArtifactEvidence = async () => ({ files: [] });
+  const pinned = await f.tasks.actorEvent(id, "actor_observation", { phase: "pinned", observation: { text: "Earlier material" } });
+  const historical = await f.tasks.actorEvent(id, "actor_action", {
+    phase: "current", observationEventId: pinned.id, action: { kind: "click", value: "View latest update" } });
+  const current = await f.tasks.actorEvent(id, "actor_observation", { phase: "current", observation: { text: "Actual Current" } });
+  const viewed = await f.tasks.actorEvent(id, "actor_action", { phase: "current",
+    observationEventId: current.id, action: { kind: "scroll" } });
+  const legacy = await f.tasks.actorEvent(id, "actor_action", { action: { kind: "scroll" } });
+  const trajectory = (await f.tasks.completionJudgeEvidence(id)).trajectory;
+  expect(trajectory.find(e => e.id === historical.id)).toMatchObject({
+    phase: "pinned", observationEventId: pinned.id, delivery: "intent_only" });
+  expect(trajectory.find(e => e.id === viewed.id)).toMatchObject({
+    phase: "current", observationEventId: current.id, delivery: "intent_only" });
+  expect(trajectory.find(e => e.id === historical.id)).not.toHaveProperty("incorporation");
+  expect(trajectory.find(e => e.id === legacy.id)).not.toHaveProperty("phase");
+  expect(f.tasks.find(id).events.find(e => e.id === historical.id).phase).toBe("current");
 });

@@ -31,6 +31,7 @@ import {
   setSettingsTab,
 } from "./navigation.js";
 import {
+  currentUpdateNotice,
   appendLayerPath,
   createLayerNavigationCoordinator,
   layerPathForVisibleLayer,
@@ -355,6 +356,15 @@ export function updateCreateThreadAvailability() {
     modelSetup: productApiAvailable ? newThreadModelSetup() : null,
     readyTitle: "Create thread and send",
   });
+}
+
+// Fresh pinning records the known head; legacy pinned absence stays unknown.
+function pinnedTemporalCurrent(current) {
+  return current == null ? current : {
+    ...current,
+    mode: "pinned",
+    ...(current.mode === "following" ? { pinnedAtRevision: current.revision } : {}),
+  };
 }
 
 function currentNavigationEntry() {
@@ -733,6 +743,7 @@ export async function refreshState(
         completionId: projectionState.completionId,
         revision: projectionState.headRevision,
         mode: "pinned",
+        ...(viewState.temporalCurrent.pinnedAtRevision === undefined ? {} : { pinnedAtRevision: viewState.temporalCurrent.pinnedAtRevision }),
       };
     }
     if (changed && wasFollowing && projectionState.currentLayerId != null && selected) {
@@ -982,6 +993,7 @@ export function selectTurnById(interactionId, { responseRoot = false, threadId =
       completionId: projection.completionId,
       revision: projection.headRevision,
       mode: "pinned",
+      pinnedAtRevision: projection.headRevision,
     },
   });
   recordCurrentNavigation("push");
@@ -1324,7 +1336,7 @@ function retainedInvocationOrigin(thread, source, call, resultId, kind) {
   if (!entry) return null;
   const sourceEntry = { ...entry, selectedNodeId: sourceNodeId };
   delete sourceEntry.invocationOrigin;
-  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = pinnedTemporalCurrent(sourceEntry.temporalCurrent);
   const layer = String(appState.visibleLayer?.layer?.id) === String(presentingLayerId) ? appState.visibleLayer
     : String(source.completionOutput?.rootLayer?.layer?.id) === String(presentingLayerId) ? source.completionOutput.rootLayer
       : acceptedLayerCache.get({ threadId: thread.id, turnId: source.id, layerId: presentingLayerId });
@@ -1367,6 +1379,43 @@ export async function navigateImportedInvocationHistory(historyEntry) {
   if (!current) return false;
   const origin = retainedInvocationOrigin(thread, source, retained, current.interaction.id, "imported");
   return retainInvocationPresentation(thread, source, current.interaction, current.layers, origin, null, retained);
+}
+
+export async function openLatestCurrent(scope) {
+  const available = () => currentUpdateNotice(appState,
+    appState.threads.find(thread => String(thread.id) === String(viewState.currentThreadId)), viewState);
+  const sameScope = notice => notice && String(notice.threadId) === String(scope.threadId)
+    && String(notice.turnId) === String(scope.turnId) && String(notice.completionId) === String(scope.completionId)
+    && String(notice.attemptId) === String(scope.attemptId);
+  if (!sameScope(available())) return false;
+  cancelAutomaticTurn();
+  recordCurrentNavigation();
+  supersedePendingHistory({ presentationChanged: true });
+  const pending = layerNavigationCoordinator.begin({ threadId: viewState.currentThreadId,
+    interactionId: viewState.currentInteractionId, layerId: appState.visibleLayer?.layer?.id, layerPath: viewState.layerPath });
+  const owns = () => layerNavigationCoordinator.isCurrent(pending, { threadId: viewState.currentThreadId,
+    interactionId: viewState.currentInteractionId, layerId: appState.visibleLayer?.layer?.id });
+  for (let count = 0; count < 3; count++) {
+    await refreshState(scope.threadId);
+    const notice = available();
+    if (!owns() || !sameScope(notice)) return false;
+    const identity = { threadId: notice.threadId, turnId: notice.turnId, layerId: notice.layerId };
+    const layer = validateResolvedLayer(identity, await request(
+      `/api/threads/${encodeURIComponent(identity.threadId)}/interactions/${encodeURIComponent(identity.turnId)}/layers/${encodeURIComponent(identity.layerId)}`));
+    await refreshState(scope.threadId);
+    if (!owns() || !sameScope(available())) return false;
+    const latest = available();
+    if (String(latest.layerId) !== String(notice.layerId) || latest.revision !== notice.revision) continue;
+    const interaction = appState.interactions.find(item => String(item.id) === String(scope.turnId));
+    refreshGate.invalidate();
+    hydrateWorkspace(interaction, layer, { layerPath: layerPathForVisibleLayer([], interaction, layer),
+      temporalCurrent: { completionId: notice.completionId, revision: notice.revision, mode: "following" } });
+    recordCurrentNavigation("push");
+    renderThread();
+    schedulePendingRefresh(scope.threadId);
+    return true;
+  }
+  throw new Error("The update changed while opening. Try viewing the latest update again.");
 }
 
 export async function navigateLayer(layerId, navigation = {}) {
@@ -1456,6 +1505,9 @@ export async function navigateLayer(layerId, navigation = {}) {
         completionId: projection.completionId,
         revision: projection.headRevision,
         mode: "pinned",
+        pinnedAtRevision: String(viewState.temporalCurrent?.completionId) === String(projection.completionId)
+          ? viewState.temporalCurrent?.pinnedAtRevision ?? projection.headRevision
+          : projection.headRevision,
       },
     });
     recordCurrentNavigation("push");
@@ -1744,7 +1796,7 @@ export async function navigateHistory(deltaOrDirection, { beforeCommit } = {}) {
     renderSidebar();
     const restoredEntry = resolved.entry.temporalCurrent == null ? resolved.entry : {
       ...resolved.entry,
-      temporalCurrent: { ...resolved.entry.temporalCurrent, mode: "pinned" },
+      temporalCurrent: pinnedTemporalCurrent(resolved.entry.temporalCurrent),
     };
     viewState.temporalCurrent = restoredEntry.temporalCurrent;
     navigationHistory.replaceCurrent(restoredEntry);
@@ -1798,7 +1850,7 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
   // Capture the clicked occurrence before asynchronous execution or browsing.
   let sourceEntry = { ...navigationHistory.current, selectedNodeId: action.sourceNodeId };
   delete sourceEntry.invocationOrigin;
-  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+  if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = pinnedTemporalCurrent(sourceEntry.temporalCurrent);
   let invocationSource = {
     origin: { sourceEntry, actionId: action.id, invocationKey, sourceNodeId: action.sourceNodeId,
       presentingLayerId: invocationBody.presentingLayerId },
@@ -1821,7 +1873,7 @@ export async function invokeAction(action, { inputDraftRevision } = {}) {
     }) : null;
     if (sourceEntry) {
       sourceEntry = { ...sourceEntry }; delete sourceEntry.invocationOrigin;
-      if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = { ...sourceEntry.temporalCurrent, mode: "pinned" };
+      if (sourceEntry.temporalCurrent) sourceEntry.temporalCurrent = pinnedTemporalCurrent(sourceEntry.temporalCurrent);
     }
     // A reservation retains its original presenting Layer. Unknown session paths
     // cannot be substituted with the currently visible occurrence.

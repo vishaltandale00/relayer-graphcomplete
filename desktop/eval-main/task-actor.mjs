@@ -5,6 +5,11 @@ export const ACTOR_SETTLED_OBSERVATION_CONTRACT = Object.freeze({ id: "task-acto
 export const ACTOR_OBSERVATION_CONTRACT = Object.freeze({ ...ACTOR_SETTLED_OBSERVATION_CONTRACT, id: "task-actor-observation-v3", currentObservation: "visible-current-during-execution", currentCaptureLimit: "2*maxActions+1", currentActions: "live-question-controls-and-navigation" });
 
 export const ACTOR_PROMPT_VERSION = "task-actor-v9";
+export const UPDATE_AWARE_ACTOR_PROMPT_VERSION = "task-actor-v12";
+export const UPDATE_AWARE_OBSERVATION_CONTRACT = Object.freeze({ ...ACTOR_OBSERVATION_CONTRACT,
+  id: "task-actor-observation-v5", pinnedObservation: "visible-workspace-and-update-control" });
+export const ACTOR_PROMPT_V12_GUIDANCE = "You can keep browsing earlier material while Relayer works. A visible View latest update control opens its newest published result and resumes following. When New update available is visible, consider reading it before repeating a request or concluding that your answer was ignored. You may keep reading elsewhere. Base your understanding only on the screenshot and visible controls; an announcement is not the contents of the new result. You must actually open and see it before claiming to have read it. Answer and Send remain separate actions; navigating never submits an answer or your follow-up draft.";
+
 export const DECISION_ACTOR_CONTRACT = "openai-decisions-codex-text-v1";
 export const INPUT_ACTOR_PROMPT_VERSION = "task-actor-v10";
 export const ENDPOINT_ACTOR_PROMPT_VERSION = "task-actor-v11";
@@ -38,7 +43,7 @@ export function actorConfiguration(input = {}) {
   return config;
 }
 export function actorPrompt({ config, request, endpoint, privateBrief }) {
-  return renderSetupPrompt(config.promptTemplate ?? ACTOR_PROMPT_TEMPLATE + (["task-actor-v8", ACTOR_PROMPT_VERSION, INPUT_ACTOR_PROMPT_VERSION, ENDPOINT_ACTOR_PROMPT_VERSION].includes(config.promptVersion) ? "\n" + ACTOR_PROMPT_V8_GUIDANCE : "") + ([ACTOR_PROMPT_VERSION, INPUT_ACTOR_PROMPT_VERSION, ENDPOINT_ACTOR_PROMPT_VERSION].includes(config.promptVersion) ? "\n" + ACTOR_PROMPT_V9_GUIDANCE : "") + ([INPUT_ACTOR_PROMPT_VERSION, ENDPOINT_ACTOR_PROMPT_VERSION].includes(config.promptVersion) ? "\n" + ACTOR_PROMPT_V10_GUIDANCE : "") + (config.promptVersion === ENDPOINT_ACTOR_PROMPT_VERSION ? "\n" + ACTOR_PROMPT_V11_GUIDANCE : ""), {
+  return renderSetupPrompt(config.promptTemplate ?? ACTOR_PROMPT_TEMPLATE + (["task-actor-v8", ACTOR_PROMPT_VERSION, INPUT_ACTOR_PROMPT_VERSION, ENDPOINT_ACTOR_PROMPT_VERSION, UPDATE_AWARE_ACTOR_PROMPT_VERSION].includes(config.promptVersion) ? "\n" + ACTOR_PROMPT_V8_GUIDANCE : "") + ([ACTOR_PROMPT_VERSION, INPUT_ACTOR_PROMPT_VERSION, ENDPOINT_ACTOR_PROMPT_VERSION, UPDATE_AWARE_ACTOR_PROMPT_VERSION].includes(config.promptVersion) ? "\n" + ACTOR_PROMPT_V9_GUIDANCE : "") + ([INPUT_ACTOR_PROMPT_VERSION, ENDPOINT_ACTOR_PROMPT_VERSION].includes(config.promptVersion) ? "\n" + ACTOR_PROMPT_V10_GUIDANCE : "") + (config.promptVersion === ENDPOINT_ACTOR_PROMPT_VERSION ? "\n" + ACTOR_PROMPT_V11_GUIDANCE : "") + (config.promptVersion === UPDATE_AWARE_ACTOR_PROMPT_VERSION ? "\n" + ACTOR_PROMPT_V12_GUIDANCE : ""), {
     request, endpoint, privateBrief: privateBrief || "No private profile supplied. Treat unspecified personal facts as unknown.",
     exploration: config.exploration, meticulousness: config.meticulousness,
   });

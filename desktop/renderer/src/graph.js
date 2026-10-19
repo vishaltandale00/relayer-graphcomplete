@@ -65,6 +65,7 @@ function workspace() {
     showThread: () => setMainView("thread"),
     showEmpty: () => setMainView("new"),
     getNavigationHistory,
+    onOpenLatestCurrent: (scope) => import("./threads.js").then(({ openLatestCurrent }) => openLatestCurrent(scope)),
     onOpenReadyResult: () => import("./threads.js").then(({ openReadyResult }) => openReadyResult()),
     onNavigateHistory: async (direction, navigation) => {
       try {

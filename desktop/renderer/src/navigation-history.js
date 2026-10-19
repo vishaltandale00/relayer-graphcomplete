@@ -27,7 +27,10 @@ function normalizeTemporalCurrent(value) {
   if (value.mode !== "following" && value.mode !== "pinned") {
     throw new TypeError("temporalCurrent.mode must be following or pinned");
   }
+  if (value.pinnedAtRevision !== undefined && (!Number.isSafeInteger(value.pinnedAtRevision)
+    || value.pinnedAtRevision < 0 || value.pinnedAtRevision > revision)) throw new TypeError("temporalCurrent.pinnedAtRevision must be a known prior revision");
   return Object.freeze({
+    ...(value.pinnedAtRevision === undefined ? {} : { pinnedAtRevision: value.pinnedAtRevision }),
     completionId: requiredId(value.completionId, "temporalCurrent.completionId"),
     revision,
     mode: value.mode,

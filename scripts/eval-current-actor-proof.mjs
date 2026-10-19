@@ -260,7 +260,27 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               await navPage.getByRole("button", { name: "Earlier finding", exact: true }).waitFor();
               console.log("CURRENT_AUTHORED_NAV_STAGE", "registered_control_visible");
               const forged = await navPage.getByRole("button", { name: "Earlier finding", exact: true }).elementHandle();
-              await forged.evaluate(element => { const clone = element.cloneNode(true); clone.id = "unregistered-navigation"; element.after(clone); });
+              await forged.evaluate(element => { element.id = "viewLatestUpdate"; const clone = element.cloneNode(true); clone.id = "unregistered-navigation"; element.after(clone); });
+              const nativeV5 = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal,
+                observationContract: { id: "task-actor-observation-v5", optionObservation: "opened-native-select-accessibility" } });
+              // The separate v5 observer must not whitelist an unregistered
+              // authored control just because it copies native chrome's ID.
+              try {
+                const v5Page = browser.contexts().at(-1).pages()[0];
+                await v5Page.locator("#nodeLayer .graph-node").filter({ hasText: "Working finding 2" }).click();
+                await v5Page.getByRole("button", { name: "Earlier finding", exact: true }).waitFor();
+                await v5Page.getByRole("button", { name: "Earlier finding", exact: true }).evaluate(element => {
+                  element.id = "viewLatestUpdate";
+                  const clone = element.cloneNode(true);
+                  clone.textContent = "Unregistered Current impostor";
+                  element.after(clone);
+                });
+                const v5Capture = await nativeV5.observeCurrent(expected);
+                assert.equal(v5Capture.observation.controls.filter(control => control.name === "Earlier finding").length, 1,
+                  "registered authored navigation survives a native-ID collision");
+                assert.equal(v5Capture.observation.controls.filter(control => control.name === "Unregistered Current impostor").length, 0,
+                  "authored native-ID impostor has no working ref");
+              } finally { await nativeV5.close(); }
               const captured = await nav.observeCurrent(expected);
               console.log("CURRENT_AUTHORED_NAV_STAGE", "captured");
               const choices = captured.observation.controls.filter(control => control.name === "Earlier finding");
@@ -289,6 +309,110 @@ export async function proveCurrentActor({ browser, directory, authored = false }
               await navPage.getByRole("button", { name: "Delivered answer for Which boundary should I inspect?", exact: true }).waitFor();
               assert.equal(await navPage.evaluate(() => window.__taskActorPresentation.currentPointer.mode), "pinned", "registered authored navigation follows the accepted reference");
               console.log("CURRENT_AUTHORED_NAV_STAGE", "historical_delivered");
+              // Native keyboard navigation remains usable on a narrow,
+              // horizontally scrolled breadcrumb rail and never submits input.
+              await navPage.setViewportSize({ width: 800, height: 900 });
+              const keyboardCue = navPage.getByRole("button", { name: /View latest update$/ });
+              await keyboardCue.waitFor();
+              await navPage.locator("#workspaceBreadcrumb").evaluate(element => { element.scrollLeft = element.scrollWidth; });
+              assert.equal(await keyboardCue.evaluate(element => {
+                const r = element.getBoundingClientRect();
+                const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                return r.left >= 0 && r.right <= innerWidth && (hit === element || element.contains(hit));
+              }), true, "narrow sticky latest cue is visible and hit-testable after breadcrumb scrolling");
+              await keyboardCue.focus();
+              await keyboardCue.press("Enter");
+              await navPage.waitForFunction(() => window.__taskActorPresentation?.currentPointer?.mode === "following"
+                && String(window.__taskActorPresentation.layerId) === String(window.__taskActorPresentation.currentPointer.layerId)
+                && !document.querySelector("#workspaceBreadcrumb")?.hasAttribute("aria-busy"));
+              assert.equal(answerRequests, 1);
+              assert.equal(tasks.get(sessionId).completions, 1);
+              console.log("PASS latest-update keyboard: narrow scrolled rail, native Enter, following paint and no input submission");
+              // New revision sees actual pinned pixels and the production cue.
+              // Return races its pending layer GET; activation must select the
+              // newest published head without submitting an unsent draft.
+              const discovery = await openTaskActorBrowser({ tasks, sessionId, productSession, browser, signal,
+                observationContract: { id: "task-actor-observation-v5", optionObservation: "opened-native-select-accessibility" } });
+              const discoveryPage = browser.contexts().at(-1).pages()[0];
+              const loading = deferred(), release = deferred(), finishRefresh = deferred();
+              let holdRefresh = false;
+              let held = false;
+              try {
+                await discoveryPage.getByRole("button", { name: "Earlier finding", exact: true }).click();
+                await discoveryPage.getByRole("button", { name: /View latest update$/ }).waitFor();
+                const cueStyle = await discoveryPage.locator(".workspace-layout #workspaceBreadcrumb > button#viewLatestUpdate").evaluate(element => {
+                  const style = getComputedStyle(element);
+                  return { border: parseFloat(style.borderLeftWidth), background: style.backgroundColor };
+                });
+                assert.ok(cueStyle.border >= 1, "latest-update cue keeps its visible border over generic breadcrumb styles");
+                assert.ok(!["transparent", "rgba(0, 0, 0, 0)"].includes(cueStyle.background), "sticky cue has an opaque background so scrolled breadcrumbs cannot overlap its text");
+                await discoveryPage.screenshot({ path: join(data, "update-discovery.png") });
+                console.log("CURRENT_DISCOVERY_SCREENSHOT", join(data, "update-discovery.png"));
+                let historical = await discovery.observeCurrent(expected);
+                assert.equal(historical.pointer.viewingCurrent, false);
+                assert.equal(historical.observation.displayedView, "historical");
+                assert.equal(historical.observation.currentUpdate, undefined);
+                let latestControl = historical.observation.controls.find(control => control.name.endsWith("View latest update"));
+                assert.ok(latestControl, "pinned actor can select the real visible latest-update control");
+                await discoveryPage.locator("#threadPrompt").fill("Draft retained across thread details");
+                const pinnedBeforeDetails = await discoveryPage.evaluate(() => {
+                  const p = window.__taskActorPresentation;
+                  return { layerId: p.layerId, currentPointer: p.currentPointer, navigationPath: p.navigationPath };
+                });
+                await discoveryPage.locator("#conversationSettingsButton").click();
+                await discoveryPage.locator("#openThreadDetails").click();
+                await discoveryPage.locator("#threadDetailsDialog").waitFor();
+                await assert.rejects(discovery.act({ kind: "click", ref: latestControl.ref }, { current: { expected, pointer: historical.pointer } }),
+                  { code: "actor_control_unavailable", actionDispatched: false });
+                const covered = await discovery.observeCurrent(expected);
+                assert.equal(covered.kind, "observation");
+                assert.ok(!covered.observation.controls.some(control => control.name.endsWith("View latest update")),
+                  "modal top layer excludes the background Current cue from actor controls");
+                assert.equal(covered.pointer.visibleUpdate, "null");
+                await discoveryPage.keyboard.press("Escape");
+                await discoveryPage.locator("#threadDetailsDialog").waitFor({ state: "hidden" });
+                assert.deepEqual(await discoveryPage.evaluate(() => {
+                  const p = window.__taskActorPresentation;
+                  return { layerId: p.layerId, currentPointer: p.currentPointer, navigationPath: p.navigationPath };
+                }), pinnedBeforeDetails);
+                assert.equal(await discoveryPage.locator("#threadPrompt").inputValue(), "Draft retained across thread details");
+                historical = await discovery.observeCurrent(expected);
+                latestControl = historical.observation.controls.find(control => control.name.endsWith("View latest update"));
+                assert.ok(latestControl, "Escape restores ordinary Current cue observation without navigation");
+                assert.equal(answerRequests, 1);
+                assert.equal(tasks.get(sessionId).completions, 1);
+                console.log("PASS thread details over Current: modal excludes background observation/activation; Escape restores cue with draft/pin retained and no input submission");
+                await discoveryPage.route(`**/layers/${layers[1].ref.id}`, async route => {
+                  if (!held) { held = true; loading.resolve(); await release.promise; }
+                  await route.continue();
+                });
+                let navigationFinished = false;
+                const opening = discovery.act({ kind: "click", ref: latestControl.ref }, { current: { expected, pointer: historical.pointer } }).then(() => { navigationFinished = true; });
+                await loading.promise;
+                await discoveryPage.waitForTimeout(350);
+                assert.equal(navigationFinished, false, "actor activation waits for the real asynchronous navigation before its next observation");
+                gates[2].resolve();
+                await discoveryPage.waitForFunction(() => window.__taskActorPresentation?.completionStatus === "accepted");
+                await discoveryPage.locator("#threadPrompt").fill("Unsent follow-up retained");
+                await discoveryPage.route("**/api/state?**", async route => {
+                  if (holdRefresh) await finishRefresh.promise;
+                  await route.continue();
+                });
+                holdRefresh = true;
+                release.resolve();
+                await discoveryPage.waitForFunction(() => window.__taskActorWrites.pending === 0 && Date.now() - window.__taskActorWrites.changedAt >= 200);
+                await discoveryPage.waitForTimeout(100);
+                assert.equal(navigationFinished, false, "GET completion alone cannot settle navigation while its final state refresh is pending");
+                finishRefresh.resolve(); await opening;
+                const current = await discovery.observeCurrent(expected);
+                assert.equal(current.pointer.viewingCurrent, true);
+                assert.equal(current.observation.currentUpdate.revision, 3);
+                assert.equal(await discoveryPage.locator("#threadPrompt").inputValue(), "Unsent follow-up retained");
+                assert.equal(answerRequests, 1);
+                assert.equal(tasks.get(sessionId).completions, 1);
+                console.log("PASS update discovery: actual pinned pixels, visible production cue, ordinary actor activation, Return during layer load, latest paint/following and unsent draft retained");
+              } finally { release.resolve(); finishRefresh.resolve(); await discovery.close(); }
+
             } finally { await nav.close(); }
           }
           gates[observation.currentUpdate.revision].resolve();

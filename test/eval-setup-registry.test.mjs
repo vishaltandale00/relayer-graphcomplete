@@ -597,3 +597,24 @@ it("bootstraps a native completion judge even when an API config sorts first", a
   expect(registry.catalog().revisions.filter(item => item.kind === "completion-judge")).toHaveLength(1);
   expect((await new SetupRegistry(options).open()).selected("completion-judge")).toEqual(registry.selected("completion-judge"));
 });
+
+it('publishes native update-aware observation separately while preserving historical defaults and reopening', async () => {
+  const { updateAwareActorSetup } = await import('../desktop/eval-main/setup-registry.mjs');
+  const f = await fixture();
+  const old = await f.start();
+  const before = f.registry.selected('actor');
+  await f.tasks.annotate(old.id, { eventId: old.events.find(e => e.kind === 'actor_action').id, comment: 'Notice visible updates while browsing earlier material' });
+  const annotation = f.tasks.get(old.id).annotations.at(-1);
+  const definition = updateAwareActorSetup();
+  await expect(f.registry.publish({ ...definition, settings: { ...definition.settings, decision: { contractId: 'openai-decisions-codex-text-v2', providerId: 'fixture', model: 'gpt-6-luna' } }, predecessorId: before.id, feedback: [{ sessionId: old.id, annotationId: annotation.id }] })).rejects.toThrow('native Codex');
+  const next = await f.registry.publish({ ...updateAwareActorSetup(), predecessorId: before.id, feedback: [{ sessionId: old.id, annotationId: annotation.id }] });
+  expect(next.promptVersion).toBe('task-actor-v12');
+  expect(next.settings.decision).toBeUndefined();
+  expect(next.behaviorContract.observationContract.id).toBe('task-actor-observation-v5');
+  const reopened = await new SetupRegistry({ stateFile: f.stateFile }).open();
+  expect(reopened.get(next.id, 'actor')).toEqual(next);
+  expect(reopened.selected('actor')).toEqual(before);
+  const task = await f.start(next.id);
+  expect(task.actorSetup.id).toBe(next.id);
+  expect(task.termination.reason).toBe('satisfied');
+});

@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
+import { currentUpdateNotice, humanTurns } from "../desktop/renderer/src/product-workspace/model.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let requestImplementation;
@@ -1414,6 +1414,7 @@ describe("workspace navigation integration", () => {
     controller.viewState.mainView = "thread";
     controller.selectTurnById(1);
     await controller.navigateLayer(9, { action: expand, sourceNode: root.nodes[0] });
+    if (isNative) controller.viewState.temporalCurrent = { completionId: 50, revision: 1, mode: "following" };
     const storage = new Map();
     window.localStorage = { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
     const drafts = await import("../desktop/renderer/src/composer-drafts.js");
@@ -1427,6 +1428,8 @@ describe("workspace navigation integration", () => {
         sourceEntry: { threadId: "10", turnId: "1", selectedNodeId: "22", navigationPath: [{ layerId: "7", viaActionId: null }, { layerId: "9", viaActionId: "60" }] } });
     };
     expectOrigin();
+    if (isNative) expect(controller.viewState.invocationOrigin.sourceEntry.temporalCurrent)
+      .toEqual({ completionId: "50", revision: 1, mode: "pinned", pinnedAtRevision: 1 });
     await expect(controller.submitInteraction("Unsent follow-up", { familyId: 1 })).rejects.toThrow("read only");
     expect(await controller.invokeAction(invoke)).toBeNull();
     expect(drafts.threadFollowupDraft("10:1")).toBe("Unsent follow-up");
@@ -2270,4 +2273,194 @@ it.each(["failed", "stopped", "running", "pending"])("navigates to a local %s in
     expect(controller.viewState.currentInteractionId).toBe(2);
     expect(controller.appState.visibleLayer).toBeNull();
   } finally { controller.cancelNavigationHistory(); }
+});
+
+it.each(['active', 'stopped', 'failed', 'succeeded'])('opens latest %s Current explicitly and resumes following without replacing historical breadcrumbs', async (lifecycle) => {
+  const root = rootLayer(18, 51), old = rootLayer(19, 53), latest = rootLayer(20, 57);
+  root.actions = [{ id: 23, kind: 'navigate', relation: 'expand', sourceNodeId: 51, targetLayerId: 19, label: 'Compare' }];
+  for (const value of [root, old, latest])
+    value.layer.state = 'accepted';
+  const turn = { ...interaction(5, 3, null), graphNodeId: 50, completionStatus: 'running', completionOutput: null, latestAttempt: { id: 5 } };
+  const state = productState([{ id: 3, title: 'Family' }], [turn]);
+  const projection = { completionId: 50, headRevision: 1, lifecycle: 'active', currentLayerId: 18, finalLayerId: null, temporalFeatures: { projectionUi: true } };
+  state.currentProjection = { cursor: 1, events: [], hasMore: false, states: [projection] };
+  requestImplementation = vi.fn(async (path) => { if (path.startsWith('/api/state?threadId=3'))
+    return structuredClone(state); if (path === '/api/threads/3')
+    return structuredClone({ thread: state.threads[0], interactions: state.interactions, actionInvocations: [] }); if (path.endsWith('/layers/18'))
+    return root; if (path.endsWith('/layers/19'))
+    return old; if (path.endsWith('/layers/20'))
+    return latest; throw Error(path); });
+  const c = await loadModules();
+  try {
+    await c.loadThread(3);
+    if (lifecycle === "active") c.viewState.temporalCurrent = {
+      completionId: 999, revision: 5, mode: "pinned", pinnedAtRevision: 5 };
+    await c.navigateLayer(19, { action: root.actions[0], sourceNode: root.nodes[0] });
+    Object.assign(projection, { headRevision: 2, currentLayerId: 20, lifecycle });
+    state.currentProjection.cursor = 2;
+    if (lifecycle !== 'active')
+      turn.completionStatus = lifecycle === 'succeeded' ? 'accepted' : lifecycle;
+    if (lifecycle === 'succeeded')
+      turn.completionOutput = { rootLayer: latest };
+    await c.refreshState(3);
+    expect(c.appState.visibleLayer.layer.id).toBe(19);
+    expect(c.viewState.temporalCurrent).toMatchObject({ pinnedAtRevision: 1, revision: 2, mode: 'pinned' });
+    expect(await c.openLatestCurrent({ threadId: 3, turnId: 5, completionId: 50, attemptId: 5 })).toBe(true);
+    expect(c.appState.visibleLayer.layer.id).toBe(20);
+    expect(c.viewState.temporalCurrent).toEqual({ completionId: 50, revision: 2, mode: 'following' });
+    await c.navigateHistory(-1);
+    expect(c.appState.visibleLayer.layer.id).toBe(19);
+  }
+  finally {
+    c.cancelNavigationHistory();
+  }
+});
+it.each(['head', 'navigation', 'attempt', 'load-failure'])('does not commit a stale latest-update navigation across %s changes', async (change) => {
+  const root = rootLayer(18, 51), old = rootLayer(19, 53), latest = rootLayer(20, 57), newest = rootLayer(21, 58);
+  root.actions = [{ id: 23, kind: 'navigate', relation: 'expand', sourceNodeId: 51, targetLayerId: 19, label: 'Compare' }];
+  for (const value of [root, old, latest])
+    value.layer.state = 'accepted';
+  const turn = { ...interaction(5, 3, null), graphNodeId: 50, completionStatus: 'running', completionOutput: null, latestAttempt: { id: 5 } };
+  const state = productState([{ id: 3, title: 'Family' }], [turn]);
+  const projection = { completionId: 50, headRevision: 1, lifecycle: 'active', currentLayerId: 18, finalLayerId: null, temporalFeatures: { projectionUi: true } };
+  state.currentProjection = { cursor: 1, events: [], hasMore: false, states: [projection] };
+  let c;
+  let race = false;
+  requestImplementation = vi.fn(async (path) => { if (path.startsWith('/api/state?threadId=3'))
+    return structuredClone(state); if (path === '/api/threads/3')
+    return structuredClone({ thread: state.threads[0], interactions: state.interactions, actionInvocations: [] }); if (path.endsWith('/layers/18'))
+    return root; if (path.endsWith('/layers/19'))
+    return old; if (path.endsWith('/layers/21'))
+    return newest; if (path.endsWith('/layers/20')) {
+    if (race) {
+      race = false;
+      if (change === 'head') {
+        Object.assign(projection, { headRevision: 3, currentLayerId: 21 });
+        state.currentProjection.cursor = 3;
+        await c.refreshState(3);
+      }
+      if (change === 'navigation')
+        await c.navigateLayer(18, { restore: true, pathIndex: 0 });
+      if (change === 'attempt') {
+        turn.latestAttempt.id = 6;
+        await c.refreshState(3);
+      }
+      if (change === 'load-failure')
+        throw Error('Unavailable layer');
+    }
+    return latest;
+  } throw Error(path); });
+  c = await loadModules();
+  try {
+    await c.loadThread(3);
+    await c.navigateLayer(19, { action: root.actions[0], sourceNode: root.nodes[0] });
+    Object.assign(projection, { headRevision: 2, currentLayerId: 20 });
+    state.currentProjection.cursor = 2;
+    await c.refreshState(3);
+    race = true;
+    const opening = c.openLatestCurrent({ threadId: 3, turnId: 5, completionId: 50, attemptId: 5 });
+    if (change === 'load-failure') {
+      await expect(opening).rejects.toThrow('Unavailable layer');
+      expect(c.appState.visibleLayer.layer.id).toBe(19);
+    }
+    else {
+      expect(await opening).toBe(change === 'head');
+      expect(c.appState.visibleLayer.layer.id).toBe(change === 'head' ? 21 : change === 'navigation' ? 18 : 19);
+    }
+  }
+  finally {
+    c.cancelNavigationHistory();
+  }
+});
+
+it.each(["paused", "interrupted"])("keeps latest navigation scoped when an explicit Resume replaces a %s attempt", async status => {
+  const root = rootLayer(18, 51), older = rootLayer(19, 53), latest = rootLayer(20, 57);
+  root.actions = [{ id: 23, kind: "navigate", relation: "expand", sourceNodeId: 51, targetLayerId: 19, label: "Compare" }];
+  for (const layer of [root, older, latest]) layer.layer.state = "accepted";
+  const turn = { ...interaction(5, 3, null), graphNodeId: 50, completionStatus: status, completionOutput: null, latestAttempt: { id: 5 } };
+  const state = productState([{ id: 3, title: "Recovered trip", pausedRuns: 1 }], [turn]);
+  const projection = { completionId: 50, headRevision: 1, lifecycle: "failed", currentLayerId: 18, finalLayerId: null, temporalFeatures: { projectionUi: true } };
+  state.currentProjection = { cursor: 1, events: [], hasMore: false, states: [projection] };
+  let controller, resumeDuringRead = false, resumeRequests = 0;
+  requestImplementation = vi.fn(async (path, options = {}) => {
+    if (path.startsWith("/api/state?threadId=3")) return structuredClone(state);
+    if (path.endsWith("/interactions/5/resume")) {
+      expect(options.method).toBe("POST");
+      resumeRequests++;
+      turn.latestAttempt = { id: 6 };
+      turn.completionStatus = "running";
+      state.threads[0].pausedRuns = 0;
+      projection.lifecycle = "active";
+      return { interactions: [structuredClone(turn)] };
+    }
+    if (path.endsWith("/layers/18")) return root;
+    if (path.endsWith("/layers/19")) return older;
+    if (path.endsWith("/layers/20")) {
+      if (resumeDuringRead) {
+        resumeDuringRead = false;
+        await controller.resumeInteraction(3, 5);
+      }
+      return latest;
+    }
+    throw new Error(`Unexpected request: ${path}`);
+  });
+  controller = await loadModules();
+  try {
+    await controller.loadThread(3);
+    await controller.navigateLayer(19, { action: root.actions[0], sourceNode: root.nodes[0] });
+    Object.assign(projection, { headRevision: 2, currentLayerId: 20 });
+    state.currentProjection.cursor = 2;
+    await controller.refreshState(3);
+    resumeDuringRead = true;
+    expect(await controller.openLatestCurrent({ threadId: 3, turnId: 5, completionId: 50, attemptId: 5 })).toBe(false);
+    expect(controller.appState.visibleLayer.layer.id).toBe(19);
+    expect(controller.viewState.temporalCurrent.mode).toBe("pinned");
+    expect(await controller.openLatestCurrent({ threadId: 3, turnId: 5, completionId: 50, attemptId: 6 })).toBe(true);
+    expect(controller.appState.visibleLayer.layer.id).toBe(20);
+    expect(controller.viewState.temporalCurrent.mode).toBe("following");
+    expect(resumeRequests).toBe(1);
+  } finally { controller.cancelNavigationHistory(); }
+});
+
+it.each(["turn-selection", "following-history", "legacy-history"])("preserves known and legacy pin baselines through %s", async route => {
+  const root = rootLayer(18, 51), latest = rootLayer(20, 57);
+  root.layer.state = latest.layer.state = "accepted";
+  const turn = { ...interaction(5, 3, root), graphNodeId: 50, completionStatus: "running", latestAttempt: { id: 5 } };
+  const other = interaction(6, 3, rootLayer(30, 61), 2);
+  const thread = { id: 3, title: "Trip" };
+  const state = productState([thread], [turn]);
+  const projection = { completionId: 50, headRevision: 1, lifecycle: "active",
+    currentLayerId: 18, temporalFeatures: { projectionUi: true } };
+  state.currentProjection = { cursor: 1, states: [projection], events: [], hasMore: false };
+  requestImplementation = vi.fn(async path => {
+    if (path.startsWith("/api/state?threadId=3")) return structuredClone(state);
+    if (path === "/api/threads/3") return structuredClone({ thread, interactions: state.interactions, actionInvocations: [] });
+    if (path.endsWith("/layers/18")) return root;
+    if (path.endsWith("/layers/20")) return latest;
+    throw Error(path);
+  });
+  const c = await loadModules();
+  try {
+    await c.loadThread(3);
+    expect(c.viewState.temporalCurrent.mode).toBe("following");
+    if (route === "legacy-history") {
+      c.viewState.temporalCurrent.mode = "pinned";
+      await c.refreshState(3);
+    }
+    state.interactions.push(other);
+    await c.refreshState(3);
+    c.selectTurnById(6);
+    if (route === "turn-selection") c.selectTurnById(5);
+    else await c.navigateHistory(-1);
+    expect(c.viewState.temporalCurrent.mode).toBe("pinned");
+    expect(c.viewState.temporalCurrent.pinnedAtRevision).toBe(route === "legacy-history" ? undefined : 1);
+    Object.assign(projection, { headRevision: 2, currentLayerId: 20 });
+    state.currentProjection.cursor = 2;
+    await c.refreshState(3);
+    expect(c.appState.visibleLayer.layer.id).toBe(18);
+    expect(currentUpdateNotice(c.appState, thread, c.viewState)).toMatchObject({ newUpdate: route !== "legacy-history", revision: 2 });
+    expect(await c.openLatestCurrent({ threadId: 3, turnId: 5, completionId: 50, attemptId: 5 })).toBe(true);
+    expect(c.appState.visibleLayer.layer.id).toBe(20);
+    expect(c.viewState.temporalCurrent.mode).toBe("following");
+  } finally { c.cancelNavigationHistory(); }
 });

@@ -114,8 +114,9 @@ export class TaskActorService {
       const observationContract = task.actorSetup ? task.actorSetup.behaviorContract?.observationContract ?? null
         : task.actor.promptVersion === ACTOR_PROMPT_VERSION ? ACTOR_OBSERVATION_CONTRACT : ACTOR_SETTLED_OBSERVATION_CONTRACT;
       browser = await this.openBrowser(id, signal, structuredClone(observationContract));
-      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4"].includes(observationContract?.id);
+      const currentNative = ["task-actor-observation-v3", "task-actor-observation-v4", "task-actor-observation-v5"].includes(observationContract?.id);
       let previousPointer = null;
+      let previousViewedPointer = null;
       let currentCaptures = 0;
       const currentCaptureLimit = task.actor.maxActions * 2 + 1;
       let limitRecorded = false;
@@ -151,11 +152,12 @@ export class TaskActorService {
         if (actionsUsed >= task.actor.maxActions) captured.observation.availableActions = [];
         const workingSchema = structuredClone(task.actorSetup?.behaviorContract?.actionSchema ?? ACTOR_ACTION_SCHEMA);
         workingSchema.properties.kind.enum = workingSchema.properties.kind.enum.filter(kind => captured.observation.availableActions.includes(kind));
-        const sameAttempt = previousPointer && String(pointer.threadId) === String(previousPointer.threadId)
-          && String(pointer.turnId) === String(previousPointer.turnId) && String(pointer.attemptId) === String(previousPointer.attemptId);
-        const missing = pointer.revision - (sameAttempt ? previousPointer.revision : 0) - 1;
+        const sameAttempt = previousViewedPointer && String(pointer.threadId) === String(previousViewedPointer.threadId)
+          && String(pointer.turnId) === String(previousViewedPointer.turnId) && String(pointer.attemptId) === String(previousViewedPointer.attemptId);
+        const missing = pointer.viewingCurrent === false ? 0 : pointer.revision - (sameAttempt ? previousViewedPointer.revision : 0) - 1;
         if (missing > 0) await this.tasks.actorEvent(id, "actor_current_gap", { pointer, reason: "revisions_not_observed", missingRevisions: missing });
-        const observed = await this.tasks.actorEvent(id, "actor_observation", { phase: "current", pointer, submissionEventId: submission.id,
+        if (pointer.viewingCurrent === false) await this.tasks.actorEvent(id, "actor_current_not_viewed", { pointer, reason: "pinned_navigation" });
+        const observed = await this.tasks.actorEvent(id, "actor_observation", { phase: pointer.viewingCurrent === false ? "pinned" : "current", pointer, submissionEventId: submission.id,
           observation: captured.observation, actionSchema: workingSchema.properties.kind.enum.length ? workingSchema : null });
         signal.throwIfAborted();
         phase = "perceive_current";
@@ -165,6 +167,7 @@ export class TaskActorService {
         await this.tasks.actorEvent(id, "actor_current_reaction", { observationEventId: observed.id, comment: reaction.comment, usage: reaction.usage ?? null,
           ...(reaction.decisionEvidence ? { decisionEvidence: reaction.decisionEvidence } : {}) });
         previousPointer = pointer;
+        if (pointer.viewingCurrent !== false) previousViewedPointer = pointer;
         repeatCurrent = false;
         if (reaction.action == null) workingControlRepairPending = false;
         if (reaction.action != null) {
@@ -172,7 +175,7 @@ export class TaskActorService {
           if (!captured.observation.availableActions.includes(reaction.action.kind)
             || actionsUsed >= task.actor.maxActions) throw Object.assign(new Error("Unavailable working action."), { code: "actor_invalid_action" });
           actionsUsed++;
-          const intent = await this.tasks.actorEvent(id, "actor_action", { phase: "current", observationEventId: observed.id, action: reaction.action, usage: reaction.usage ?? null });
+          const intent = await this.tasks.actorEvent(id, "actor_action", { phase: observed.phase, observationEventId: observed.id, action: reaction.action, usage: reaction.usage ?? null });
           signal.throwIfAborted();
           phase = "act_current";
           try {

@@ -148,6 +148,7 @@
         "test/window-factory.test.mjs",
         "test/workspace-actions.test.mjs",
         "test/workspace-navigation-integration.test.mjs",
+        "test/current-update-discovery.test.mjs",
         "test/workspace-reading-context.test.mjs",
         "test/workspace-reading-layout.test.mjs",
         "test/node-detail-runtime.test.mjs",

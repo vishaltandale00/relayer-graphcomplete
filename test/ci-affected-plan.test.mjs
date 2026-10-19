@@ -353,6 +353,8 @@ describe("affected-module plan v1", { timeout: 30_000 }, () => {
     ["desktop/renderer/src/model-family-settings.js", "test/model-family-settings-refresh.test.mjs"],
     ["desktop/eval-main/eval-service.mjs", "test/eval-service-human-model.test.mjs"],
     ["desktop/eval-main/task-actor-service.mjs", "test/eval-task-actor.test.mjs"],
+    ["desktop/eval-main/task-actor-browser.mjs", "test/current-update-discovery.test.mjs"],
+    ["desktop/renderer/src/product-workspace/workspace.js", "test/current-update-discovery.test.mjs"],
     ["desktop/eval-main/task-actor-service.mjs", "test/eval-task-actor-errors.test.mjs"],
     ["packages/eval-runner/src/simulated-user/task-actor.ts", "test/eval-task-actor-errors.test.mjs"],
     ["packages/eval-runner/src/simulated-user/task-actor.ts", "test/eval-task-actor.test.mjs"],

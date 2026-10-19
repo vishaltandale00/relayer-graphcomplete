@@ -13,6 +13,7 @@ import {
 } from "../model-picker.js";
 import { pickerSelectionPayload } from "../model-picker-model.js";
 import {
+  currentUpdateNotice,
   interactionForThread,
   responseNodesForThread,
   workspaceBreadcrumbItems,
@@ -1641,6 +1642,7 @@ export function createProductWorkspace({
   onSelectTurnById,
   onSelectionChange = () => {},
   onOpenReadyResult = () => {},
+  onOpenLatestCurrent = null,
   layerSelectionMemoryOwner = globalThis.window,
   onArchiveThread = null,
   onExportConversation = null,
@@ -5343,8 +5345,9 @@ export function createProductWorkspace({
   function renderBreadcrumb(state = getState(), thread = getThread()) {
     const breadcrumb = $("#workspaceBreadcrumb");
     const items = workspaceBreadcrumbItems(state, thread, selection);
-    const visible = workspaceBreadcrumbShouldRender(items);
-    const rootAnnotationOnly = workspaceRootAnnotationShouldRender(items, annotationEnabled);
+    const update = onOpenLatestCurrent && currentUpdateNotice(state, thread, selection);
+    const visible = workspaceBreadcrumbShouldRender(items) || Boolean(update);
+    const rootAnnotationOnly = !visible && workspaceRootAnnotationShouldRender(items, annotationEnabled);
     breadcrumb.classList.toggle("hidden", !visible && !rootAnnotationOnly);
     breadcrumb.classList.toggle("root-annotation-only", rootAnnotationOnly);
     if (!visible && !rootAnnotationOnly) {
@@ -5352,6 +5355,25 @@ export function createProductWorkspace({
       return;
     }
     const children = [];
+    if (update) {
+      const button = graphDocument.createElement("button");
+      button.id = "viewLatestUpdate";
+      button.type = "button";
+      button.className = "breadcrumb-segment current-update-control";
+      button.dataset.currentUpdateScope = JSON.stringify([update.threadId, update.turnId, update.completionId, update.attemptId]);
+      button.dataset.currentUpdateRevision = String(update.revision);
+      button.textContent = update.newUpdate ? "New update available · View latest update" : "View latest update";
+      button.setAttribute("aria-label", button.textContent);
+      button.onclick = async () => {
+        if (breadcrumb.getAttribute("aria-busy") === "true") return;
+        breadcrumb.setAttribute("aria-busy", "true");
+        try {
+          if (await prepareNodeContextSelectionChange()) await onOpenLatestCurrent(update);
+        } catch (error) { toast(error.message); }
+        finally { breadcrumb.removeAttribute("aria-busy"); }
+      };
+      children.push(button);
+    }
     items.forEach((item, index) => {
       if (visible && index > 0) {
         const separator = graphDocument.createElement("span");
