@@ -50,8 +50,8 @@ export function newThreadModelSelectionPayload() {
     : null;
 }
 
-export function openNewThreadModelPicker(tab = "model") {
-  newThreadPicker?.open(tab);
+export function openNewThreadModelPicker() {
+  newThreadPicker?.open();
 }
 
 export function resetNewThreadModelPicker() {

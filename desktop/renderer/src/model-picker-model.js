@@ -1,4 +1,3 @@
-export const NO_MODELS_FOR_HARNESS = "No available models for this harness";
 
 // A refresh that finds no eligible models tombstones the provider's managed family. The
 // app server keeps it as the default and refuses Send with this code (PROV-008).
@@ -39,11 +38,32 @@ export function familyModelSetup(settings, familyId, harnessId = settings?.defau
     if (!family || !family.enabled) return null;
     if (availableOrchestrator(settings, family, harnessId)) return null;
     const orchestrator = familyOrchestrator(family);
+    const provider = settings.providers?.find(item => item.id === orchestrator?.providerId);
+    const model = provider?.models?.find(item => item.id === orchestrator?.modelId);
+    const harness = harnessFor(settings, harnessId);
+    if (orchestrator && provider?.connected !== false && model
+      && model.visible !== false && model.available !== false
+      && harness && harness.available !== false
+      && !harnessSupportsModel(harness, provider, orchestrator.modelId)) {
+      return {
+        familyId: family.id,
+        familyName: family.name,
+        providerId: orchestrator.providerId,
+        reason: "harness-mismatch",
+        action: "family-settings",
+        label: "Harness mismatch",
+        message: `${family.name} cannot run with ${harness.label ?? harnessId}: its orchestrator, ${model.label ?? model.id}, is not supported by this harness. Choose a compatible family, or configure one in Settings.`,
+        choiceName: availablePickerFamilies(settings, harnessId).length
+          ? `Choose a compatible family for ${harness.label ?? harnessId}` : null,
+        actionLabel: "Open Settings",
+        actionName: `Configure a compatible family for ${harness.label ?? harnessId} in Settings`,
+      };
+    }
     return {
       familyId: family.id,
       familyName: family.name,
       providerId: orchestrator?.providerId,
-      action: settings.providers?.find(provider => provider.id === orchestrator?.providerId)?.connected === false ? "settings" : "family-settings",
+      action: provider?.connected === false ? "settings" : "family-settings",
       label: "Orchestrator unavailable",
       message: `${family.name} cannot run because its orchestrator is unavailable or incompatible. Reconnect its provider or choose an available orchestrator in Settings.`,
       actionLabel: "Open Settings",
@@ -190,6 +210,29 @@ export function availablePickerFamilies(settings, harnessId) {
     .filter((family) => family.orchestrator);
 }
 
+// Family selection in a new composer may choose a harness, but never another
+// family or orchestrator. Existing conversations use only their pinned harness.
+export function routablePickerFamilies(settings, harnessId, { allowHarnessChange = false } = {}) {
+  const harnessIds = allowHarnessChange
+    ? [...new Set([harnessId, settings.defaults?.harnessId,
+      ...settings.harnesses.map(harness => harness.id).sort()])]
+    : [harnessId];
+  const routes = new Map();
+  for (const id of harnessIds) {
+    // A configured model is a family-less route. Cross-harness choices also need
+    // an available permission profile before they can displace a usable alternative.
+    if (harnessUsesConfigurationModel(settings, id)
+      || (allowHarnessChange && harnessFor(settings, id)?.permissionAvailable === false)) continue;
+    for (const family of availablePickerFamilies(settings, id)) {
+      const usable = harnessFor(settings, id)?.usableFamilyIds;
+      if (allowHarnessChange && Array.isArray(usable)
+        && !usable.some(familyId => String(familyId) === String(family.id))) continue;
+      if (!routes.has(family.id)) routes.set(family.id, { ...family, harnessId: id });
+    }
+  }
+  return [...routes.values()].sort((left, right) => left.position - right.position);
+}
+
 // Automatic selection resolves the default family. While that family is in recovery it refuses,
 // rather than running another family the user did not choose (PROV-008).
 export function firstAvailableSelection(settings, harnessId) {
@@ -210,10 +253,9 @@ export function firstAvailableSelection(settings, harnessId) {
 
 export function normalizePickerSelection(settings, candidate) {
   const harnessId = candidate?.harnessId ?? settings.defaults.harnessId;
+  if (harnessUsesConfigurationModel(settings, harnessId)) return { harnessId };
   const families = availablePickerFamilies(settings, harnessId);
-  if (families.length === 0) {
-    return harnessUsesConfigurationModel(settings, harnessId) ? { harnessId } : null;
-  }
+  if (families.length === 0) return null;
   const requestedFamilyId = candidate?.familyId ?? settings.defaults?.familyId;
   const requestedFamily = requestedFamilyId == null
     ? null
@@ -319,35 +361,6 @@ export function resolveUnsentModelIntent(settings, candidate) {
     },
     blockedFamilyId: null,
   };
-}
-
-export function selectCandidateHarness(settings, currentSelection, harnessId) {
-  const selection = normalizePickerSelection(settings, { ...currentSelection, harnessId });
-  if (selection) return { selection, error: null };
-  if (harnessUsesConfigurationModel(settings, harnessId)) {
-    return { selection: { harnessId, familyId: null, providerId: null, modelId: null }, error: null };
-  }
-  if (availablePickerFamilies(settings, harnessId).length > 0) {
-    return { selection: { harnessId, familyId: null, providerId: null, modelId: null }, error: null };
-  }
-  return { selection: currentSelection, error: NO_MODELS_FOR_HARNESS };
-}
-
-export async function validateCandidateHarness(
-  settings,
-  currentSelection,
-  harnessId,
-  validateSelection,
-) {
-  const candidate = selectCandidateHarness(settings, currentSelection, harnessId);
-  if (candidate.error) return candidate;
-  if (candidate.selection.familyId == null) return candidate;
-  try {
-    await validateSelection(candidate.selection);
-    return candidate;
-  } catch {
-    return { selection: currentSelection, error: NO_MODELS_FOR_HARNESS };
-  }
 }
 
 export function pickerSelectionPayload(selection) {
