@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "fixtureVersion": 1,
+  "version": "0.2.40",
+  "sourceCommit": "8201faac88c7d979909517ddace51f6f46d25c07",
+  "target": "macos-arm64",
+  "url": "https://updates.relayerlabs.ai/desktop/macos/arm64/releases/0.2.40/Relayer-0.2.40-mac-arm64.zip",
+  "bytes": 207669922,
+  "sha256": "e999a9d7f4836d22138af0faee490914dc9dc7afc359220d2b4a3e8c2bb9d7db"
+}

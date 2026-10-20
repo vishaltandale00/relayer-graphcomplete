@@ -158,6 +158,8 @@
     }
   ],
   "chapterOwners": [
+    { "exact": "scripts/test-desktop-upgrade-replay.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-upgrade-replay.test.mjs"] },
+    { "prefix": "scripts/upgrade-replay/", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/desktop-upgrade-replay.test.mjs"] },
     {"exact": "desktop/release/build-native-release.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
     {"exact": "desktop/release/windows-native-build.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
     {"exact": "desktop/release/windows-native-cache.mjs", "chapters": ["vitest", "packaging"], "vitestFiles": ["test/windows-native-cache.test.mjs", "test/windows-candidate.test.mjs", "test/signed-native-cache.test.mjs", "test/desktop-telemetry-release-artifacts.test.mjs"]},
