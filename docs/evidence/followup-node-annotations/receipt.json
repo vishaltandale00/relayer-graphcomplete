@@ -3,7 +3,7 @@
   "captureScriptSha256": "ad445a7874fb26b4f95e85e2bc32cee7d15adbd0dffff4e3e0bb0dda7b65d3c6",
   "paidInferenceCalls": 0,
   "baselineCommit": "70d2d5fad590b75c7903358a0f4805026647cd76",
-  "sourceHead": "f5be2409c494ae03f1b90770ad21755695b0bdb3",
+  "sourceHead": "157f2722887a1eb60afcb687b3ddcf96784f7616",
   "renderer": {
     "path": "desktop/renderer/src/product-workspace/workspace.js",
     "baselineSha256": "1d0d87f3e93bf4127a6dcb8467c47c22c7331a81b9fc3528a93933457e38c76c",
@@ -16,7 +16,7 @@
   "checkpoints": [
     {
       "name": "A-before-missing-plus",
-      "imageSha256": "3813de8f4112c33719e45aca9828951f607618231b89a5a63b6f8aba5564c4be",
+      "imageSha256": "22bd42579cca96b368882b4fac3035661bdfb9630909d420385619651922bb10",
       "renderer": "baseline",
       "title": "Incoming queue",
       "hidden": true,
@@ -24,7 +24,7 @@
     },
     {
       "name": "B-after-plus-visible",
-      "imageSha256": "057a7c2c894663c3fa2bb4cf89171f8ae2ba310712be6f4057720f0a41f7f506",
+      "imageSha256": "584c8752ddda9a407d1f5a7061f784a6b04cddcdf3ec985a23ce4575511fafcc",
       "renderer": "fixed",
       "title": "Incoming queue",
       "hidden": false,
@@ -32,13 +32,13 @@
     },
     {
       "name": "C-after-editor",
-      "imageSha256": "072ec6c59f8821cbd557a8828ba97d75c6005f7ab0a044a7898cd953c9a0b34d",
+      "imageSha256": "9383df7b9cf7f996b286aa96d04598548147fb2343deb09a626db11f12ac90f6",
       "renderer": "fixed",
       "editableDuringGeneration": true
     },
     {
       "name": "D-after-confirmed",
-      "imageSha256": "2e22444c0ed3c04367f5a78a3337aed1a3857d4217d1076b783fc5d2d397b42a",
+      "imageSha256": "16831ec30569f712f77b1d8c1803fd34c267fe6a648f8b44391fcdb372f4cda6",
       "renderer": "fixed",
       "durableCanonicalConfirmation": true
     },
@@ -67,7 +67,7 @@
     "drafts": [],
     "confirmations": [
       {
-        "draftId": "f3c983a5-77ab-4165-86db-4a735eeae2c3",
+        "draftId": "a1cfc2ac-fdd6-4842-aae2-05c710fcd0f1",
         "threadId": 1,
         "target": {
           "nodeId": 34,
@@ -85,7 +85,7 @@
         "annotation": "Keep worker capacity visible while prioritizing work.",
         "draftRevision": 1,
         "confirmationRevision": 1,
-        "confirmedAt": "1792381378635"
+        "confirmedAt": "1792513027290"
       }
     ]
   },
