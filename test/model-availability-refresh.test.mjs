@@ -177,5 +177,5 @@ it("wires both production publishers and the preload channel to a refresh after 
   expect(main).toContain("const publishCatalog = modelAvailability.publishCatalog");
   expect(preload).toContain('onChanged: (callback) => subscribe("relayer:models-changed", callback)');
   expect(renderer.indexOf("const availabilityRefresh = watchModelAvailability")).toBeGreaterThan(renderer.indexOf("connectEvents();"));
-  expect(renderer).toMatch(/subscribe: desktop.models.onChanged,[\s\S]*await refreshProviderSettings\(\);\s*await refreshProviderModelUi\(\);/);
+  expect(renderer).toMatch(/subscribe: desktop.models.onChanged,[\s\S]*await refreshProviderSettings\(\);\s*await refreshProviderOnboarding\(\);\s*await refreshProviderModelUi\(\);/);
 });
