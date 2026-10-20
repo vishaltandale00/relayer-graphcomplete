@@ -1,0 +1,287 @@
+{
+  "version": "0.2.41",
+  "target": "macos-arm64",
+  "baseCommit": "1d9a6ac188d5eba872da06476a8c23a7a543c055",
+  "versionCommit": "5753d1e3cb1467cb830cf07ad896cab3060f03a1",
+  "pullRequest": "https://github.com/vishaltandale00/relayer-graphcomplete/pull/760",
+  "pullRequestCiRun": 39181601365,
+  "local": {
+    "nodeVersion": "22.23.2",
+    "check": "passed",
+    "build": "passed",
+    "vitest": {
+      "filesPassed": 340,
+      "filesSkipped": 1,
+      "casesPassed": 4568,
+      "casesSkipped": 3
+    },
+    "secretBoundaryCases": 2,
+    "pythonCases": 100,
+    "checkLog": "/private/tmp/relayer-preview-0.2.41-check.log",
+    "buildLog": "/private/tmp/relayer-preview-0.2.41-build.log"
+  },
+  "feedBefore": {
+    "previewVersion": "0.2.40",
+    "stableVersion": "0.2.40",
+    "previewSha256": "c4ce70e3173e0d2fbd76f11359417ad168ebe673e614272faddc6978c57ddbd2",
+    "stableSha256": "c4ce70e3173e0d2fbd76f11359417ad168ebe673e614272faddc6978c57ddbd2"
+  },
+  "sourceCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+  "sourceTree": "d412aa7da19bd77f726e37a6e0226cd674514d31",
+  "mainCiRun": 39182250230,
+  "primeRuntime": {
+    "result": "passed",
+    "recipeId": "prime@0.8.1",
+    "recipeDigest": "b90b701bcccbc280b3a09d29839969f1eff195b0c2e267663d84d89dccbe32f4",
+    "log": "/private/tmp/relayer-preview-0.2.41-prime.log"
+  },
+  "mainCiResult": "passed",
+  "candidateRun": 39182768486,
+  "mainCiLog": "/private/tmp/relayer-preview-0.2.41-main-ci.log",
+  "mainCiObserved": {
+    "vitestPassed": 4537,
+    "vitestSkipped": 34,
+    "secretBoundaryPlatformSkipped": 2,
+    "pythonPassed": 100,
+    "actualMacAsarAfterPack": "passed"
+  },
+  "candidateArtifact": {
+    "id": 12157239848,
+    "node_id": "MDg6QXJ0aWZhY3QxMjE1NzIzOTg0OA==",
+    "name": "relayer-desktop-preview-macos-arm64-2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+    "size_in_bytes": 474686334,
+    "url": "https://api.github.com/repos/vishaltandale00/relayer-graphcomplete/actions/artifacts/12157239848",
+    "archive_download_url": "https://api.github.com/repos/vishaltandale00/relayer-graphcomplete/actions/artifacts/12157239848/zip",
+    "expired": false,
+    "digest": "sha256:3ce9eb779d8845a6c9b7788d6d43222cc8358992111139169e4a0defcc273cbd",
+    "created_at": "2026-10-19T01:25:26Z",
+    "updated_at": "2026-10-19T01:25:26Z",
+    "expires_at": "2027-01-17T00:53:07Z",
+    "workflow_run": {
+      "id": 39182768486,
+      "repository_id": 1327816644,
+      "head_repository_id": 1327816644,
+      "head_branch": "main",
+      "head_sha": "2ef4f7a4f14bb444a955a180a2f90cec34873e93"
+    }
+  },
+  "candidateResult": "passed",
+  "candidateAttempt": 1,
+  "candidateArchiveVerified": true,
+  "nativeBuild": {
+    "result": "fresh compilation",
+    "restoreReason": "no compatible trusted artifact",
+    "saveResult": "unavailable: incomplete dSYM generation diagnostics; using fresh Cargo output"
+  },
+  "localDmgTrust": {
+    "signature": "passed",
+    "appleTeamId": "NZ253AL7U6",
+    "stapler": "passed",
+    "gatekeeper": "accepted: Notarized Developer ID"
+  },
+  "publicationRun": 39185504259,
+  "tag": "desktop-v0.2.41",
+  "tagObject": "85378617e7d5d9a2def5ffc53bcde5abe8594031",
+  "candidateReview": "release_review: no remaining blocker to annotated-tag Preview publication; limitations retained in PR760",
+  "preTagAuthority": "passed",
+  "publicationResult": "passed",
+  "publicationArtifact": {
+    "id": 12157258672,
+    "node_id": "MDg6QXJ0aWZhY3QxMjE1NzI1ODY3Mg==",
+    "name": "relayer-desktop-preview-publication-macos-arm64-2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+    "size_in_bytes": 1461,
+    "url": "https://api.github.com/repos/vishaltandale00/relayer-graphcomplete/actions/artifacts/12157258672",
+    "archive_download_url": "https://api.github.com/repos/vishaltandale00/relayer-graphcomplete/actions/artifacts/12157258672/zip",
+    "expired": false,
+    "digest": "sha256:f8c33fb6b7eaaa013eb50126752bdb403231185994846d0eab51e545c023693f",
+    "created_at": "2026-10-19T01:29:57Z",
+    "updated_at": "2026-10-19T01:29:57Z",
+    "expires_at": "2027-01-17T01:28:23Z",
+    "workflow_run": {
+      "id": 39185504259,
+      "repository_id": 1327816644,
+      "head_repository_id": 1327816644,
+      "head_branch": "desktop-v0.2.41",
+      "head_sha": "2ef4f7a4f14bb444a955a180a2f90cec34873e93"
+    }
+  },
+  "publicVerification": {
+    "ok": true,
+    "sourceCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+    "version": "0.2.41",
+    "verified": [
+      {
+        "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.dmg",
+        "size": 208177418,
+        "sha256": "78a0e6e21aed75ea34b56485185b56583222ba9f97f7cd5078e3be1e488666fc",
+        "verified": true
+      },
+      {
+        "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.zip",
+        "size": 208309941,
+        "sha256": "6ef5d3fadebdfac3de2d408781c6d785c01dcb054a4a3bc0671c3f91be549144",
+        "verified": true
+      },
+      {
+        "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.dmg.blockmap",
+        "size": 217254,
+        "sha256": "7eb7e9904c9704ccba5b00d1c470c01395706a61f804f300a9b9b0f06b9206ae",
+        "verified": true
+      },
+      {
+        "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.zip.blockmap",
+        "size": 217977,
+        "sha256": "2c1ceecd4a2cc960e191e50c04a326452a70965a4396eedb2882a403a061fdb7",
+        "verified": true
+      },
+      {
+        "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64-SHA256SUMS.txt",
+        "size": 190,
+        "sha256": "dc7a35ead1cbc7028b8763a7794afba66cb263f260aa818b00c7fc7205017cc3",
+        "verified": true
+      },
+      {
+        "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64-RELEASE.json",
+        "size": 1195,
+        "sha256": "4779cd9f565d5d4ed6068272bf6b405185df5909bb0369125f536672c63c0ad1",
+        "verified": true
+      },
+      {
+        "key": "desktop/macos/arm64/beta-mac.yml",
+        "size": 697,
+        "sha256": "c1898b2e7113d549ea05449bc9b4f6537939e9d03de24c39230efd332e3e0c4e",
+        "verified": true
+      }
+    ],
+    "stableUnchanged": true,
+    "stableSha256": "c4ce70e3173e0d2fbd76f11359417ad168ebe673e614272faddc6978c57ddbd2"
+  },
+  "canaryRun": 39185696271,
+  "canaryResult": "passed: archive, production trace/screenshot validator, and visual inspection",
+  "canaryArtifact": {
+    "id": 12157393693,
+    "node_id": "MDg6QXJ0aWZhY3QxMjE1NzM5MzY5Mw==",
+    "name": "relayer-desktop-canary-macos-arm64-0.2.41-39185696271",
+    "size_in_bytes": 193443,
+    "url": "https://api.github.com/repos/vishaltandale00/relayer-graphcomplete/actions/artifacts/12157393693",
+    "archive_download_url": "https://api.github.com/repos/vishaltandale00/relayer-graphcomplete/actions/artifacts/12157393693/zip",
+    "expired": false,
+    "digest": "sha256:c34b42330211882789f5b8e1f7a224754eb32b4a38e5614aa94ba4325601aaa0",
+    "created_at": "2026-10-19T01:33:33Z",
+    "updated_at": "2026-10-19T01:33:33Z",
+    "expires_at": "2027-01-17T01:30:52Z",
+    "workflow_run": {
+      "id": 39185696271,
+      "repository_id": 1327816644,
+      "head_repository_id": 1327816644,
+      "head_branch": "main",
+      "head_sha": "2ef4f7a4f14bb444a955a180a2f90cec34873e93"
+    }
+  },
+  "canaryVerification": {
+    "ok": true,
+    "capture": {
+      "schemaVersion": 2,
+      "capturedAt": "2026-10-19T01:33:32.175Z",
+      "environment": {
+        "target": "macos-arm64",
+        "host": "iad20-fj920-1447bbea-d1e7-4699-aaff-5dbf8d02305f-EE80F3BCE6C8",
+        "architecture": "arm64",
+        "os": "macOS 15.7.9"
+      },
+      "seed": {
+        "version": "0.2.40",
+        "sourceCommit": "8201faac88c7d979909517ddace51f6f46d25c07",
+        "processId": 5777
+      },
+      "target": {
+        "version": "0.2.41",
+        "sourceCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+        "workflowRunId": "39185504259",
+        "artifactSha256": {
+          "Relayer-0.2.41-mac-arm64.dmg": "78a0e6e21aed75ea34b56485185b56583222ba9f97f7cd5078e3be1e488666fc",
+          "Relayer-0.2.41-mac-arm64.zip": "6ef5d3fadebdfac3de2d408781c6d785c01dcb054a4a3bc0671c3f91be549144"
+        }
+      },
+      "productFlow": [
+        {
+          "phase": "idle",
+          "version": "0.2.40",
+          "channel": "preview",
+          "error": null
+        },
+        {
+          "phase": "available",
+          "version": "0.2.40",
+          "availableVersion": "0.2.41",
+          "channel": "preview",
+          "error": null
+        },
+        {
+          "phase": "downloading",
+          "version": "0.2.40",
+          "availableVersion": "0.2.41",
+          "channel": "preview",
+          "displayedPercentages": [
+            19,
+            39,
+            56,
+            67,
+            86,
+            99
+          ],
+          "error": null
+        },
+        {
+          "phase": "ready",
+          "version": "0.2.40",
+          "availableVersion": "0.2.41",
+          "channel": "preview",
+          "error": null
+        },
+        {
+          "phase": "installed-and-relaunched",
+          "version": "0.2.41",
+          "channel": "preview",
+          "error": null
+        }
+      ],
+      "trace": {
+        "file": "macos-arm64-preview-update.jsonl",
+        "sha256": "dee975aa3f98c1293aea22cc421d4ea8f976c839d63fd795769b797092d68a98",
+        "records": 17
+      },
+      "postUpdate": {
+        "installedVersion": "0.2.41",
+        "running": true,
+        "codeSignatureVerified": true,
+        "platformAcceptanceVerified": true,
+        "processId": 6362,
+        "channel": "preview",
+        "updateStatus": "idle"
+      },
+      "screenshots": {
+        "firstInstall": {
+          "file": "macos-arm64-target-first-install.png",
+          "sha256": "03c0d3177c64c96fa8dc2b77a74bf8e02e499ccc79ef82c352532addc96c95b9"
+        },
+        "available": {
+          "file": "macos-arm64-preview-available.png",
+          "sha256": "216444eada59929f73e51c306700862b837c2cb7b4545f0263ef96ad49627966"
+        },
+        "ready": {
+          "file": "macos-arm64-preview-ready.png",
+          "sha256": "6c1d5d2fc026dff89043cf88d4cd1fcbd8aa3c130d60c630ccdd89c5a2e3ce81"
+        },
+        "installed": {
+          "file": "macos-arm64-preview-installed.png",
+          "sha256": "7c972ca375b21dbda7017809c8cdae362aaa0b947539c764ea4d2f84cdb5ad6a"
+        }
+      }
+    },
+    "size": 2653,
+    "sha256": "fa293990a88afdad8d30c248f6abdedc5fe245a6e605e99ac3e54ffc19d8c71e"
+  },
+  "finalReview": "release_review: passed for exact source and macos-arm64 target; no unresolved Preview release blocker",
+  "result": "Preview published and native canary verified"
+}

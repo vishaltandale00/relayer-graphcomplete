@@ -564,6 +564,7 @@ if (primaryInstance) {
       recipeInstalled: (recipeId) => managedRecipeInstalled(managedRuntimeResolver, recipeId),
       recipeSupported: (recipeId) => managedRecipeSupported(managedRuntimeResolver, recipeId),
       diagnostics: providerDiagnostics,
+      onProgressChanged: modelAvailability.notifyReadinessProgress,
     });
     const publishCatalog = modelAvailability.publishCatalog;
     providerComposition = createProviderComposition({
@@ -579,7 +580,9 @@ if (primaryInstance) {
         runtimeRoot: providerRuntimeRoot,
         registry: productionProviderAdapterRegistry,
       }),
-      providerStatuses: () => productServer.providerStatuses(),
+      providerStatuses: async () => new Map([...await productServer.providerStatuses()].map(([id, status]) => [id, {
+        ...status, executionPreparing: readiness.isPreparingForProvider(id),
+      }])),
       runtimeDependencies: async (definition) => {
         if (definition.accessContract === "secret@1") {
           return productionProviderRuntimeDependencies(definition, {

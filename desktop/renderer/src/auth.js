@@ -3,7 +3,7 @@ import {
   completeProviderOnboarding,
   loadProviderOnboardingProjection,
 } from "./model-settings-api.js";
-import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload } from "./provider-ui-model.js";
+import { normalizeProviderDescriptor, providerConnectionErrors, providerCreationPayload, providerDefinitionStatus } from "./provider-ui-model.js";
 import {
   providerOnboardingCompletionIntent,
   providerOnboardingRecoveryAction,
@@ -32,6 +32,8 @@ let connectedDefinition;
 let onboardingHarness;
 let onboardingFamilyIntent;
 let onboardingProjection;
+let familyStepPending = null;
+let onboardingViewRevision = 0;
 const onboardingProjectionGate = createProviderOnboardingProjectionGate();
 let bound = false;
 const connectionCancellation = createProviderConnectionCancellationState();
@@ -74,6 +76,9 @@ function currentFormValues() {
 }
 
 function showProviderOptions() {
+  onboardingViewRevision += 1;
+  connectedDefinition = null;
+  onboardingProjectionGate.begin("");
   setConnectionCancellationAvailable(true);
   selectedDescriptor = null;
   connectionValues = null;
@@ -81,7 +86,11 @@ function showProviderOptions() {
   $("#providerSetupForm").classList.add("hidden");
   $("#providerFamilyStep").classList.add("hidden");
   const resumable = resumableProviderDefinitions(providerStatus);
-  $("#providerSetupOptions").innerHTML = `${resumable.map((definition) => `<div class="connected-provider-resume"><strong>${escapeHtml(definition.label)}</strong><small>Connected and ready for harness and family setup.</small><button type="button" class="primary" data-resume-provider-onboarding="${escapeHtmlAttribute(definition.id)}">Continue setup</button></div>`).join("")}${providerOptionsMarkup(providerStatus?.adapters ?? [])}`;
+  $("#providerSetupOptions").innerHTML = `${resumable.map((definition) => {
+    const status = providerDefinitionStatus(definition);
+    const message = status.usable ? "Connected and ready for harness and family setup." : status.label;
+    return `<div class="connected-provider-resume"><strong>${escapeHtml(definition.label)}</strong><small>${escapeHtml(message)}</small><button type="button" class="primary" data-resume-provider-onboarding="${escapeHtmlAttribute(definition.id)}" ${status.lifecycle === "preparing_execution" ? "disabled" : ""}>Continue setup</button></div>`;
+  }).join("")}${providerOptionsMarkup(providerStatus?.adapters ?? [])}`;
   $$('[data-resume-provider-onboarding]', $("#providerSetupOptions")).forEach((button) => {
     button.addEventListener("click", () => {
       connectedDefinition = resumable.find(({ id }) => String(id) === button.dataset.resumeProviderOnboarding) ?? null;
@@ -98,6 +107,9 @@ function showProviderOptions() {
 }
 
 function showProviderForm(adapterId, { showErrors = false } = {}) {
+  onboardingViewRevision += 1;
+  connectedDefinition = null;
+  onboardingProjectionGate.begin("");
   setConnectionCancellationAvailable(true);
   selectedDescriptor = normalizeProviderDescriptor(
     providerStatus.adapters.find((descriptor) => descriptor.adapterId === adapterId),
@@ -129,7 +141,8 @@ function chosenHarness() {
 }
 
 function finishIntentValid() {
-  return Boolean(chosenHarness()?.selectable && providerOnboardingCompletionIntent({
+  return Boolean(connectedDefinition && providerDefinitionStatus(connectedDefinition).usable
+    && chosenHarness()?.selectable && providerOnboardingCompletionIntent({
     providerId: connectedDefinition?.id,
     projection: onboardingProjection,
     harnessId: onboardingHarness,
@@ -215,13 +228,19 @@ function bindOnboardingChoices({ focus } = {}) {
 }
 
 function renderOnboardingChoices({ focus } = {}) {
+  const step = $("#providerFamilyStep");
+  const active = document.activeElement;
+  const identity = step.contains(active) ? [...active.attributes]
+    .filter(({ name }) => name === "id" || name.startsWith("data-onboarding-")) : [];
+  const selection = typeof active?.selectionStart === "number" ? [active.selectionStart, active.selectionEnd] : null;
   $("#onboardingHarnessOptions").innerHTML = onboardingHarnessOptionsMarkup(onboardingProjection, onboardingHarness);
   const harness = chosenHarness();
   $("#onboardingFamilyOptions").innerHTML = harness
     ? onboardingFamilyOptionsMarkup(harness, onboardingFamilyIntent ?? {})
     : `<p class="field-error" role="alert">${onboardingProjection.blockingReason?.message ?? "Choose a compatible harness to continue."}</p>`;
   $("#finishProviderSetup").disabled = !finishIntentValid();
-  const recovery = providerOnboardingRecoveryAction(onboardingProjection);
+  const preparing = providerDefinitionStatus(connectedDefinition).lifecycle === "preparing_execution";
+  const recovery = preparing ? null : providerOnboardingRecoveryAction(onboardingProjection);
   const recoveryButton = $("#refreshOnboardingProviderModels");
   recoveryButton.classList.toggle("hidden", recovery === null);
   recoveryButton.textContent = recovery?.label ?? "Refresh models";
@@ -230,9 +249,24 @@ function renderOnboardingChoices({ focus } = {}) {
     providerOnboardingRecoveryName(recovery, onboardingProjection?.provider?.label),
   );
   bindOnboardingChoices({ focus });
+  if (!focus && identity.length) {
+    const replacement = $$("button,input,select,textarea", step)
+      .find(control => identity.every(({ name, value }) => control.getAttribute(name) === value));
+    replacement?.focus();
+    if (selection) replacement?.setSelectionRange?.(...selection);
+  }
+  setStatus(preparing ? "Preparing execution configurations…" : onboardingProjection.blockingReason?.message
+    ?? "Choose a compatible harness and explicitly confirm a default family.");
 }
 
-async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
+function prepareFamilyStep(definition, options) {
+  const pending = loadFamilyStep(definition, options);
+  familyStepPending = pending;
+  return pending.finally(() => { if (familyStepPending === pending) familyStepPending = null; });
+}
+
+async function loadFamilyStep(definition, { preserveIntent = false } = {}) {
+  onboardingViewRevision += 1;
   if (!productApiAvailable) return completeOnboarding();
   const providerId = definition.id;
   const request = onboardingProjectionGate.begin(providerId);
@@ -258,8 +292,33 @@ async function prepareFamilyStep(definition, { preserveIntent = false } = {}) {
   const hasCompatibleHarness = onboardingProjection.harnesses.some((harness) => harness.selectable);
   $("#providerFamilyBack").textContent = hasCompatibleHarness ? "← Back" : "← Add a provider";
   renderOnboardingChoices();
-  setStatus(onboardingProjection.blockingReason?.message
-    ?? "Choose a compatible harness and explicitly confirm a default family.");
+}
+
+// Availability notifications reread presentation and persisted choices without
+// restarting authentication or completing defaults on the user's behalf.
+export async function refreshProviderOnboarding() {
+  if (providerStatus?.hasCompletedOnboarding !== false || $("#authScreen").classList.contains("hidden")
+    || $(".provider-setup-card")?.getAttribute("aria-busy") === "true") return;
+  await familyStepPending?.catch(() => {});
+  if (!$("#providerSetupForm").classList.contains("hidden")) return;
+  const revision = onboardingViewRevision;
+  const latest = await desktop.providers.status();
+  if (revision !== onboardingViewRevision || $("#authScreen").classList.contains("hidden")
+    || $(".provider-setup-card")?.getAttribute("aria-busy") === "true") return;
+  providerStatus = latest;
+  if (latest.hasCompletedOnboarding) return;
+  if (!$("#providerFamilyStep").classList.contains("hidden") && connectedDefinition) {
+    const definition = latest.definitions.find(({ id }) => String(id) === String(connectedDefinition.id));
+    if (!definition) { showProviderOptions(); return; }
+    connectedDefinition = definition;
+    if (providerDefinitionStatus(definition).lifecycle === "preparing_execution") {
+      // A pending catalog can omit every harness and family. Keep the draft;
+      // current provider status disables Finish until persisted readiness returns.
+      renderOnboardingChoices();
+      return;
+    }
+    await prepareFamilyStep(definition, { preserveIntent: true });
+  } else if (!$("#providerSetupOptions").classList.contains("hidden")) showProviderOptions();
 }
 
 async function connectSelectedProvider(event) {

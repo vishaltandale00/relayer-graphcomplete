@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 2,
+  "channel": "preview",
+  "target": "macos-arm64",
+  "version": "0.2.41",
+  "sourceCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+  "candidateWorkflowRunId": "39182768486",
+  "candidateWorkflowRunAttempt": "1",
+  "candidateArtifactId": "12157239848",
+  "candidateArtifactDigest": "sha256:3ce9eb779d8845a6c9b7788d6d43222cc8358992111139169e4a0defcc273cbd",
+  "workflowRunId": "39185504259",
+  "workflowRunAttempt": "1",
+  "publishedAt": "2026-10-19T01:29:33.004Z",
+  "artifacts": [
+    {
+      "name": "Relayer-0.2.41-mac-arm64.dmg",
+      "size": 208177418,
+      "sha256": "78a0e6e21aed75ea34b56485185b56583222ba9f97f7cd5078e3be1e488666fc",
+      "sha512": "pkijripqQUSx5C0qds60BfmnyI2me2+bA+HBEIVgLUae0iEE6rhPcqGGrG3ZapTl2khUVlCbPe7DaoeLksRwKQ==",
+      "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.dmg"
+    },
+    {
+      "name": "Relayer-0.2.41-mac-arm64.zip",
+      "size": 208309941,
+      "sha256": "6ef5d3fadebdfac3de2d408781c6d785c01dcb054a4a3bc0671c3f91be549144",
+      "sha512": "Gg6k7QncXhTu6YkK95JO0QlL2mcjPBWULjj8F8I6q3Ig0LD3zqafxrjuNRcgXSgiiBb5qM3abOpVH1Q4sUDo0w==",
+      "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.zip"
+    },
+    {
+      "name": "Relayer-0.2.41-mac-arm64.dmg.blockmap",
+      "size": 217254,
+      "sha256": "7eb7e9904c9704ccba5b00d1c470c01395706a61f804f300a9b9b0f06b9206ae",
+      "sha512": "Fq7BNY6PNZPqX8YeIMNeKvboAYHP/6RN3cvP2ZTKzznmWrV7BEHIm1h0k75mv+n+Qnm1jkPdv7DLHxN+EwwdyQ==",
+      "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.dmg.blockmap"
+    },
+    {
+      "name": "Relayer-0.2.41-mac-arm64.zip.blockmap",
+      "size": 217977,
+      "sha256": "2c1ceecd4a2cc960e191e50c04a326452a70965a4396eedb2882a403a061fdb7",
+      "sha512": "ThrQwEkVIWEnj7ssjz82LyHGP3SpJw4xefnxsJdxiEbRWa78XD7XmMFQKdvrnpPikk+64CFbstjylyoqdGlqIw==",
+      "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64.zip.blockmap"
+    },
+    {
+      "name": "Relayer-0.2.41-mac-arm64-SHA256SUMS.txt",
+      "size": 190,
+      "sha256": "dc7a35ead1cbc7028b8763a7794afba66cb263f260aa818b00c7fc7205017cc3",
+      "sha512": "hIHFJjPfObiwDdIPj0AJ5Rv6sILlID4lzIJ6MbN0svJSKjj9gpJ7Edxqnwkid0/lhFV3arL1S9+sMWzNSVM2qw==",
+      "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64-SHA256SUMS.txt"
+    },
+    {
+      "name": "Relayer-0.2.41-mac-arm64-RELEASE.json",
+      "size": 1195,
+      "sha256": "4779cd9f565d5d4ed6068272bf6b405185df5909bb0369125f536672c63c0ad1",
+      "sha512": "hwmvauKL8adWqPkj5a6+3sjXHsod9g3lyoWmlHupyTU7px6FC5dr0wrtpghCxG4Rdb9UdpIpe2hJF9pvoautBw==",
+      "key": "desktop/macos/arm64/releases/0.2.41/Relayer-0.2.41-mac-arm64-RELEASE.json"
+    }
+  ],
+  "manifest": {
+    "key": "desktop/macos/arm64/beta-mac.yml",
+    "size": 697,
+    "sha256": "c1898b2e7113d549ea05449bc9b4f6537939e9d03de24c39230efd332e3e0c4e"
+  }
+}
