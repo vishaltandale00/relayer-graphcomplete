@@ -16,6 +16,18 @@ Exporting note screenshots is #703, decided 2026-10-07. Export and shares keep e
 
 `npm run test:desktop:artifact-viewer` runs the real `desktop/main/index.mjs` with the `fixture.artifact-viewer` harness in place of Codex, and checks P1 and P2 together. `RELAYER_ARTIFACT_VIDEO=<file>.mp4` records the run with captions.
 
+The current runner also records the accepted source action, canonical artifact
+layer/node and actual viewer identity, verifies Graph/Esc return to the source
+graph, reloads the saved thread and follows the same action without another
+execution. This extends ART-006 through the saved graph navigation boundary.
+Its results include a source workspace digest and explicit limitations. The
+fixture authors through the real graph client and acceptance boundary but
+replaces the model and bypasses provider readiness/authentication. A renderer
+reload is not a process restart or application upgrade. Connected-profile and
+separately authorized live authoring qualification follow the
+[release runbook](../../desktop-release-operations.md#existing-profile-candidate-qualification).
+These runner changes do not extend the historical passing evidence below.
+
 ## Files
 
 - `artifact-viewer-p2-demo.mp4`: the recorded run.

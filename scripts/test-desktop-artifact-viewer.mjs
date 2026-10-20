@@ -2,17 +2,20 @@
 // Runs the actual desktop entry point with the artifact-viewer fixture harness in
 // place of codex.basic: no model, no network inference. It sends one message, opens
 // every artifact the fixture authored, checks the viewer and saves screenshots.
+// The accepted website journey is repeated after a renderer reload of the saved
+// thread. This proves deterministic authoring/navigation, not live model output,
+// a process restart, or connected-provider readiness (which is bypassed below).
 //
 //   npm run test:desktop:artifact-viewer
 //
 // RELAYER_ARTIFACT_EVIDENCE_DIR overrides where screenshots and results.json go.
 import { app, BrowserWindow, shell } from "electron";
-import { execFileSync } from "node:child_process";
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import sharp from "sharp";
 
 import { createViewerRecorder } from "./artifact-viewer-video.mjs";
+import { workspaceProvenance } from "./recursive-live-run-provenance.mjs";
 
 import { artifactViewerFixtureFactory, ORDER_DESK_PORT } from "@relayer/eval-runner";
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
@@ -21,8 +24,7 @@ import { ModelCatalogService } from "../desktop/main/models/model-catalog-servic
 
 const root = resolve(import.meta.dirname, "..");
 // The exact source this run tests: a pass is claimed only for that snapshot (AGENTS.md).
-const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-const source = { commit: git("rev-parse", "HEAD"), clean: git("status", "--porcelain", "--untracked-files=no") === "" };
+const source = workspaceProvenance(root);
 const profile = join(root, ".relayer", `artifact-viewer-evidence-${Date.now()}`);
 const output = process.env.RELAYER_ARTIFACT_EVIDENCE_DIR ?? join(root, ".relayer", "evidence", "artifact-viewer");
 await rm(output, { recursive: true, force: true });
@@ -41,6 +43,7 @@ shell.openPath = async (path) => { external.push({ kind: "path", path }); return
 
 let productSession;
 let product;
+let fixtureExecutions = 0;
 const startRuntime = GraphCompleteRuntimeService.prototype.start;
 GraphCompleteRuntimeService.prototype.start = function () {
   this.startupTimeoutMs = 60_000;
@@ -48,6 +51,7 @@ GraphCompleteRuntimeService.prototype.start = function () {
     const fixture = artifactViewerFixtureFactory(context);
     const complete = fixture.complete.bind(fixture);
     fixture.complete = async (...args) => {
+      fixtureExecutions += 1;
       try { return await complete(...args); } catch (error) { console.error("FIXTURE_ERROR", error?.stack ?? error, JSON.stringify({ status: error?.status, code: error?.code, path: error?.path, issues: error?.issues })); throw error; }
     };
     return fixture;
@@ -76,6 +80,7 @@ ModelCatalogService.prototype.beforeInference = async () => [];
 
 const QUESTION = "Build a launch kit for Tidewater Coffee: a website, an investor brief, a promo video and the brand assets. Let me open each one.";
 const results = [];
+const journey = [];
 const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
 async function waitFor(label, check, timeoutMs = 30_000) {
@@ -155,13 +160,49 @@ const say = (text) => recorder?.caption(text);
 const hold = (ms) => (recorder ? sleep(ms) : undefined);
 
 async function openArtifact(window, groupTitle, label) {
-  await js(window, `document.querySelector("#artifactViewerClose")?.click()`);
+  await js(window, `document.querySelector('.artifact-toolbar button[title="Back to the graph (Esc)"]')?.click()`);
   const nodeId = await waitFor(`node ${groupTitle}`, () => js(window, `[...document.querySelectorAll("[data-node]")].find((n) => n.textContent.includes(${JSON.stringify(groupTitle)}))?.dataset.node ?? null`));
   await js(window, `document.querySelector('[data-node="${nodeId}"]').click()`);
   await hold(1200);
   await waitFor(`action ${label}`, () => js(window, `[...document.querySelectorAll("[data-action-id]")].some((a) => a.textContent.trim().includes(${JSON.stringify(label)}))`));
-  await js(window, `[...document.querySelectorAll("[data-action-id]")].find((a) => a.textContent.trim().includes(${JSON.stringify(label)})).click()`);
+  const origin = await workspace(window);
+  const actionId = await js(window, `(() => { const action = [...document.querySelectorAll("[data-action-id]")].find((a) => a.textContent.trim().includes(${JSON.stringify(label)})); const id = action.dataset.actionId; action.click(); return id; })()`);
   await waitFor(`viewer for ${label}`, () => js(window, `document.querySelector(".artifact-viewer") !== null`));
+  return { nodeId, actionId, origin };
+}
+
+const workspace = (window) => js(window, `import("./src/state.js").then(({ appState, viewState }) => ({ threadId: viewState.currentThreadId, turnId: viewState.currentInteractionId, layerId: appState.visibleLayer?.layer?.id, selectedNodeId: viewState.selectedNodeId, layerPath: viewState.layerPath }))`);
+const viewerPresentation = (window) => js(window, `import("./src/threads.js").then(({ artifactReviewPresentation }) => { const shown = artifactReviewPresentation(); if (!shown) return null; const { root, ...identity } = shown; return identity; })`);
+
+async function acceptedJourney(window, threadId, opened, stage) {
+  const detail = await request(`/api/threads/${threadId}`);
+  const origin = opened.origin;
+  const preserved = await workspace(window);
+  const interaction = detail.interactions.find((item) => String(item.id) === String(origin.turnId));
+  const root = interaction?.completionOutput?.rootLayer;
+  const action = root?.actions.find((item) => String(item.id) === String(opened.actionId));
+  if (!action?.targetLayerId) throw new Error("The clicked website action is missing from the accepted graph.");
+  const layer = await request(`/api/threads/${threadId}/interactions/${interaction.id}/layers/${action.targetLayerId}`);
+  const shown = await viewerPresentation(window);
+  const node = layer.nodes[0];
+  check(`ART-006 ${stage}: accepted navigation reaches the exact artifact`,
+    interaction.completionStatus === "accepted" && action.state === "accepted"
+      && action.kind === "navigate" && String(action.sourceNodeId) === String(opened.nodeId)
+      && layer.layer.state === "accepted" && layer.layer.renderer === "artifact"
+      && layer.nodes.length === 1 && node?.state === "accepted" && node?.artifact?.kind === "website"
+      && String(shown?.layerId) === String(layer.layer.id) && String(shown?.selectedNodeId) === String(node?.id)
+      && String(origin.layerId) === String(root.layer.id) && JSON.stringify(preserved) === JSON.stringify(origin),
+    JSON.stringify({ threadId, turnId: interaction.id, sourceLayerId: root.layer.id, actionId: action.id, artifactLayerId: layer.layer.id, artifactNodeId: node?.id, shown }));
+  const entry = { stage, origin, actionId: action.id, artifactLayerId: layer.layer.id, artifactNodeId: node.id, shown, interactions: detail.interactions.length, fixtureExecutions };
+  journey.push(entry);
+  return entry;
+}
+
+async function returnedToOrigin(window, entry) {
+  const restored = await workspace(window);
+  check(`ART-006 ${entry.stage}: return preserves the source graph`,
+    JSON.stringify(restored) === JSON.stringify(entry.origin), JSON.stringify(restored));
+  entry.returned = restored;
 }
 
 async function viewerLoaded(window) {
@@ -233,8 +274,9 @@ async function run(window) {
 
   // Website: live, isolated, address strip, toolbar hides.
   say("Click a node, then its action: the website opens in the viewer");
-  await openArtifact(window, "Landing page", "Open the site");
+  const firstOpen = await openArtifact(window, "Landing page", "Open the site");
   let view = await viewerLoaded(window);
+  const firstJourney = await acceptedJourney(window, thread.id, firstOpen, "first open");
   await sleep(500);
   check("ART-007 website", view.webContents.getURL().startsWith("relayer-artifact://view/index.html"), view.webContents.getURL());
   const badges = await js(window, `[...document.querySelectorAll("[data-badge]")].map((badge) => badge.title ? badge.textContent + " (" + badge.title + ")" : badge.textContent).join(", ")`);
@@ -278,6 +320,31 @@ async function run(window) {
   await hold(2500);
   await closeViewer(window);
   check("ART-006 Esc returns to the graph", true, "viewer closed by Escape inside the artifact");
+  await returnedToOrigin(window, firstJourney);
+
+  // Discard the renderer's live graph/cache and reconstruct the saved thread
+  // through the ordinary URL route. Do not send a new message or call fixture
+  // authoring: the accepted action and artifact must survive this boundary.
+  await window.loadURL(`${productSession.origin}/?threadId=${thread.id}`);
+  await waitFor("saved launch kit after reload", () => js(window, `import("./src/state.js").then(({ appState, viewState }) => String(viewState.currentThreadId) === "${thread.id}" && String(appState.visibleLayer?.layer?.id) === "${firstJourney.origin.layerId}" && Boolean(document.querySelector('[data-node="${firstOpen.nodeId}"]')))`));
+  const savedOpen = await openArtifact(window, "Landing page", "Open the site");
+  view = await viewerLoaded(window);
+  const savedJourney = await acceptedJourney(window, thread.id, savedOpen, "saved thread after reload");
+  const savedCart = await view.webContents.executeJavaScript(`document.querySelector("#cartCount").textContent`);
+  check("ART-006 saved navigation reopens content without another execution",
+    savedJourney.interactions === firstJourney.interactions
+      && savedJourney.fixtureExecutions === firstJourney.fixtureExecutions
+      && String(savedJourney.actionId) === String(firstJourney.actionId)
+      && String(savedJourney.artifactNodeId) === String(firstJourney.artifactNodeId)
+      && String(savedJourney.artifactLayerId) === String(firstJourney.artifactLayerId)
+      && view.webContents.getURL().startsWith("relayer-artifact://view/index.html") && savedCart === "1",
+    JSON.stringify({ interactions: savedJourney.interactions, fixtureExecutions, actionId: savedJourney.actionId, artifactLayerId: savedJourney.artifactLayerId, artifactNodeId: savedJourney.artifactNodeId, cart: savedCart }));
+  await shot(window, "23-saved-thread-reopened");
+  // Exercise the visible Graph control as well as Escape.
+  await js(window, `document.querySelector('.artifact-toolbar button[title="Back to the graph (Esc)"]').click()`);
+  await waitFor("Graph closes viewer", () => js(window, `document.querySelector(".artifact-viewer") === null`));
+  await waitFor("Graph closes native view", () => artifactView(window) === null);
+  await returnedToOrigin(window, savedJourney);
 
   // Reopen: storage is fresh every time.
   say("Reopening starts fresh, and the artifact cannot reach Relayer (the probe's blocked request shows as a page error)");
@@ -556,8 +623,12 @@ async function run(window) {
 
   await hold(3000);
   if (recorder) await recorder.stop();
+  const finalSource = workspaceProvenance(root);
+  check("evidence source remains unchanged", JSON.stringify(finalSource) === JSON.stringify(source), JSON.stringify(finalSource));
   const failed = results.filter((result) => !result.ok);
-  await writeFile(join(output, "results.json"), JSON.stringify({ at: new Date().toISOString(), source, entryPoint: "desktop/main/index.mjs", inference: false, results, external }, null, 2));
+  await writeFile(join(output, "results.json"), JSON.stringify({ at: new Date().toISOString(), source, entryPoint: "desktop/main/index.mjs", inference: false,
+    limitations: ["fixture authoring replaces the model", "provider readiness and authentication are bypassed", "reload is a renderer reload, not a process restart or application upgrade", "this is a development app, not signed-candidate proof"],
+    journey, results, external }, null, 2));
   console.log(`\n${results.length - failed.length} passed, ${failed.length} failed. Evidence: ${output}`);
   return failed.length === 0;
 }

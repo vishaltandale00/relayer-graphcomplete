@@ -7,6 +7,7 @@ import { humanTaskInvocationResults, observeHumanTaskPresentation } from "./huma
 import { initializeLayerSelections } from "./product-workspace/layer-selection.js";
 import {
   refreshAccount,
+  refreshProviderOnboarding,
   setProviderOnboardingCompletionHandler,
   showApplication,
 } from "./auth.js";
@@ -567,6 +568,7 @@ async function boot() {
       subscribe: desktop.models.onChanged,
       refresh: async () => {
         await refreshProviderSettings();
+        await refreshProviderOnboarding();
         await refreshProviderModelUi();
       },
       onError: (error) => toast(error.message),

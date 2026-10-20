@@ -286,6 +286,7 @@ export class ProviderDefinitionService {
         return publicDefinition({
           ...definition,
           connected: override?.connected ?? (status?.connected === true),
+          executionPreparing: !override && status?.executionPreparing === true,
           unavailableReason: override?.unavailableReason ?? (status
             ? status.unavailableReason ?? null
             : {
