@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { GraphCompleteRuntimeService } from "../desktop/main/services/graphcomplete-runtime.mjs";
 import { RelayerAppServerService } from "../desktop/main/services/relayer-app-server.mjs";
@@ -16,6 +16,9 @@ import { newThreadRequestBody } from "../desktop/renderer/src/interaction-reques
 const repositoryRoot = resolve(import.meta.dirname, "..");
 const services = [];
 const directories = [];
+let selectorRuntime;
+let selectorRuntimeDirectory;
+let selectorRuntimeSession;
 
 const flows = [
   {
@@ -71,6 +74,48 @@ const flows = [
     expectedModelIds: ["alibaba/qwen3.8-max", "deepseek/deepseek-v4-pro-0813", "zai/glm-5.3"],
   },
 ];
+
+// The six selector flows have separate product databases. Their immutable,
+// zero-inference graph catalog needs one real cold publication, not six.
+beforeAll(async () => {
+  selectorRuntimeDirectory = await mkdtemp(join(tmpdir(), "relayer-provider-selector-runtime-"));
+  const started = performance.now();
+  const publications = [];
+  selectorRuntime = new GraphCompleteRuntimeService({
+    userDataDirectory: selectorRuntimeDirectory,
+    graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
+    configurationPaths: [
+      join(repositoryRoot, "harnesses", "codex-basic.yaml"),
+      join(repositoryRoot, "harnesses", "claude-basic.yaml"),
+      join(repositoryRoot, "harnesses", "prime-agent-basic.yaml"),
+    ],
+    fetchRequest: async (url, options) => {
+      const start = performance.now();
+      const response = await fetch(url, options);
+      const path = new URL(url).pathname;
+      if (path.startsWith("/api/control/instruction-graphs/")) {
+        publications.push({ versionKey: path.split("/").at(-1), milliseconds: Math.round(performance.now() - start), status: response.status });
+      }
+      return response;
+    },
+    acquireProviderExecution: async () => {
+      throw new Error("Provider execution is outside this zero-inference selector test.");
+    },
+  });
+  try {
+    selectorRuntimeSession = await selectorRuntime.start();
+  } finally {
+    process.stderr.write(`Provider selector cold runtime ${JSON.stringify({ milliseconds: Math.round(performance.now() - started), publications })}\n`);
+  }
+}, 45_000);
+
+afterAll(async () => {
+  try {
+    await selectorRuntime?.close();
+  } finally {
+    if (selectorRuntimeDirectory) await rm(selectorRuntimeDirectory, { recursive: true, force: true });
+  }
+});
 
 afterEach(async () => {
   for (const service of services.splice(0).reverse()) await service.close();
@@ -133,26 +178,12 @@ describe("straightforward discovered-model provider flows", () => {
 async function productFixture() {
   const dataDirectory = await mkdtemp(join(tmpdir(), "relayer-provider-straightforward-"));
   directories.push(dataDirectory);
-  const runtime = new GraphCompleteRuntimeService({
-    userDataDirectory: dataDirectory,
-    graphServerBinary: join(repositoryRoot, "target", "debug", "relayer-graph-server"),
-    configurationPaths: [
-      join(repositoryRoot, "harnesses", "codex-basic.yaml"),
-      join(repositoryRoot, "harnesses", "claude-basic.yaml"),
-      join(repositoryRoot, "harnesses", "prime-agent-basic.yaml"),
-    ],
-    acquireProviderExecution: async () => {
-      throw new Error("Provider execution is outside this zero-inference selector test.");
-    },
-  });
-  services.push(runtime);
-  const runtimeSession = await runtime.start();
   const product = new RelayerAppServerService({
     userDataDirectory: dataDirectory,
     binaryPath: join(repositoryRoot, "target", "debug", "relayer-app-server"),
     webDirectory: join(repositoryRoot, "desktop", "renderer"),
     permissionCatalogPath: join(repositoryRoot, "permissions", "desktop.json"),
-    runtimeSession,
+    runtimeSession: selectorRuntimeSession,
     defaultHarnessConfiguration: "codex-basic",
   });
   services.push(product);

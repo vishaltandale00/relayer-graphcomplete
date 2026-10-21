@@ -1,0 +1,195 @@
+{
+  "baseCommit": "df86e63300f289e661f2faee3e660c23ba618f80",
+  "scope": "Claude and Prime instruction-graph default extension changed source; excludes evidence",
+  "files": [
+    {
+      "path": "desktop/eval-main/configuration-paths.mjs",
+      "sha256": "7b9906b9e14946863ec04bbe9bffcfb489cb75ec38ebb52fd6ed1b0f1b23e520"
+    },
+    {
+      "path": "desktop/eval-main/eval-service.mjs",
+      "sha256": "b016845aa67dc3e6a3ff98c95796f9db0b3e71f727a718f637527299fe8370a0"
+    },
+    {
+      "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+      "sha256": "0c5c64e56a9c21b811d22d1837446133e7ba4198f973a8c9cc8b543077d06f3d"
+    },
+    {
+      "path": "desktop/eval-main/instruction-graph-metrics.mjs",
+      "sha256": "6a86c2a475bdfcf9a815f0beed6cba744a75d85e50dd6189a39c59ae2b7be5b3"
+    },
+    {
+      "path": "desktop/eval-renderer/run-model.js",
+      "sha256": "880c9ae9e130f4298027c158ef5f5d479b908dc2077c1631d2761871fea5abad"
+    },
+    {
+      "path": "desktop/main/managed-runtimes/recipes.mjs",
+      "sha256": "fa27f660a6a110d139f1b3b43c9c06984139eedfb0f8391a6824d4d267eba986"
+    },
+    {
+      "path": "desktop/main/services/graphcomplete-runtime.mjs",
+      "sha256": "b359e342d37454ff217f545fc9f9dcadecc1b017b12d12715e8a2aacafd0cdf7"
+    },
+    {
+      "path": "desktop/main/services/prime-agent-runtime.mjs",
+      "sha256": "ed200b5244b4bf46c67e0f870cb26fd3ee31f5d05dd58f15fb56141d820f7d4d"
+    },
+    {
+      "path": "desktop/packaging/verify-bundled-app-server.mjs",
+      "sha256": "b70459141fa45849cda925dd5dbd0aa0545f9bd44cc5cfb5f608b4ec2a76dc05"
+    },
+    {
+      "path": "desktop/shared/telemetry-module-inventory.mjs",
+      "sha256": "34524115c2ac7e6dff84ad5693ef861ecf4db7b2bf557165649f7335f01f6927"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "1e90bea0b1cf05ceaf7cedb28036840d4841f7a57c2d39d9611ad3ce64ffa415"
+    },
+    {
+      "path": "docs/decisions/0006-harness-provider-agnostic-product-boundary.md",
+      "sha256": "0a6525aeb80188abc1e8b3c64b0269908c203ae9f1232363cb1cc0f02088dc8f"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "b3b1a051f000affdcb44122dd154eb386ef99ddae80860cbf7321f837dc271a4"
+    },
+    {
+      "path": "fixtures/claude-instruction-graph-v2.json",
+      "sha256": "68d888961be806b2fcf947f564fcb909ff2d8704069a8fe4b28eb8fe3f2fe0b6"
+    },
+    {
+      "path": "fixtures/prime-instruction-graph-v2.json",
+      "sha256": "771760582a2ecac82007b240260553ffbbd9d29688d0cb7684535b98705d10b3"
+    },
+    {
+      "path": "harnesses/claude-basic.yaml",
+      "sha256": "4c2bce32cd04cdb594550743bffd6644d914ab43743d0c8c730760dd2ba46d13"
+    },
+    {
+      "path": "harnesses/claude-full-prompt-control.yaml",
+      "sha256": "e736e1b847ca101317a0089ba8bae0e4b23a85d13523c4ed59b8f54e849201ef"
+    },
+    {
+      "path": "harnesses/claude-instruction-graph-v2.yaml",
+      "sha256": "9fc4c2007ce785f08c3641959123eda6017ef2d6fb82a2976390b06a500d2caa"
+    },
+    {
+      "path": "harnesses/prime-agent-basic.yaml",
+      "sha256": "5bbb7910367123212539d2568f2782e02c8a74933c2d1db4f408aa62612b64a3"
+    },
+    {
+      "path": "harnesses/prime-agent-full-prompt-control.yaml",
+      "sha256": "a2bafc208be15d2be49651a49aa1b174cf93f6d62504ad2768c6d320b982355a"
+    },
+    {
+      "path": "harnesses/prime-agent-instruction-graph-v2.yaml",
+      "sha256": "e73a8b7488800821d0214493fdc57609819dcca9f46a1c1dca806a26f972c9f0"
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "ba5fcbcaaf70d7de01472ebad8fa41fa7c083825c5394fa339bcb6cae97a4aff"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/claude-basic.ts",
+      "sha256": "2ebcc31c12f6892f5bb1bb513b43ccdcafb83256c9c624bcc22609c580bfc68f"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/claude-instruction-graph-v2.ts",
+      "sha256": "ed90f5555f9d63aac0d578ad6bc82fd41dc15a43dd1b083b943c0649dfb9222a"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-agent.ts",
+      "sha256": "8436c4845294c3d6ecffdf9567a2dd0bc1949a7c7ee17fc79e5592d5991b7a31"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/prime-instruction-graph-v2.ts",
+      "sha256": "8de4d5cd776359c3f8edbfe917cffdbd9f54c59ecfd4de9eb666a6ed2ff7e3d3"
+    },
+    {
+      "path": "packages/harness-host/src/index.ts",
+      "sha256": "c2dd9c3454cbf15bc537876a13864f95bf8c65b7c25694f0ed054f45e901f633"
+    },
+    {
+      "path": "packages/harness-host/src/instruction-graph-corpora.ts",
+      "sha256": "09aa3d14089557ce7de33cafc7c41346838abd5409ae02bafb9cdb1730a24b30"
+    },
+    {
+      "path": "packages/harness-host/test/claude-basic.test.ts",
+      "sha256": "ceb29afb22a83461875789c9a2d9d946c36d43c04d0b3973746d575162cd639c"
+    },
+    {
+      "path": "packages/harness-host/test/host-instruction-promotion.test.ts",
+      "sha256": "bbe7b2555fc4df6c04705b219d615cda581be40cccdf401ac5b703f69a37e96c"
+    },
+    {
+      "path": "packages/harness-host/test/instruction-graph-corpora.test.ts",
+      "sha256": "ce412154e45405dfdb95a28bcf13bf24036c7c9fd5b6d2eb4cb637b3a9803ac5"
+    },
+    {
+      "path": "packages/harness-host/test/prime-agent.test.ts",
+      "sha256": "97ff27ef5ed7bdeed9fa9356333c6b1881a730b309f3006d6ea16d20e677ef1f"
+    },
+    {
+      "path": "packages/harness-host/test/prime-instruction-graph-v2.test.ts",
+      "sha256": "3193d007f06bac73d6dd016c2b6eff918a497b7370cb286a0dcf23e6f491a268"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/__init__.py",
+      "sha256": "26c3aabd18c069011e35a147e26cc971ac4a84591e0eed458d3e70e5923c271e"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/authoring.py",
+      "sha256": "f6426fa64a18cec59e628b0d086abf6fee4fd22ad70c8160874abcb280188002"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/instructions.py",
+      "sha256": "8a3bb9156443516e0fab5a8d93638c329318a41c7be448720095140af0aa0436"
+    },
+    {
+      "path": "python/relayer-graph/src/relayer_graph/session.py",
+      "sha256": "ede16ab8a5d69db0c6db57b4e0b27dcac560c28568841b90372cd9f64d678c6d"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_instructions.py",
+      "sha256": "a121959558f2b3e0dbe6d68ab1865952b8b2f9b52b979b41b35668827f24de41"
+    },
+    {
+      "path": "python/relayer-graph/tests/test_prime_instruction_recipes.py",
+      "sha256": "d15c13a538d4b700554f37139711012e817ba13dd48b130dfe97b4111a30990f"
+    },
+    {
+      "path": "test/desktop-shell.test.mjs",
+      "sha256": "72f743609cf3ed2c47aac0e764dcd3d362647c70010eaf6e17b746cf4453f3bd"
+    },
+    {
+      "path": "test/eval-configuration-paths.test.mjs",
+      "sha256": "e0b8751fb88e3ed736ada68386c04d48b74de39b946af5b03a91c747b0510274"
+    },
+    {
+      "path": "test/eval-instruction-graph.test.mjs",
+      "sha256": "774a338d4c952ebb3138c5cd34122ea8682e83df14ebfcbd6aaf6c8f8d1c2df8"
+    },
+    {
+      "path": "test/instruction-graph-e2e.test.mjs",
+      "sha256": "e7ef4e59fff35fa22ac457afe963ab98fc34b8ee52a9e8ca6d400c3ee33b9ecd"
+    },
+    {
+      "path": "test/prime-visual-integration.test.mjs",
+      "sha256": "cd923c1b4465ec391487d43443f100bcb88d6139beebed2e599ebf3b3b080e61"
+    },
+    {
+      "path": "test/provider-straightforward-flow.test.mjs",
+      "sha256": "0a2678dd7dbcc3ceb3190e57ba09e5b70911533b18700f73fa963d6ce631f103"
+    },
+    {
+      "path": "test/support/prime-visual-fixture.mjs",
+      "sha256": "ecd36b14c0838c5c4ca436bb4796109f14653eef04dc36cf6b1cb71a9f145407"
+    },
+    {
+      "path": "vendor/prime-agent/manifest.json",
+      "sha256": "a3d911a5ec66ec25c78b3e88b1de0a8b74ab06c680c79b65832f225d1fb169b4"
+    }
+  ],
+  "digest": "a1672ab91ac1c57b7eca66f701efefee14e84e0d88fe192f89cf88d01bdd6e0b"
+}

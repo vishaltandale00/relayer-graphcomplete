@@ -1,0 +1,60 @@
+{
+  "sourceSnapshotDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
+  "command": "npm run desktop:pack",
+  "exitCode": 0,
+  "target": "macos-arm64",
+  "artifactMode": "unsigned development",
+  "localArtifactPath": ".relayer/claude-prime-packaged-app-final/mac-arm64/Relayer Dev.app",
+  "configurations": [
+    {
+      "name": "claude-basic",
+      "revision": 13,
+      "settings": {
+        "personalPresentationVersion": "personal-presentation-v6",
+        "promptProfile": "instruction-graph-v2",
+        "instructionGraphVersionKey": "claude-instruction-graph-v2",
+        "instructionGraphDigest": "2580a10176e39066aeb44f7e9dc022e78d0e0d0c21502289e1822f79d51c4c8b"
+      },
+      "sha256": "4c2bce32cd04cdb594550743bffd6644d914ab43743d0c8c730760dd2ba46d13"
+    },
+    {
+      "name": "prime-agent-basic",
+      "revision": 15,
+      "settings": {
+        "personalPresentationVersion": "personal-presentation-v6",
+        "thinkingLevel": "medium",
+        "rlmMaxDepth": 1,
+        "prewarmIpythonKernel": true,
+        "promptProfile": "instruction-graph-v2",
+        "instructionGraphVersionKey": "prime-agent-instruction-graph-v2",
+        "instructionGraphDigest": "146eb4b1b68001ce0281d77f234bdc41a015d52053e86636df1726478a556f6a"
+      },
+      "sha256": "5bbb7910367123212539d2568f2782e02c8a74933c2d1db4f408aa62612b64a3"
+    }
+  ],
+  "modules": [
+    {
+      "path": "implementations/claude-instruction-graph-v2.js",
+      "sha256": "f0eed8e019c85a9a6d00187dd5062cff6bec77d1273708e67963767b0ae51b1d"
+    },
+    {
+      "path": "implementations/prime-instruction-graph-v2.js",
+      "sha256": "9448a893a3fac868368f65e25dd407ae01f6b9975ca04919b8b170b716d81d0a"
+    },
+    {
+      "path": "instruction-graph-corpora.js",
+      "sha256": "500a1c5bbf9f083e67549105d617f0e8e076a9008d9c203c3dcc22ccca2cbc97"
+    }
+  ],
+  "pythonPackageTreeSha256": "e9ad9a3eae872e7d2d26fffedcd10a8f1507da5f1fa50bbf93a6ef12b00b5142",
+  "exactSourceConfiguration": true,
+  "exactCompiledModules": true,
+  "primeIntegrity": true,
+  "afterPack": "passed",
+  "cache": "Verified packaging runtime cache hit; standard unsigned assembly and afterPack passed. No release or notarization claim.",
+  "managedRecipe": {
+    "path": "main/managed-runtimes/recipes.mjs",
+    "sha256": "fa27f660a6a110d139f1b3b43c9c06984139eedfb0f8391a6824d4d267eba986",
+    "exactSource": true
+  }
+}

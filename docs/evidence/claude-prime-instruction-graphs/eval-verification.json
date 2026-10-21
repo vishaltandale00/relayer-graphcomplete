@@ -1,0 +1,142 @@
+{
+  "schemaVersion": 1,
+  "scope": "Provider-specific frozen controls and matched instruction-graph Eval comparisons",
+  "sourceScope": {
+    "files": [
+      {
+        "path": "desktop/eval-main/configuration-paths.mjs",
+        "sha256": "7b9906b9e14946863ec04bbe9bffcfb489cb75ec38ebb52fd6ed1b0f1b23e520"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+        "sha256": "0c5c64e56a9c21b811d22d1837446133e7ba4198f973a8c9cc8b543077d06f3d"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-metrics.mjs",
+        "sha256": "6a86c2a475bdfcf9a815f0beed6cba744a75d85e50dd6189a39c59ae2b7be5b3"
+      },
+      {
+        "path": "desktop/eval-main/eval-service.mjs",
+        "sha256": "b016845aa67dc3e6a3ff98c95796f9db0b3e71f727a718f637527299fe8370a0"
+      },
+      {
+        "path": "desktop/eval-renderer/run-model.js",
+        "sha256": "880c9ae9e130f4298027c158ef5f5d479b908dc2077c1631d2761871fea5abad"
+      },
+      {
+        "path": "test/eval-configuration-paths.test.mjs",
+        "sha256": "e0b8751fb88e3ed736ada68386c04d48b74de39b946af5b03a91c747b0510274"
+      },
+      {
+        "path": "test/eval-instruction-graph.test.mjs",
+        "sha256": "774a338d4c952ebb3138c5cd34122ea8682e83df14ebfcbd6aaf6c8f8d1c2df8"
+      },
+      {
+        "path": "harnesses/claude-full-prompt-control.yaml",
+        "sha256": "e736e1b847ca101317a0089ba8bae0e4b23a85d13523c4ed59b8f54e849201ef"
+      },
+      {
+        "path": "harnesses/prime-agent-full-prompt-control.yaml",
+        "sha256": "a2bafc208be15d2be49651a49aa1b174cf93f6d62504ad2768c6d320b982355a"
+      }
+    ],
+    "digest": "c91e258a6399c12134be8c34e2e760ec41e8df1752be845f9e0587f1433f1016"
+  },
+  "additionalConfigurationInputs": [
+    {
+      "path": "harnesses/codex-basic.yaml",
+      "sha256": "5502baeaaf7b54b4ca4172c60e5db8dc0ff6a34ee8fade27b0eec18351299cb1"
+    },
+    {
+      "path": "harnesses/codex-full-prompt-control.yaml",
+      "sha256": "a91f65cb6977881c2346eed841cc2a121d3b2d9e143c58d0cc8b1b6cab544d6d"
+    },
+    {
+      "path": "harnesses/codex-instruction-graph-v1.yaml",
+      "sha256": "f2acdd2e552c8785ac39c78df642202c9fa97874f28e2f79fe434bae2ce08b98"
+    },
+    {
+      "path": "harnesses/codex-instruction-graph-v2.yaml",
+      "sha256": "3def9b5328edd23399c91cf1a204b9d017bdcdde7f96392d60617a70dcd4080a"
+    },
+    {
+      "path": "harnesses/claude-basic.yaml",
+      "sha256": "4c2bce32cd04cdb594550743bffd6644d914ab43743d0c8c730760dd2ba46d13"
+    },
+    {
+      "path": "harnesses/claude-instruction-graph-v2.yaml",
+      "sha256": "9fc4c2007ce785f08c3641959123eda6017ef2d6fb82a2976390b06a500d2caa"
+    },
+    {
+      "path": "harnesses/prime-agent-basic.yaml",
+      "sha256": "5bbb7910367123212539d2568f2782e02c8a74933c2d1db4f408aa62612b64a3"
+    },
+    {
+      "path": "harnesses/prime-agent-instruction-graph-v2.yaml",
+      "sha256": "e73a8b7488800821d0214493fdc57609819dcca9f46a1c1dca806a26f972c9f0"
+    }
+  ],
+  "checkpoint": "IG-024",
+  "changedExecutableSeams": [
+    "Eval harness catalog includes V2 aliases with target search opt-out and Prime package gating",
+    "Comparison registry validates provider-specific implementation, full-prompt control and immutable V2 identity",
+    "Preflight reuses exact family/provider/model/adapter before either candidate dispatch",
+    "Provider-neutral dashboard confirmation binds root count, helper/child scope and declared cap",
+    "Metrics recognize reasoned retrieval for each exact V2 corpus identity while preserving unknown usage",
+    "Historical Codex pair/fallback and saved configuration snapshots remain unchanged"
+  ],
+  "controlCopies": [
+    {
+      "name": "claude-full-prompt-control",
+      "revision": 1,
+      "priorDefault": "claude-basic",
+      "priorRevision": 12,
+      "priorYamlSha256": "dd97df2b4a09eeacb0aee25b14894af7f6d4f68d33198d626372a0884ab095ed",
+      "controlYamlSha256": "e736e1b847ca101317a0089ba8bae0e4b23a85d13523c4ed59b8f54e849201ef",
+      "identicalExceptNameAndRevision": true
+    },
+    {
+      "name": "prime-agent-full-prompt-control",
+      "revision": 1,
+      "priorDefault": "prime-agent-basic",
+      "priorRevision": 14,
+      "priorYamlSha256": "86f39bd58893010ac72281d1616a7896bb61b5d9727f52cff0c3f809eabca11c",
+      "controlYamlSha256": "a2bafc208be15d2be49651a49aa1b174cf93f6d62504ad2768c6d320b982355a",
+      "identicalExceptNameAndRevision": true
+    }
+  ],
+  "requiredVerificationPlan": {
+    "warm": "Matched-pair admission/finalization, catalog/default pins, dashboard consent, exported trace metrics and trusted credential routing",
+    "heavy": "Parent-owned required check/build and applicable browser/runtime proofs on aggregate source",
+    "paid": "Optional later approved native trial; not part of this deterministic portfolio"
+  },
+  "actuallyRan": {
+    "finalCommand": "npx vitest run test/eval-instruction-graph.test.mjs test/eval-configuration-paths.test.mjs test/eval-dashboard-model.test.mjs test/eval-graph-timing-directory.test.mjs desktop/eval-main/live-credentials.test.mjs",
+    "testFilesPassed": 5,
+    "testsPassed": 77,
+    "durationSeconds": 1.46,
+    "packagePreparation": "Parent reported npm run build:packages exit0 and held outputs stable during this run.",
+    "scopedGitDiffCheck": "passed",
+    "inference": false
+  },
+  "portfolioNotes": [
+    "Existing historical Codex schemas remain explicitly tested; no tests retired.",
+    "Provider fixtures exercise real EvalService preflight, dispatch refusal, persistence and UI consent using injected model routes and fetch.",
+    "Both new provider pairs are tested on a search-disabled target; catalog inclusion does not prove native runtime availability.",
+    "Reason/body/replay/duplicate accounting uses actual metric production seams for all three V2 keys. Unsupported native usage is unknown, not zero."
+  ],
+  "laterOptionalLiveRequirements": [
+    "Run each provider pair separately with the same ordinary case, exact resolved model/provider/family/adapter, permissions, V6 and native recursion settings.",
+    "For the two-turn case, approve four candidate root executions per pair plus additional provider-native helpers and agent-authored child completions.",
+    "If measuring screenshot quality, approve the frozen judge setup and four accepted-turn judge sessions per pair; internal model requests are not fixed.",
+    "Verify connected credentials and actual candidate/judge/native-runtime readiness before paid dispatch.",
+    "Obtain a new declared USD cap covering the chosen live scope. Eval records that cap but does not meter or enforce spend.",
+    "Retain exact run/configuration/source pins, complete candidate traces, reason/body receipts, screenshot-grounded reviews and available usage. Missing native or child usage and actual dollar cost remain unknown."
+  ],
+  "limits": [
+    "No paid inference, Claude/Prime quality comparison or equivalence proof ran here.",
+    "No claim that configuration catalog presence establishes provider or platform readiness.",
+    "Heavy proof and final aggregate source binding are parent-owned and recorded separately.",
+    "Workspace evidence only; non-certifying without a PR."
+  ]
+}

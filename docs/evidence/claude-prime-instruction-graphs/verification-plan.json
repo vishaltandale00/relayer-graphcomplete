@@ -1,0 +1,126 @@
+{
+  "decision": "2026-10-21 user extends graph instruction delivery/defaults to Claude and Prime, following Codex promotion",
+  "checkpoints": {
+    "IG-019": {
+      "seams": [
+        "code-owned corpus registry",
+        "distinct immutable Claude/Prime corpora",
+        "startup publication and pin validation"
+      ],
+      "tests": [
+        "packages/harness-host/test/instruction-graph-corpora.test.ts",
+        "Claude corpus fixture + production-turn tests",
+        "Prime corpus fixture + production-turn tests",
+        "test/instruction-graph-e2e.test.mjs"
+      ]
+    },
+    "IG-020": {
+      "seams": [
+        "Claude SDK prompt",
+        "Prime session instructions",
+        "exact V6/native-helper handoff",
+        "reasoned retrieval bootstrap and search-disabled guidance",
+        "actual prompt metrics with sanitized traces"
+      ],
+      "tests": [
+        "packages/harness-host/test/claude-basic.test.ts",
+        "packages/harness-host/test/prime-agent.test.ts",
+        "packages/harness-host/test/prime-instruction-graph-v2.test.ts",
+        "packages/harness-host/test/claude-preview-session.test.ts"
+      ]
+    },
+    "IG-021": {
+      "seams": [
+        "Python manifest/retrieve/search client APIs",
+        "Python recipe authoring",
+        "run-scoped read-only compiler-reference metadata host request"
+      ],
+      "tests": [
+        "python/relayer-graph/tests/test_instructions.py",
+        "python/relayer-graph/tests/test_prime_instruction_recipes.py",
+        "packages/harness-host/test/prime-agent.test.ts"
+      ]
+    },
+    "IG-022": {
+      "seams": [
+        "saved registration migration",
+        "unchanged strict live-object comparison",
+        "permissions/workspace/execution refusal"
+      ],
+      "tests": [
+        "packages/harness-host/test/host-instruction-promotion.test.ts",
+        "existing generic admission policy/immutable receipt tests in full check"
+      ]
+    },
+    "IG-023": {
+      "seams": [
+        "runtime code-owned publication",
+        "app-server pin attachment before execution",
+        "completion-scoped client manifest and body reads",
+        "search denial",
+        "accepted graph across reopen",
+        "Prime real-bridge recipe retrieval retains asset, old pin, new presentation and navigation depth proof"
+      ],
+      "tests": [
+        "test/instruction-graph-e2e.test.mjs (fixture provider execution, no native inference claim)",
+        "test/prime-visual-integration.test.mjs with test/support/prime-visual-fixture.mjs (fixture model, real Python bridge/compiler/graph server)"
+      ]
+    },
+    "IG-024": {
+      "seams": [
+        "frozen full-prompt controls",
+        "provider-specific matched-pair authorization/preflight",
+        "metrics and physical retrieval classification",
+        "historical stored pair fallback"
+      ],
+      "tests": [
+        "test/eval-instruction-graph.test.mjs",
+        "test/eval-configuration-paths.test.mjs",
+        "test/eval-dashboard-model.test.mjs"
+      ]
+    },
+    "IG-025": {
+      "seams": [
+        "packaged corpus and registry modules",
+        "Prime configuration + Python integrity identity",
+        "telemetry module allowlist",
+        "Managed runtime recipe Python identity agrees with runtime constants and vendor manifest"
+      ],
+      "tests": [
+        "test/desktop-shell.test.mjs",
+        "test/desktop-telemetry-module-inventory.test.mjs",
+        "Prime integrity tests",
+        "actual unsigned development afterPack",
+        "test/prime-managed-runtime.test.mjs"
+      ]
+    },
+    "IG-026": {
+      "seams": [
+        "One real three-default runtime publishes the immutable catalog before selector tests; no inference or runtime execution is permitted",
+        "Six native app-server/profile/provider stores remain fresh and isolated; provider discovery/order, onboarding defaults, Settings preserving defaults and composer family routing remain observed",
+        "Each flow retains its 15-second deadline; bounded 45-second heavy setup is distinct and reports cold publication phases; runtime closes even on setup failure"
+      ],
+      "productPromises": [
+        "PRD2.1 successful provider connection and product-managed family ordering",
+        "PROV-008 paired provider/family defaults and preservation",
+        "FAM-001 family-only composer request",
+        "FAM-004 compatible harness resolution"
+      ],
+      "tests": [
+        "test/provider-straightforward-flow.test.mjs (all six original assertion sets retained)",
+        "test/instruction-graph-e2e.test.mjs retains dedicated cold publication/reopen proof"
+      ],
+      "limits": "Amortizes repeated setup, not a product startup-latency guarantee. Three-corpus cold publication adds real work. CI first-attempt exact timeout phase was not captured."
+    }
+  },
+  "requiredHeavyEntryPoints": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-web",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:prime-managed-runtime",
+    "npm run desktop:pack"
+  ],
+  "paidProof": "No new paid inference authorized yet. Native quality and whole-task savings remain unmeasured unless a separately consented matched comparison is completed.",
+  "proofStatus": "Plan only; actual results and reviewed source snapshot will be recorded separately."
+}

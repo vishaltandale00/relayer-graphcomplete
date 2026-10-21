@@ -1,0 +1,57 @@
+{
+  "previousHead": "922d7210c08c8861e0191859d85fc4b79571e603",
+  "previousSourceScopeDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
+  "currentSourceScopeDigest": "a1672ab91ac1c57b7eca66f701efefee14e84e0d88fe192f89cf88d01bdd6e0b",
+  "hostedAttempt": {
+    "runId": 39687635146,
+    "attempt": 1,
+    "jobUrl": "https://github.com/vishaltandale00/relayer-graphcomplete/actions/runs/39687635146/job/119525873713",
+    "result": "Failed: six provider-straightforward-flow cases timed out at 15000ms; 4,631 tests passed; 34 tests were skipped under Linux/platform conditions",
+    "rawLogSha256": "31d5735e721e54a1a41a95ee2f9c7894b4db1a6b30df73c26869f97c598256e4",
+    "otherChapters": "All other selected CI chapters passed, including actual macos-arm64 package inspection.",
+    "exactTimeoutPhase": "Unknown: original cases did not record phase timings. Do not label it a confirmed CI publication-phase failure."
+  },
+  "observedWorkload": "Each original selector case separately cold-published all three actual corpora. The two new corpora add ordinary graph mutations and FULL-synchronous SQLite commits. Cold work is a real production overhead.",
+  "independentMacMeasurement": {
+    "reviewer": "/root/adversarial_review",
+    "coldRuntimeMs": 3021,
+    "corpusPublicationMs": {
+      "codex": 852,
+      "claude": 759,
+      "prime": 846
+    },
+    "appServerMs": 495,
+    "onboardingAndSettingsMs": 25,
+    "reopenRuntimeMs": 187,
+    "scope": "Diagnostic measurement, not a startup-latency guarantee or Linux measurement."
+  },
+  "repair": {
+    "productionFilesChanged": [],
+    "originalSourceFilesChanged": [
+      "docs/prd/index.html"
+    ],
+    "newReviewedSource": [
+      "test/provider-straightforward-flow.test.mjs"
+    ],
+    "mechanism": "Share one real immutable three-default graph runtime. Keep six native product app servers, SQLite/profile/provider stores and every original assertion isolated per case. Provider acquisition still refuses inference.",
+    "budgets": "Each flow keeps its 15,000 ms deadline. Cold setup is separate and bounded to 45,000 ms. Finally cleanup closes runtime even on setup failure; stderr reports publication phase timing.",
+    "subsumption": "Repeated cold setup protects no distinct provider assertion. One real setup remains; dedicated IG-023 runtime journeys still protect cold publication and reopen. This does not assert that product cold startup became faster."
+  },
+  "focusedProof": {
+    "command": "CARGO_TARGET_DIR=\"$PWD/target\" npx vitest run test/provider-straightforward-flow.test.mjs",
+    "exitCode": 0,
+    "testsPassed": 6,
+    "testsSkipped": 0,
+    "durationSeconds": 5.13,
+    "coldSetupMs": 3631,
+    "publicationMs": {
+      "codex": 851,
+      "claude": 846,
+      "prime": 933
+    },
+    "allPublicationStatus": 200,
+    "log": ".relayer/claude-prime-selector-fix-final.log",
+    "logSha256": "8e6a0e73f98df4d1445144322a58d17119cb152f9d9fa3da1cb9d9c9aa3afab9"
+  },
+  "requiredProof": "Full check/build rerun before commit. Updated-head CI must pass before merge; this receipt alone is not CI success."
+}

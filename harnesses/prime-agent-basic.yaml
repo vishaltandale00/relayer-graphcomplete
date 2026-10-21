@@ -2,7 +2,7 @@ schemaVersion: 1
 name: prime-agent-basic
 implementation: prime.agent
 implementationVersion: 1
-revision: 14
+revision: 15
 complete:
   agentAuthored: true
 permissionBindings:
@@ -39,3 +39,6 @@ settings:
   thinkingLevel: medium
   rlmMaxDepth: 1
   prewarmIpythonKernel: true
+  promptProfile: instruction-graph-v2
+  instructionGraphVersionKey: prime-agent-instruction-graph-v2
+  instructionGraphDigest: 146eb4b1b68001ce0281d77f234bdc41a015d52053e86636df1726478a556f6a

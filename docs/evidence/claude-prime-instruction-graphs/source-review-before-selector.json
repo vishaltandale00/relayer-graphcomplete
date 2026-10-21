@@ -1,0 +1,62 @@
+{
+  "reviewer": "/root/adversarial_review",
+  "sourceScopeDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
+  "sourceFileCount": 46,
+  "sourceSnapshot": "docs/evidence/claude-prime-instruction-graphs/source-snapshot.json",
+  "allSourceFileHashesVerified": true,
+  "scope": "Original43-file authority/mechanics/default review plus managed-runtime Python recipe identity, real Python visual fixture replacement and final PRD mapping.",
+  "verdict": "No unresolved source blocker; replacement fixture preserves reviewed original boundaries and passes its observed focused portfolio.",
+  "unresolvedSourceFindings": [],
+  "status": "non_certifying_without_pr",
+  "resolvedFindings": [
+    "Prime native recipes use actual caller-read bytes, mapping field access and persisted action mappings.",
+    "The managed-runtime recipe now binds the same actual Python package tree as the runtime and vendor manifest.",
+    "The replacement fixture compares the corpus manifest to the prompt pin without conflating its publication completion with the task completion.",
+    "The new fixture imports json explicitly for the optional native-kernel path and dedents supplemental source before injecting it into the retrieved publication recipe."
+  ],
+  "managedRecipe": {
+    "actualPythonTreeSha256": "e9ad9a3eae872e7d2d26fffedcd10a8f1507da5f1fa50bbf93a6ef12b00b5142",
+    "threeContractsIndependentlyVerified": true,
+    "recipeDigest": "bbceb3d557413bbda5f097b3eca731169e2da2b7e3a2d0019bf8c0cccc249c60",
+    "observedManagedProofLog": ".relayer/claude-prime-managed-runtime-final.log",
+    "observedManagedProofLogSha256": "6c4087323d7466fb89e9953a8ebca8d334cbb3001445f4bf03321791bd8ae344",
+    "observedResult": "ready:true for the exact recipe digest, macos-arm64 repository closure"
+  },
+  "fixtureSubsumption": {
+    "verdict": "Reviewed replacement is sound for the declared ordinary-subprocess proof; no original assertion or scenario was retired.",
+    "sourceHashes": {
+      "test/support/prime-visual-fixture.mjs": "ecd36b14c0838c5c4ca436bb4796109f14653eef04dc36cf6b1cb71a9f145407",
+      "test/prime-visual-integration.test.mjs": "cd923c1b4465ec391487d43443f100bcb88d6139beebed2e599ebf3b3b080e61"
+    },
+    "preservedBoundaries": [
+      "Original PYTHON asset registration/inspection/download/listing, invalid compiler rejection, detail retain/clear, checkpoint/final package identity and terminal asset-read refusal branch is byte-identical to HEAD.",
+      "Original export/import compiled detail and asset digest checks remain intact.",
+      "Old V1 preference pins survive reopen and follow-up; new basic V6 and deep V4 preference pins remain independently asserted.",
+      "The final connected three-node graph, supporting evidence layer, exact Current reference, deeper Evidence expansion and action mount/client-key binding assertions remain intact.",
+      "The deep full-prompt example path remains available; only the V2 fixture path substitutes corpus retrieval and execution for the obsolete inline-example assumption."
+    ],
+    "newObservedMechanism": "The real GraphSession retrieves reasoned chunks and prerequisites in bounded batches, validates returned identity/body lengths, then executes the published publish-current/detail-basic/detail-controls/finish-current fences through the real host/compiler/Rust path. Fixture-authored supplemental graph structure preserves the old proof and is not presented as generated quality.",
+    "focusedLog": ".relayer/claude-prime-visual-fix.log",
+    "focusedLogSha256": "ae444dbb3d16d452bf08f760571a844f12ed54b445df7e6b7897ab096426090c",
+    "observedFinalRun": {
+      "filesPassed": 1,
+      "testsPassed": 2,
+      "testsSkipped": 0,
+      "durationSeconds": 9.2,
+      "testExecutionSeconds": 8.23
+    },
+    "priorFailures": "Preserved earlier in the same append log; final success does not relabel those attempts."
+  },
+  "packagingObservation": {
+    "log": ".relayer/claude-prime-pack-final.log",
+    "logSha256": "562a4ac734249c2e547f6464af7a61335ae18e32fa29ef891eee56f0426bec82",
+    "observedResult": "Verified packaging cache hit, unsigned macos-arm64 assembly and afterPack verification report passed. This is not signing or release evidence."
+  },
+  "limits": [
+    "The optional RELAYER_TEST_PRIME_PYTHON/ipykernel fixture branch was source-reviewed but not executed by this focused portfolio.",
+    "Full npm run check remains separately running at this assertion; no final full-command pass is asserted here.",
+    "No provider inference, quality-equivalence or whole-task savings claim is made.",
+    "Logs establish their reported chapter outcomes; other required heavy entry points remain separately audited.",
+    "Source changes invalidate this assertion. Record it in the PR against the exact snapshot."
+  ]
+}

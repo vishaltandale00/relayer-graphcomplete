@@ -1,8 +1,10 @@
 import { isDeepStrictEqual } from "node:util";
 
 export const instructionGraphTreatments = Object.freeze({
-  "codex-instruction-graph-v1": Object.freeze({ name: "codex-instruction-graph-v1", promptProfile: "instruction-graph-v1", versionKey: "codex-instruction-graph-v1", readProtocol: 1 }),
-  "codex-instruction-graph-v2": Object.freeze({ name: "codex-instruction-graph-v2", promptProfile: "instruction-graph-v2", versionKey: "codex-instruction-graph-v2", readProtocol: 2 }),
+  "codex-instruction-graph-v1": Object.freeze({ name: "codex-instruction-graph-v1", implementation: "codex.basic", controlName: "codex-full-prompt-control", controlPromptProfile: "layered-navigation-multi-agent-v1", promptProfile: "instruction-graph-v1", versionKey: "codex-instruction-graph-v1", readProtocol: 1 }),
+  "codex-instruction-graph-v2": Object.freeze({ name: "codex-instruction-graph-v2", implementation: "codex.basic", controlName: "codex-full-prompt-control", controlPromptProfile: "layered-navigation-multi-agent-v1", promptProfile: "instruction-graph-v2", versionKey: "codex-instruction-graph-v2", readProtocol: 2 }),
+  "claude-instruction-graph-v2": Object.freeze({ name: "claude-instruction-graph-v2", implementation: "claude.basic", controlName: "claude-full-prompt-control", promptProfile: "instruction-graph-v2", versionKey: "claude-instruction-graph-v2", readProtocol: 2 }),
+  "prime-agent-instruction-graph-v2": Object.freeze({ name: "prime-agent-instruction-graph-v2", implementation: "prime.agent", controlName: "prime-agent-full-prompt-control", promptProfile: "instruction-graph-v2", versionKey: "prime-agent-instruction-graph-v2", readProtocol: 2 }),
 });
 export const instructionGraphControlName = "codex-full-prompt-control";
 export const instructionGraphHarnessPair = Object.freeze([instructionGraphControlName, "codex-instruction-graph-v1"]);
@@ -47,18 +49,18 @@ export function validateInstructionGraphComparison({ names, configurations, case
   const selectedTreatments = names?.filter(isInstructionGraphTreatment) ?? [];
   if (selectedTreatments.length === 0) return null;
   const spec = instructionGraphTreatments[selectedTreatments[0]];
-  const pair = [instructionGraphControlName, spec.name];
-  if (targetKey !== "macos-arm64") throw new Error("Instruction-graph Eval requires the qualified macOS Apple Silicon graph-search target.");
+  const pair = [spec.controlName, spec.name];
+  if (spec.readProtocol === 1 && targetKey !== "macos-arm64") throw new Error("Instruction-graph V1 Eval requires the qualified macOS Apple Silicon graph-search target.");
   if (!isDeepStrictEqual(names, pair)) throw new Error(`Instruction-graph Eval requires the exact ordered pair ${pair.join(", ")}.`);
   const [control, treatment] = names.map((name) => configurations.get(name));
-  if (!control || !treatment || control.implementation !== "codex.basic"
-    || control.settings?.promptProfile !== "layered-navigation-multi-agent-v1"
+  if (!control || !treatment || control.implementation !== spec.implementation
+    || control.settings?.promptProfile !== spec.controlPromptProfile
     || treatment.settings?.promptProfile !== spec.promptProfile
     || treatment.settings?.instructionGraphVersionKey !== spec.versionKey
     || !/^[a-f0-9]{64}$/.test(treatment.settings?.instructionGraphDigest ?? "")
     || control.settings?.instructionGraphVersionKey !== undefined || control.settings?.instructionGraphDigest !== undefined
     || control.complete?.agentAuthored !== true
-    || control.graphCapabilityProfile?.search !== "query-v1"
+    || !(spec.readProtocol === 1 ? ["query-v1"] : ["query-v1", "disabled"]).includes(control.graphCapabilityProfile?.search)
     || control.settings?.personalPresentationVersion !== "personal-presentation-v6"
     || !isDeepStrictEqual(normalized(control), normalized(treatment))) {
     throw new Error("Instruction-graph configurations must match the frozen full-prompt control outside their names, revisions and instruction-delivery prompt profiles.");

@@ -60,7 +60,7 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "fixture-human-task.yaml",
       "fixture-node-detail.yaml",
-    "fixture-graph-preview.yaml",
+      "fixture-graph-preview.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
@@ -74,10 +74,14 @@ describe("Eval harness configuration availability", () => {
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-full-prompt-control.yaml",
+      "claude-instruction-graph-v2.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
       "codex-layered-personal-presentation-v2.yaml",
       "prime-agent-basic.yaml",
+      "prime-agent-full-prompt-control.yaml",
+      "prime-agent-instruction-graph-v2.yaml",
       "prime-agent-deep.yaml",
       "prime-agent-layered-navigation-luna.yaml",
     ]);
@@ -93,7 +97,7 @@ describe("Eval harness configuration availability", () => {
       "fixture-task-system.yaml",
       "fixture-human-task.yaml",
       "fixture-node-detail.yaml",
-    "fixture-graph-preview.yaml",
+      "fixture-graph-preview.yaml",
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
@@ -107,13 +111,15 @@ describe("Eval harness configuration availability", () => {
       "codex-layered-navigation-luna.yaml",
       "codex-multi-agent-layered-navigation.yaml",
       "claude-basic.yaml",
+      "claude-full-prompt-control.yaml",
+      "claude-instruction-graph-v2.yaml",
       "codex-layered-personal-presentation-v0.yaml",
       "codex-layered-personal-presentation-v1.yaml",
       "codex-layered-personal-presentation-v2.yaml",
     ]);
   });
 
-  it("keeps baseline harnesses but omits graph-search experiments off Apple Silicon", () => {
+  it("keeps V2 pairs but omits V1 and graph-search experiments off Apple Silicon", () => {
     for (const targetKey of ["macos-x64", "windows-x64", "linux-x64"]) {
       const available = names(evalHarnessConfigurationPaths({
         harnessDirectory: "/tmp/harnesses",
@@ -122,20 +128,24 @@ describe("Eval harness configuration availability", () => {
       }));
       expect(available).toEqual(expect.arrayContaining([
         "fixture-task-system.yaml",
-      "fixture-human-task.yaml",
+        "fixture-human-task.yaml",
         "fixture-node-detail.yaml",
-    "fixture-graph-preview.yaml",
+        "fixture-graph-preview.yaml",
         "codex-basic.yaml",
+        "codex-instruction-graph-v2.yaml",
         "claude-basic.yaml",
+        "claude-full-prompt-control.yaml",
+        "claude-instruction-graph-v2.yaml",
         "prime-agent-basic.yaml",
+        "prime-agent-full-prompt-control.yaml",
+        "prime-agent-instruction-graph-v2.yaml",
       ]));
-      expect(available).not.toEqual(expect.arrayContaining([
+      for (const name of [
         "fixture-graph-memory.yaml",
         "codex-instruction-graph-v1.yaml",
-        "codex-instruction-graph-v2.yaml",
         "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
         "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
-      ]));
+      ]) expect(available).not.toContain(name);
     }
   });
 
@@ -240,15 +250,17 @@ describe("Eval harness configuration availability", () => {
     expect(treatment).toEqual(control);
   });
 
-  it.each(["v1", "v2"])("keeps instruction graph %s matched to the frozen full-prompt control outside instruction delivery", async (version) => {
+  it.each([["codex", "v1"], ["codex", "v2"], ["claude", "v2"], ["prime-agent", "v2"]])("keeps %s instruction graph %s matched to its frozen control", async (provider, version) => {
     const catalog = await loadHarnessConfigurations([
-      resolve(repositoryRoot, "harnesses/codex-full-prompt-control.yaml"),
-      resolve(repositoryRoot, `harnesses/codex-instruction-graph-${version}.yaml`),
+      resolve(repositoryRoot, `harnesses/${provider}-full-prompt-control.yaml`),
+      resolve(repositoryRoot, `harnesses/${provider}-instruction-graph-${version}.yaml`),
     ]);
-    const control = structuredClone(catalog.get("codex-full-prompt-control"));
-    const treatment = structuredClone(catalog.get(`codex-instruction-graph-${version}`));
-    expect(treatment.settings).toMatchObject({ promptProfile: `instruction-graph-${version}`, instructionGraphVersionKey: `codex-instruction-graph-${version}`, instructionGraphDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
-    expect(control).toMatchObject({ name: "codex-full-prompt-control", revision: 1, settings: { promptProfile: "layered-navigation-multi-agent-v1" } });
+    const control = structuredClone(catalog.get(`${provider}-full-prompt-control`));
+    const treatment = structuredClone(catalog.get(`${provider}-instruction-graph-${version}`));
+    expect(treatment.settings).toMatchObject({ promptProfile: `instruction-graph-${version}`, instructionGraphVersionKey: `${provider}-instruction-graph-${version}`, instructionGraphDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(control).toMatchObject({ name: `${provider}-full-prompt-control`, revision: 1 });
+    if (provider === "codex") expect(control.settings.promptProfile).toBe("layered-navigation-multi-agent-v1");
+    else expect(control.settings).not.toHaveProperty("promptProfile");
     for (const configuration of [control, treatment]) {
       delete configuration.name; delete configuration.revision;
       delete configuration.settings.promptProfile;
@@ -256,8 +268,21 @@ describe("Eval harness configuration availability", () => {
     }
     expect(treatment).toEqual(control);
     const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
-    expect(packaging).not.toContain(`codex-instruction-graph-${version}.yaml`);
-    expect(packaging).not.toContain("codex-full-prompt-control.yaml");
+    expect(packaging).not.toContain(`${provider}-instruction-graph-${version}.yaml`);
+    expect(packaging).not.toContain(`${provider}-full-prompt-control.yaml`);
+  });
+
+  it.each([["claude-basic", "claude", 13], ["prime-agent-basic", "prime-agent", 15]])("matches product %s to its V2 Eval alias", async (productName, provider, revision) => {
+    const aliasName = `${provider}-instruction-graph-v2`;
+    const catalog = await loadHarnessConfigurations([
+      resolve(repositoryRoot, `harnesses/${productName}.yaml`),
+      resolve(repositoryRoot, `harnesses/${aliasName}.yaml`),
+    ]);
+    const product = structuredClone(catalog.get(productName));
+    const alias = structuredClone(catalog.get(aliasName));
+    expect(product).toMatchObject({ revision, settings: { promptProfile: "instruction-graph-v2", instructionGraphVersionKey: aliasName, instructionGraphDigest: expect.stringMatching(/^[a-f0-9]{64}$/) } });
+    for (const configuration of [product, alias]) { delete configuration.name; delete configuration.revision; }
+    expect(product).toEqual(alias);
   });
 
   it("disables search for every configuration only off the qualified target", () => {

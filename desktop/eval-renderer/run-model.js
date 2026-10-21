@@ -24,13 +24,20 @@ export const recursiveGraphMemoryHarnessPair = Object.freeze([
 
 export const instructionGraphControlName = "codex-full-prompt-control";
 export const instructionGraphHarnessPair = Object.freeze([instructionGraphControlName, "codex-instruction-graph-v1"]);
-export const instructionGraphTreatmentNames = Object.freeze(["codex-instruction-graph-v1", "codex-instruction-graph-v2"]);
+const instructionGraphControls = Object.freeze({
+  "codex-instruction-graph-v1": instructionGraphControlName,
+  "codex-instruction-graph-v2": instructionGraphControlName,
+  "claude-instruction-graph-v2": "claude-full-prompt-control",
+  "prime-agent-instruction-graph-v2": "prime-agent-full-prompt-control",
+});
+export const instructionGraphTreatmentNames = Object.freeze(Object.keys(instructionGraphControls));
 
 export function authorizeInstructionGraphSelection(selection, catalog, confirmLiveRun, requestCostCap) {
   const treatments = selection.harnessConfigurationNames.filter((name) => instructionGraphTreatmentNames.includes(name));
   if (treatments.length === 0) return structuredClone(selection);
   const treatment = treatments[0];
-  if (treatments.length !== 1 || selection.harnessConfigurationNames.length !== 2 || selection.harnessConfigurationNames[0] !== instructionGraphControlName || selection.harnessConfigurationNames[1] !== treatment) throw new Error("Choose the frozen full-prompt control and exactly one instruction-graph treatment, in that order.");
+  const control = instructionGraphControls[treatment];
+  if (treatments.length !== 1 || selection.harnessConfigurationNames.length !== 2 || selection.harnessConfigurationNames[0] !== control || selection.harnessConfigurationNames[1] !== treatment) throw new Error("Choose the matching frozen full-prompt control and exactly one instruction-graph treatment, in that order.");
   if (selection.suiteId) throw new Error("Choose ordinary cases for the instruction-graph comparison.");
   const rootProviderExecutions = selection.testCaseIds.reduce((total, id) => {
     const definition = catalog.cases.find((item) => item.id === id);
@@ -42,7 +49,7 @@ export function authorizeInstructionGraphSelection(selection, catalog, confirmLi
   if (capInput === null || capInput === undefined) return null;
   const declaredCostCapUsd = typeof capInput === "number" ? capInput : Number(String(capInput).trim());
   if (!Number.isFinite(declaredCostCapUsd) || declaredCostCapUsd <= 0) throw new Error("Enter a positive declared USD cost cap for the instruction-graph comparison.");
-  if (!confirmLiveRun(`Run ${treatment} against ${instructionGraphControlName} with ${rootProviderExecutions} paid/live Codex root turns? Both cells may launch additional model-controlled agent-authored child execution through the connected product provider. Declared maximum spend: $${declaredCostCapUsd.toFixed(2)} USD. Eval records this cap but does not meter or enforce provider spend.`)) return null;
+  if (!confirmLiveRun(`Run ${treatment} against ${control} with ${rootProviderExecutions} paid/live provider root turns? Both cells may launch additional model-controlled provider-native helpers or agent-authored child execution through the connected product provider. Declared maximum spend: $${declaredCostCapUsd.toFixed(2)} USD. Eval records this cap but does not meter or enforce provider spend.`)) return null;
   return {
     ...structuredClone(selection),
     liveAuthorization: {

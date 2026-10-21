@@ -94,6 +94,14 @@ class GraphSession(RelayerGraphClient):
         self.bind_node(node)
         return await self._visual_authoring("checkpoint", node)
 
+    async def detail_authoring_reference(self) -> Mapping[str, Any]:
+        """Read the active Prime host's canonical compiler vocabulary, without writes."""
+        from rlm import host_request
+        value = await host_request("relayer.graph.detail-authoring-reference")
+        if not isinstance(value, Mapping):
+            raise ConfigurationError("Prime returned an invalid detail authoring reference")
+        return value
+
     async def replace_node_presentation(self, node: NodeReference, expected_revision: int,
                                         presentation: NodeObject) -> None:
         """Stage a compiled full replacement; never submit the semantic node envelope."""

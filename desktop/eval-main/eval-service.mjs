@@ -1,5 +1,5 @@
 import { instructionMetricsFromTrace, aggregateInstructionMetrics } from "./instruction-graph-metrics.mjs";
-import { validateInstructionGraphComparison, finalizeInstructionGraphComparison, preflightInstructionGraphComparison, isInstructionGraphTreatment, instructionGraphControlName } from "./instruction-graph-comparison.mjs";
+import { validateInstructionGraphComparison, finalizeInstructionGraphComparison, preflightInstructionGraphComparison, isInstructionGraphTreatment, instructionGraphTreatments } from "./instruction-graph-comparison.mjs";
 import { completionArtifactEvidence } from "./task-completion-artifacts.mjs";
 import { abortable } from "./abortable.mjs";
 import { interactiveTripCase } from "./interactive-trip-case.mjs";
@@ -152,12 +152,12 @@ export const evalCases = Object.freeze([
 
 // Ablation presets hold one case constant while changing one product capability.
 // The graph-search on/off ablation retired once search became the configuration default.
-const evalAblations = Object.freeze(["v1", "v2"].map((version) => Object.freeze({
-  id: `codex-instruction-graph-${version}`,
-  name: `Codex · instruction graph ${version}`,
-  description: "Compare the frozen full prompt against graph-retrieved instructions with the same Codex model, permissions, V6 preferences and recursion.",
+const evalAblations = Object.freeze(Object.values(instructionGraphTreatments).map((spec) => Object.freeze({
+  id: spec.name,
+  name: `${({ "codex.basic": "Codex", "claude.basic": "Claude", "prime.agent": "Prime Agent" })[spec.implementation]} · instruction graph v${spec.readProtocol}`,
+  description: "Compare the frozen full prompt against graph-retrieved instructions with the same provider, model, permissions, V6 preferences and native recursion.",
   testCaseIds: [basicEvalCaseId],
-  harnessPairs: [{ control: instructionGraphControlName, treatment: `codex-instruction-graph-${version}` }],
+  harnessPairs: [{ control: spec.controlName, treatment: spec.name }],
 })));
 
 // Search is a default harness capability, so qualification follows the cases whose

@@ -1,0 +1,15 @@
+{
+  "command": "npm run test:prime-managed-runtime",
+  "exitCode": 0,
+  "result": {
+    "recipeId": "prime@0.8.1",
+    "recipeDigest": "bbceb3d557413bbda5f097b3eca731169e2da2b7e3a2d0019bf8c0cccc249c60",
+    "target": "macos-arm64",
+    "javascriptClosureKind": "repository",
+    "javascriptClosureSha256": "02f15fb2ce6366f1e9709e66336a94476dc6605bb8618885afea9e7d2e19766f",
+    "ready": true
+  },
+  "pythonPackageTreeSha256": "e9ad9a3eae872e7d2d26fffedcd10a8f1507da5f1fa50bbf93a6ef12b00b5142",
+  "sourceScopeDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
+  "scope": "Inference-free clean-root managed kernel/runtime probe with verified recipe and Python client integrity. No model quality claim."
+}

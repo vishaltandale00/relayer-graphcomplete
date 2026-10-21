@@ -49,15 +49,17 @@ export function evalHarnessConfigurationPaths({
     join(harnessDirectory, "codex-full-prompt-control.yaml"),
     join(harnessDirectory, "codex-eval-visual-node-details-control.yaml"),
     join(harnessDirectory, "codex-eval-visual-node-details-treatment.yaml"),
+    ...(graphSearchQualified ? [join(harnessDirectory, "codex-instruction-graph-v1.yaml")] : []),
+    join(harnessDirectory, "codex-instruction-graph-v2.yaml"),
     ...(graphSearchQualified ? [
-      join(harnessDirectory, "codex-instruction-graph-v1.yaml"),
-      join(harnessDirectory, "codex-instruction-graph-v2.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-disabled.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-enabled.yaml"),
     ] : []),
     join(harnessDirectory, "codex-layered-navigation-luna.yaml"),
     join(harnessDirectory, "codex-multi-agent-layered-navigation.yaml"),
     join(harnessDirectory, "claude-basic.yaml"),
+    join(harnessDirectory, "claude-full-prompt-control.yaml"),
+    join(harnessDirectory, "claude-instruction-graph-v2.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v0.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v1.yaml"),
     join(harnessDirectory, "codex-layered-personal-presentation-v2.yaml"),
@@ -65,6 +67,8 @@ export function evalHarnessConfigurationPaths({
   if (packageAvailable(primeAgentPackage)) {
     paths.push(
       join(harnessDirectory, "prime-agent-basic.yaml"),
+      join(harnessDirectory, "prime-agent-full-prompt-control.yaml"),
+      join(harnessDirectory, "prime-agent-instruction-graph-v2.yaml"),
       join(harnessDirectory, "prime-agent-deep.yaml"),
       join(harnessDirectory, "prime-agent-layered-navigation-luna.yaml"),
     );

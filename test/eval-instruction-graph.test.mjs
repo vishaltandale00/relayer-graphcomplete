@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { digestHarnessConfiguration } from "../packages/harness-host/src/configuration.ts";
-import { instructionGraphControlName, instructionGraphHarnessPair, validateInstructionGraphComparison, finalizeInstructionGraphComparison, preflightInstructionGraphComparison } from "../desktop/eval-main/instruction-graph-comparison.mjs";
+import { instructionGraphControlName, instructionGraphHarnessPair, instructionGraphTreatments, validateInstructionGraphComparison, finalizeInstructionGraphComparison, preflightInstructionGraphComparison } from "../desktop/eval-main/instruction-graph-comparison.mjs";
+import { evalTargetHarnessConfiguration } from "../desktop/eval-main/configuration-paths.mjs";
 import { instructionMetricsFromTrace, aggregateInstructionMetrics } from "../desktop/eval-main/instruction-graph-metrics.mjs";
-import { authorizeInstructionGraphSelection, projectExecutionDossier } from "../desktop/eval-renderer/run-model.js";
+import { authorizeInstructionGraphSelection, projectExecutionDossier, instructionGraphTreatmentNames } from "../desktop/eval-renderer/run-model.js";
 
 const caseId = "empty-project.task-system.two-turn";
 const cases = [{ id: caseId, prompts: ["First", "Second"] }];
@@ -14,13 +15,13 @@ const directories = [];
 afterEach(async () => { vi.unstubAllGlobals(); for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }); });
 const usageEvent = (inputTokens, outputTokens, threadId = "main") => ({ type: "provider.event", data: { method: "thread/tokenUsage/updated", params: { threadId, tokenUsage: { total: { inputTokens, outputTokens, cachedInputTokens: 2 } } } } });
 
-async function serviceFixture() {
+async function serviceFixture({ controlName = instructionGraphControlName, treatmentName = instructionGraphHarnessPair[1], targetKey = "macos-arm64" } = {}) {
   const { EvalService } = await import("../desktop/eval-main/eval-service.mjs");
   const directory = await mkdtemp(join(tmpdir(), "instruction-graph-eval-")); directories.push(directory);
-  const service = await new EvalService({ validateLiveCredential: vi.fn(async (configuration) => ({ selectedModel: { harnessId: configuration.name, familyId: 1, providerId: "work", modelId: "first" }, productModelSelection: true, providerAdapterId: "codex-subscription" })), stateFile: join(directory, "runs.json"), productSession: { origin: "http://product.invalid", cookie: { name: "control", value: "test" } }, configurationPaths: [resolve("harnesses/codex-full-prompt-control.yaml"), resolve("harnesses/codex-basic.yaml")], targetKey: "macos-arm64" }).open();
-  const treatment = structuredClone(service.configurations.get(instructionGraphControlName));
-  treatment.name = instructionGraphHarnessPair[1];
-  Object.assign(treatment.settings, { promptProfile: "instruction-graph-v1", instructionGraphVersionKey: "codex-instruction-graph-v1", instructionGraphDigest: "a".repeat(64) });
+  const service = await new EvalService({ validateLiveCredential: vi.fn(async (configuration) => ({ selectedModel: { harnessId: configuration.name, familyId: 1, providerId: "work", modelId: "first" }, productModelSelection: true, providerAdapterId: ({ "codex.basic": "codex-subscription", "claude.basic": "anthropic-api", "prime.agent": "openai-api" })[configuration.implementation] })), selectModel: vi.fn(async () => ({ familyId: 1, providerId: "work", modelId: "first" })), stateFile: join(directory, "runs.json"), productSession: { origin: "http://product.invalid", cookie: { name: "control", value: "test" } }, configurationPaths: [resolve(`harnesses/${controlName}.yaml`), resolve("harnesses/codex-basic.yaml")], targetKey, adaptConfiguration: evalTargetHarnessConfiguration(targetKey) }).open();
+  const treatment = structuredClone(service.configurations.get(controlName));
+  treatment.name = treatmentName;
+  Object.assign(treatment.settings, { promptProfile: instructionGraphTreatments[treatmentName].promptProfile, instructionGraphVersionKey: treatmentName, instructionGraphDigest: "a".repeat(64) });
   service.configurations.set(treatment.name, treatment);
   return service;
 }
@@ -28,6 +29,7 @@ async function serviceFixture() {
 describe("Instruction graph Eval comparison", () => {
   it("admits only the exact matched V6 pair and enforces live consent at the real run boundary", async () => {
     const service = await serviceFixture();
+    expect(instructionGraphTreatmentNames).toEqual(Object.keys(instructionGraphTreatments));
     const selection = { testCaseIds: [caseId], harnessConfigurationNames: [...instructionGraphHarnessPair], judgeConfigurationName: "deterministic-graph-contract" };
     const fetch = vi.fn(); vi.stubGlobal("fetch", fetch);
     await expect(service.createRun(selection)).rejects.toThrow("4 live roots");
@@ -132,12 +134,55 @@ describe("Instruction graph Eval comparison", () => {
     expect(authorizeInstructionGraphSelection(selection, { cases }, () => false, () => 10)).toBeNull();
     expect(authorizeInstructionGraphSelection(selection, { cases }, (message) => {
       expect(message).toContain(`against ${instructionGraphControlName}`);
-      expect(message).toContain("4 paid/live Codex root turns"); expect(message).toContain("additional model-controlled"); return true;
+      expect(message).toContain("4 paid/live provider root turns"); expect(message).toContain("additional model-controlled"); return true;
     }, () => 10).liveAuthorization).toEqual(authorization);
   });
 
-  it.each([["v1", "codex-basic"], ["v2", "codex-basic"], ["v1", instructionGraphControlName], ["v2", instructionGraphControlName]])("requires accepted matched evidence for %s with saved control %s", (version, controlName) => {
-    const treatmentName = `codex-instruction-graph-${version}`;
+  it.each(["claude-instruction-graph-v2", "prime-agent-instruction-graph-v2"])("preflights and records matched %s routes on a search-disabled target", async (treatmentName) => {
+    const spec = instructionGraphTreatments[treatmentName];
+    const service = await serviceFixture({ controlName: spec.controlName, treatmentName, targetKey: "linux-x64" });
+    const names = [spec.controlName, treatmentName];
+    const selection = { testCaseIds: [caseId], harnessConfigurationNames: names, judgeConfigurationName: "deterministic-graph-contract" };
+    const authorized = authorizeInstructionGraphSelection(selection, { cases }, (message) => {
+      expect(message).toContain("4 paid/live provider root turns");
+      expect(message).toContain("provider-native helpers");
+      expect(message).not.toContain("Codex");
+      return true;
+    }, () => 10);
+    expect(authorized.liveAuthorization).toEqual(authorization);
+    expect(() => authorizeInstructionGraphSelection({ ...selection, harnessConfigurationNames: [instructionGraphControlName, treatmentName] }, { cases }, () => true, () => 10)).toThrow("matching frozen");
+    const dispatches = [];
+    vi.stubGlobal("fetch", vi.fn(async (url, options = {}) => {
+      if (new URL(url).pathname === "/api/model-settings") return Response.json({ harnesses: [], providers: [], families: [] });
+      if (new URL(url).pathname === "/api/threads") { dispatches.push(JSON.parse(options.body)); throw new Error("Injected dispatch loss"); }
+      throw new Error(`Unexpected ${url}`);
+    }));
+    const run = await service.createRun(authorized);
+    await Promise.all(service.running.values());
+    const saved = service.getRun(run.id);
+    expect(saved.comparison).toMatchObject({ harnessPair: names, treatment: { implementation: spec.implementation, readProtocol: 2 }, qualityEquivalence: "unproven" });
+    expect(service.catalog().ablations).toEqual([expect.objectContaining({ harnessPairs: [{ control: spec.controlName, treatment: treatmentName }] })]);
+    expect(service.validateLiveCredential.mock.calls.map(([configuration, reference, selected]) => [configuration.name, reference, selected])).toEqual([
+      [spec.controlName, "connected-product-provider", {}], [treatmentName, "connected-product-provider", { familyId: 1 }],
+    ]);
+    expect(dispatches.map(({ harnessConfigurationName, modelSelection }) => ({ harnessConfigurationName, modelSelection }))).toEqual(names.map((harnessConfigurationName) => ({ harnessConfigurationName, modelSelection: { familyId: 1 } })));
+    expect(saved.executions.every((execution) => execution.harnessConfiguration.graphCapabilityProfile.search === "disabled")).toBe(true);
+    expect(service.selectModel).not.toHaveBeenCalled();
+    const before = service.listRuns().length;
+    const validate = service.validateLiveCredential;
+    service.validateLiveCredential = vi.fn(async (...args) => {
+      const route = await validate(...args);
+      if (args[0].name === treatmentName) route.selectedModel.providerId = "different";
+      return route;
+    });
+    dispatches.length = 0;
+    await expect(service.createRun(authorized)).rejects.toThrow("differ");
+    expect(dispatches).toEqual([]);
+    expect(service.listRuns()).toHaveLength(before);
+  });
+
+  it.each([["codex-instruction-graph-v1", "codex-basic"], ["codex-instruction-graph-v2", "codex-basic"], ["codex-instruction-graph-v1", instructionGraphControlName], ["codex-instruction-graph-v2", instructionGraphControlName], ["claude-instruction-graph-v2", "claude-full-prompt-control"], ["prime-agent-instruction-graph-v2", "prime-agent-full-prompt-control"]])("requires accepted matched evidence for %s with saved control %s", (treatmentName, controlName) => {
+    const version = treatmentName.endsWith("v1") ? "v1" : "v2";
     const comparison = version === "v1" && controlName === "codex-basic" ? undefined : { treatment: { name: treatmentName, versionKey: treatmentName, digest: "a".repeat(64), readProtocol: version === "v2" ? 2 : 1 }, harnessPair: [controlName, treatmentName], preflight: Object.fromEntries([controlName, treatmentName].map((name) => [name, { selectedModel: { familyId: 1, providerId: "work", modelId: "model" } }])) };
     const control = { testCaseId: caseId, harnessConfigurationName: controlName, modelResolution: { selectedModel: { familyId: 1, modelId: "model" } }, turns: [{ status: "accepted", prompt: "Same", modelSelection: { familyId: 1, providerId: "work", modelId: "model" }, permissionProfileId: "auto", effectivePermissionReceipt: { mode: "auto" }, personalPresentationVersionKey: "personal-presentation-v6", personalPresentationVersionId: 9, candidateTrace: { status: "complete", completionBrokerAvailable: true } }] };
     const treatment = { ...structuredClone(control), harnessConfigurationName: treatmentName, harnessConfiguration: { settings: { instructionGraphVersionKey: treatmentName, instructionGraphDigest: "a".repeat(64) } } };
@@ -164,17 +209,18 @@ describe("Instruction graph Eval comparison", () => {
     expect(instructionMetricsFromTrace([usageEvent(5, 1, null)], { complete: true }).providerSessionUsage.status).toBe("unknown");
   });
 
-  it("counts physical v2 body delivery, replays and duplicate metadata separately with reason receipts", () => {
+  it.each(["codex-instruction-graph-v2", "claude-instruction-graph-v2", "prime-agent-instruction-graph-v2"])("counts physical body delivery and reasons for %s", (versionKey) => {
     const reason = { purpose: "authoring", detail: "Need the node submission signature." };
     const operation = (requestKey, delivery, replayed = false, bodyCharacters = 20) => ({ method: "POST", path: "/api/graph/instruction-graph/retrieve", status: 200,
       instructionRetrieval: { requestKey, replayed, reason, entries: [{ nodeId: 7, key: "nodes", delivery, bodyCharacters, bodyBytes: bodyCharacters }] } });
-    const events = [{ type: "prompt", data: { instructionGraphVersionKey: "codex-instruction-graph-v2", instructionGraphDigest: "b".repeat(64) } }];
+    const events = [{ type: "prompt", data: { instructionGraphVersionKey: versionKey, instructionGraphDigest: "b".repeat(64) } }];
     const graphOperations = [operation("first", "body"), operation("first", "body", true), operation("duplicate", "already-returned", false, 0), {
       ...operation("reread", "reread"), instructionRetrieval: { ...operation("reread", "reread").instructionRetrieval, rereadReason: "Earlier output was truncated." },
     }];
     const metric = instructionMetricsFromTrace(events, { complete: true, ledgerComplete: true, graphOperations });
     expect(metric.instructionRetrieval).toMatchObject({ readProtocol: 2, reasonCoverage: "complete", successfulReads: 3, uniqueModulesRead: 1, uniqueReadRequests: 3, replayBodyResponses: 1, duplicateMetadataResponses: 1, returnedBodyCharacters: 60, returnedBodyBytes: 60 });
     expect(metric.instructionRetrieval.readReasons).toHaveLength(4);
+    expect(metric.providerSessionUsage).toMatchObject({ status: "unknown", counters: null, nativeChildCoverage: "unknown" });
     const dossier = projectExecutionDossier({}, { id: "reasoned", turns: [{ interactionId: 9, graphNodeId: 11, instructionMetrics: metric }] });
     expect(dossier.instructionRetrieval).toMatchObject([{ interactionId: 9, graphNodeId: 11, reasonCoverage: "complete", readReasons: metric.instructionRetrieval.readReasons }]);
     const search = { method: "POST", path: "/api/graph/instruction-graph/search", status: 200, instructionSearchReceipt: { reason: { purpose: "search", detail: "Find the specific repair rule." } } };
