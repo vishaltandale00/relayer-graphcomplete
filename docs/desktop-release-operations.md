@@ -161,6 +161,18 @@ readiness/authentication; it proves neither connected-profile upgrade recovery
 nor a model's choice to author artifact layers. The reload is a renderer reload,
 not a native process restart.
 
+### Automated predecessor replay
+
+`npm run test:desktop:upgrade-replay` rebuilds a disposable baseline with the
+hash-pinned 0.2.40 native services, then reopens its stores with candidate services.
+It repeats twice from empty profiles, including interrupted readiness recovery
+and another process reopen. The existing Apple Silicon packaging CI job runs it
+against the package that job just built. No dedicated machine, saved account or
+paid inference is needed. See the [checkpoint map and proof limits](evidence/desktop-upgrade-replay/README.md).
+This establishes native service persistence and recovery under controlled vendor
+responses. It does not replace signed connected-account qualification, actual
+desktop navigation, updater canary or live authoring.
+
 ### Live artifact authoring checkpoint
 
 Run a bounded live authoring smoke only with separate explicit authorization

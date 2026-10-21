@@ -743,6 +743,20 @@ jobs:
         env:
           RELAYER_PACKAGING_FETCH_ON_MISS: ${{ steps.runtime-ready.outputs.ready == 'true' && '1' || '0' }}
           RELAYER_DESKTOP_TARGET: ${{ matrix.target }}
+          RELAYER_DESKTOP_SOURCE_COMMIT: ${{ github.sha }}
+      - name: Replay pinned predecessor upgrade twice with the packaged native services
+        timeout-minutes: 10
+        run: >-
+          npm run test:desktop:upgrade-replay --
+          --candidate-app "desktop/dist/mac-arm64/Relayer Dev.app"
+          --evidence-directory "${{ runner.temp }}/upgrade-replay"
+      - name: Upload native upgrade replay evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: native-upgrade-replay-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/upgrade-replay
+          if-no-files-found: error
       - name: Save trusted packaging Rust compilation acceleration
         if: ${{ github.event_name == 'push' && success() && steps.rust-cache.outputs.cache-primary-key != '' && steps.rust-cache.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v5
