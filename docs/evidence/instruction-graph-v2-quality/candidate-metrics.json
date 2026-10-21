@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+  "status": "completed",
+  "scope": "Candidate native-session counters only; judge inference excluded. Whole-task native-child coverage remains unknown.",
+  "arms": [
+    {
+      "harness": "codex-basic",
+      "instructionRetrieval": {
+        "reasonCoverage": "unknown",
+        "returnedBodyCharacters": null,
+        "returnedBodyBytes": null,
+        "uniqueModuleReadsByGraphSession": null,
+        "replayBodyResponses": null,
+        "rereadBodyResponses": null,
+        "duplicateMetadataResponses": null
+      },
+      "actualPromptCharacters": 159383,
+      "observedInputTokens": 415138,
+      "observedOutputTokens": 4817,
+      "recordedSessions": 2,
+      "expectedGraphSessions": 2,
+      "totalInputTokens": null,
+      "coverage": "unknown",
+      "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+      "latencyScope": "evaluation-cell-including-grading",
+      "latencyMs": 373952,
+      "graphWriteRejections": 0
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "instructionRetrieval": {
+        "reasonCoverage": "complete",
+        "returnedBodyCharacters": 15604,
+        "returnedBodyBytes": 15606,
+        "uniqueModuleReadsByGraphSession": 15,
+        "replayBodyResponses": 0,
+        "rereadBodyResponses": 0,
+        "duplicateMetadataResponses": 0
+      },
+      "actualPromptCharacters": 32163,
+      "observedInputTokens": 275254,
+      "observedOutputTokens": 3377,
+      "recordedSessions": 2,
+      "expectedGraphSessions": 2,
+      "totalInputTokens": null,
+      "coverage": "unknown",
+      "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+      "latencyScope": "evaluation-cell-including-grading",
+      "latencyMs": 644127,
+      "graphWriteRejections": 0
+    }
+  ]
+}

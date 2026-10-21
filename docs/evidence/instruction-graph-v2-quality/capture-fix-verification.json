@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "implementer": "/root/adversarial_review",
+  "status": "focused_deterministic_proof_only_non_certifying_without_pr",
+  "checkpoint": "JUDGE-CAP-001",
+  "productAuthority": {
+    "path": "docs/prd/index.html",
+    "section": "13.4.1",
+    "checkpoint": "JUDGE-CAP-001"
+  },
+  "sourceScope": [
+    {
+      "path": "desktop/eval-main/review-session.mjs",
+      "sha256": "84534d2939921beb7d9d29e7d7adaa9bdda09ff32d89005f45c116bec5b5b8e4"
+    },
+    {
+      "path": "test/review-session.test.mjs",
+      "sha256": "6d52ae344db53fbcc0f601c5324f3129bc9d78b8a2cab1147b587556a03ae808"
+    }
+  ],
+  "behavior": [
+    "Each ReviewSession serializes screenshot requests from the initial presentation snapshot through renderer capture, restoration and evidence registration. Viewport and element requests use the same session-local queue.",
+    "Malformed requests are rejected before enqueueing. Queued work rechecks that the review window is open before sending any capture command.",
+    "Ordinary capture or unknown-target failures release the queue after successful restoration. Capture command timeouts and restoration failures withhold evidence and refuse subsequent screenshots because renderer ownership is uncertain.",
+    "When both capture and restoration fail, AggregateError preserves both original errors. Existing pre/post pixel presentation checks continue to reject Graph/Esc navigation changes.",
+    "Provider execution, native recursion and review interactions do not acquire this screenshot queue. No global scheduler was added."
+  ],
+  "red": {
+    "command": "npx vitest run test/review-session.test.mjs -t 'binds overlapping full-element'",
+    "exitCode": 1,
+    "unmodifiedProductionModuleSha256": "3efb42fceb3ae6f2a42fd6552ccfc775f42eedc59a96a6a689db8f78feed1712",
+    "testCount": 1,
+    "durationMs": 826,
+    "failure": {
+      "expected": "node-detail pixels",
+      "received": "graph pixels"
+    },
+    "mechanism": "The real ReviewSession runs overlapping full-element screenshot calls against a fake Electron transport whose mutable capture slot has asynchronous ownership assignment, matching the production renderer race. Assertions read the saved tile PNG bytes and compare them with the immutable capture target.",
+    "testEvolution": "The observed red test covered two element targets. The final green test also covers a concurrent viewport request; later tests add distinct failure boundaries. The final test-file hash is the green source, not an asserted red-source snapshot.",
+    "evidenceLocation": "Agent tool result at 2026-10-20 15:03:28 America/New_York; the red terminal output was not saved as an independent log."
+  },
+  "green": {
+    "command": "npx vitest run test/review-session.test.mjs",
+    "exitCode": 0,
+    "filesPassed": 1,
+    "testsPassed": 30,
+    "testsFailed": 0,
+    "durationMs": 1140,
+    "testExecutionMs": 86,
+    "distinctBoundaries": [
+      "Saved bytes match two overlapping full-element targets and a queued viewport target, with ordered multi-tile output.",
+      "A malformed request does not restore the active capture; a failed platform capture and an ordinary unknown-target rejection allow a subsequent queued capture.",
+      "A queued screenshot refuses a closed review window before its capturePlan starts.",
+      "A timed-out capturePlan may complete late, but queued and later requests never reuse its renderer capture slot.",
+      "Restoration failure saves no evidence and rejects queued captures, with or without a preceding platform-capture failure.",
+      "Existing viewport/element Graph/Esc invalidation tests and presentation-change retry tests remain in the passing suite."
+    ]
+  },
+  "subsumption": {
+    "replacedTest": "does not restore an element capture owned by an overlapping request",
+    "reason": "The old fake synchronously claimed ownership and expected overlapping requests to fail. The replacement reproduces asynchronous ownership overwrite, asserts actual persisted bytes, and covers the intended queued success behavior. Separate failure tests protect cleanup and ownership refusal."
+  },
+  "additionalCheck": {
+    "command": "git diff --check -- desktop/eval-main/review-session.mjs test/review-session.test.mjs",
+    "exitCode": 0
+  },
+  "limits": [
+    "This is implementer evidence, not an independent review assertion or a PR certification.",
+    "The fake transport exercises the production ReviewSession seam without provider inference; it does not by itself prove real Chromium screenshot pixels.",
+    "Required npm run check, npm run build and test:eval-web are parent-owned and are not claimed passed in this focused record.",
+    "Earlier mislabeled screenshot artifacts and the failed quality attempt remain preserved; no quality score equivalence or context savings is inferred."
+  ],
+  "sourceSnapshot": {
+    "path": "docs/evidence/instruction-graph-v2-quality/source-snapshot.json",
+    "digest": "a967325fa6813cfcdf9ed5060901a7e7f231a749da2a347f914c1c2819aafdbd",
+    "fileCount": 44,
+    "allFileHashesVerified": true
+  }
+}

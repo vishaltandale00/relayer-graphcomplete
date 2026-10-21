@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "scope": "Future Eval frozen full-prompt control selection and historical comparison preservation",
+  "sourceScope": {
+    "files": [
+      {
+        "path": "harnesses/codex-full-prompt-control.yaml",
+        "sha256": "a91f65cb6977881c2346eed841cc2a121d3b2d9e143c58d0cc8b1b6cab544d6d"
+      },
+      {
+        "path": "desktop/eval-main/configuration-paths.mjs",
+        "sha256": "453769e769d63fefe7abeac827792b1ed8e3f71e77009e1d5e2f0e12fdfb3c84"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+        "sha256": "2416eb0b3465c124e5916b5e7e77406e5da897486065bd7614d0595c9fea1df0"
+      },
+      {
+        "path": "desktop/eval-main/eval-service.mjs",
+        "sha256": "9b05ce028f17f0e8a5f714166338dec7af1545ee4a210d1a790821866ea65f7b"
+      },
+      {
+        "path": "desktop/eval-renderer/run-model.js",
+        "sha256": "2590527538289f6e0eb6781d6c9d03ed04bc66989e2d3b48257da1095d0ec024"
+      },
+      {
+        "path": "test/eval-configuration-paths.test.mjs",
+        "sha256": "99c3b5da59ffc3326e58010700b7863dee65943e5b93037f670f487f342fda34"
+      },
+      {
+        "path": "test/eval-instruction-graph.test.mjs",
+        "sha256": "e26098f45fe349e29fb28c22ce2b5614c2ec8a778d1f6268c088ef0143d9aef5"
+      }
+    ],
+    "digest": "a1a059bfa30e8a18f6389e1986f8cc0b73458aee9593282a8210fe3a87d89839"
+  },
+  "scopeDigestAlgorithm": "SHA-256 of compact UTF-8 JSON file entries with sorted object keys",
+  "checkpoints": {
+    "IG-005": [
+      "Frozen full-prompt configuration matches V1/V2 outside named instruction delivery pins",
+      "Future presets and backend/UI authorization require the frozen control",
+      "Obsolete codex-basic live pairs reject before dispatch",
+      "Current product default pins V2 revision19 and exact fixture digest"
+    ],
+    "IG-012": [
+      "Historical V1 missing-pair fallback and V2 stored pair remain accepted evidence",
+      "Historical revision18 snapshot/digest survive reopen beside current codex-basic revision19",
+      "Future V1/V2 records finalize using their explicitly saved new-control pair"
+    ]
+  },
+  "controlCopy": {
+    "sourceName": "codex-basic",
+    "sourceRevision": 18,
+    "sourceYamlSha256": "87a148f38e63649fe70352ffcbdc6244a538389db8d37cf3e0c81bd892db7d33",
+    "controlName": "codex-full-prompt-control",
+    "controlRevision": 1,
+    "controlYamlSha256": "a91f65cb6977881c2346eed841cc2a121d3b2d9e143c58d0cc8b1b6cab544d6d",
+    "identicalExceptNameAndRevision": true
+  },
+  "verificationPlan": {
+    "warm": "Focused Eval configuration, comparison service and dashboard model tests",
+    "heavy": "Parent-owned npm run check, npm run build, applicable Eval browser proof on final aggregate source",
+    "live": "No inference launched; scoped configuration-selection and history checks are deterministic."
+  },
+  "actuallyRan": {
+    "command": "npx vitest run test/eval-instruction-graph.test.mjs test/eval-configuration-paths.test.mjs test/eval-dashboard-model.test.mjs",
+    "testFilesPassed": 3,
+    "testsPassed": 48,
+    "durationSeconds": 2.4,
+    "inference": false,
+    "initialAttempt": "Six EvalService tests initially failed to import a temporarily missing compiled @relayer/graph-client entry. After shared package build completed, final focused run passed without an import workaround."
+  },
+  "testPortfolio": "No tests retired. Extended finalizer cases distinguish legacy V1 absent-pair fallback, historical V2 stored pair, and future V1/V2 stored frozen-control pairs. Reopen observes the same-name current catalog collision without rewriting archived snapshots.",
+  "heavyResults": "Owned and recorded by the parent; this scoped record makes no heavy pass claim.",
+  "certification": "Workspace evidence only; no PR or commit certification."
+}

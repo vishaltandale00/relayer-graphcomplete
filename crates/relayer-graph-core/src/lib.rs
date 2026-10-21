@@ -48,3 +48,8 @@ pub use graph::artifact;
 pub use graph::{ImageIcon, image_icon};
 
 pub use graph::{icon_serde, optional_icon_serde};
+
+pub use graph::{
+    INSTRUCTION_GRAPH_THREAD_MAX, INSTRUCTION_GRAPH_THREAD_MIN, InstructionGraphDefinition,
+    InstructionGraphManifest, InstructionModuleDefinition, InstructionModulePointer,
+};

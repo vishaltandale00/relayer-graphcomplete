@@ -397,3 +397,48 @@ export class GraphApiError extends Error {
     this.name = "GraphApiError";
   }
 }
+
+/** Trusted, accepted, immutable instruction corpus pinned to this completion. */
+export interface InstructionGraphManifest {
+  readonly retrievalContractVersion?: number;
+  readonly versionKey: string;
+  readonly digest: string;
+  readonly threadId: GraphId;
+  readonly interactionNodeId: GraphId;
+  readonly rootLayerId: GraphId;
+  readonly modules: readonly {
+    readonly key: string;
+    readonly title: string;
+    readonly nodeId: GraphId;
+    readonly prerequisites: readonly GraphId[];
+  }[];
+}
+
+export interface InstructionRetrievalReason {
+  readonly purpose: "authority" | "authoring" | "presentation" | "navigation" | "search" | "preview" | "repair" | "delegation" | "verification" | "recovery";
+  readonly detail: string;
+}
+export interface InstructionRetrievalRequest {
+  readonly requestKey: string;
+  readonly nodeIds: readonly GraphId[];
+  readonly reason: InstructionRetrievalReason;
+  readonly rereadReason?: string;
+}
+export interface InstructionRetrievalReceipt {
+  readonly versionKey: string;
+  readonly digest: string;
+  readonly requestKey: string;
+  readonly replayed: boolean;
+  readonly reason: InstructionRetrievalReason;
+  readonly rereadReason?: string;
+  readonly entries: readonly {
+    readonly nodeId: GraphId;
+    readonly key: string;
+    readonly title: string;
+    readonly delivery: "body" | "already-returned" | "reread";
+    readonly bodyCharacters: number;
+    readonly bodyBytes: number;
+    readonly detail?: string;
+    readonly firstRequestKey?: string;
+  }[];
+}

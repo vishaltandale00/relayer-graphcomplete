@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "status": "passed-final-scoped-snapshot",
+  "recordedAtUtc": "2026-10-20T17:04:20Z",
+  "purpose": "Deterministic authenticated real-Ladybug instruction-search mechanics on the frozen v2 corpus",
+  "command": "CARGO_TARGET_DIR=\"$PWD/target\" LBUG_LIBRARY_DIR=\"$PWD/.relayer/instruction-graph-v1/lbug/lib\" LBUG_INCLUDE_DIR=\"$PWD/.relayer/instruction-graph-v1/lbug/include\" cargo test -p relayer-graph-server --test instruction_graph_search_v2 --features crash-test-support -- --nocapture",
+  "sourceHead": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+  "sourceSnapshot": {
+    "scope": "The listed production query, instruction-authority, transport, corpus and benchmark files; this is not a complete repository source attestation.",
+    "digestAlgorithm": "SHA-256 of UTF-8 concatenation in sorted path order: path + NUL + lowercase file SHA-256 + LF",
+    "digestSha256": "f0c288397cc8175b42274d0afffc2ac34b07c165f8ed5f68fc7c391d0638ca1a",
+    "files": {
+      "Cargo.lock": "83e8d4708f40f698ee161bb6178f0fe4f58a67284e30a36450799acd3d735b98",
+      "Cargo.toml": "0ff23bb421a7619ae76aef1091e8dd825569a853de996a8e36f3c0abb8bc7a49",
+      "crates/relayer-graph-core/Cargo.toml": "049ad24447fcb27aac0d3c31324dd3dfd6bc01e10ece105c8c46f2f4130c1782",
+      "crates/relayer-graph-core/src/graph/instruction_graph.rs": "2aaf612f384f2e45fdd372ef4c9871ebf1844424bc690571d9c01d686e5fb76f",
+      "crates/relayer-graph-core/src/query/limits.rs": "872f0791769d3f13422114abdd8ba94ba0187d30a60f311c28668a9614681d7b",
+      "crates/relayer-graph-core/src/query/parser.rs": "1b09e64f08fc2e68f79f68bbbc8ca65790ac21623349407e63918a8954d8865f",
+      "crates/relayer-graph-server/Cargo.toml": "06e0cfe2f95c02d5fbd748379c1a6ef02ea6b7ecb9b53635ecb1b01e569cb3e4",
+      "crates/relayer-graph-server/src/instruction_retrieval.rs": "d110d4aa00435b696ef98c3906f1bf074d2abb36937c471880c6175a2f7cf03b",
+      "crates/relayer-graph-server/src/lib.rs": "fa1d51a4151ad9726cb98d447dc63f944ab8308ecf2960055e17d593000757b7",
+      "crates/relayer-graph-server/src/search_index/query.rs": "6bec600c1bc6ddbf353cbd01c979884e6f9298100185f3c9790ea93ff1e6ccfe",
+      "crates/relayer-graph-server/tests/instruction_graph_search_v2.rs": "7ba7ee54f57eb691997884bfd9210a79d776bc3378c954e720fcb25ef808f9af",
+      "fixtures/instruction-graph-v2-search-cases.json": "4482a793bc4df99d0ee8346ef7dd40b65387ef0f5cf2d2c10cd5815944187d7b",
+      "fixtures/instruction-graph-v2.json": "b55b45998ff65f948ac56e4c083d67a1434b5a9a9fd1054d551206edab6286d3",
+      "packages/harness-host/src/implementations/instruction-graph-v2.ts": "decd354c4e29c61463d541feab62f7cd2cdf7ba0a9ae20c81e49eafc0cdbd7fb"
+    },
+    "changedDuringRun": []
+  },
+  "execution": {
+    "host": {
+      "system": "Darwin",
+      "architecture": "arm64"
+    },
+    "rustc": "rustc 1.98.0 (88d9e12ae 2026-08-18)",
+    "exitCode": 0,
+    "testName": "actual_v2_corpus_search_is_bounded_exact_and_dependency_complete",
+    "passed": 1,
+    "failed": 0,
+    "ignored": 0,
+    "testSeconds": 3.24,
+    "cargoReportedProfileCompletionSeconds": 25.89,
+    "profileCompletionIncludesBuildLockWait": true,
+    "testExecutable": {
+      "path": "target/debug/deps/instruction_graph_search_v2-f5f0b0e4dd03a25a",
+      "sha256": "64a1ab7858f2d85cf03f4c83cc4365ca01c1f879cb7cfb0ef9b7f261db441a31",
+      "sizeBytes": 119577776
+    },
+    "completionOutput": "    Finished `test` profile [unoptimized + debuginfo] target(s) in 25.89s\n     Running tests/instruction_graph_search_v2.rs (target/debug/deps/instruction_graph_search_v2-f5f0b0e4dd03a25a)\n\nrunning 1 test\ninstruction_graph_search_v2_benchmark={\"aboveHardRowCapRejected\":true,\"bodyProjectionsRejected\":5,\"corpusDigest\":\"e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224\",\"corpusVersionKey\":\"codex-instruction-graph-v2\",\"exactTitleLookups\":{\"passed\":23,\"total\":23},\"foreignCorpusMatches\":0,\"manifestDependencyGoldCases\":4,\"naturalPhraseExactMatches\":{\"hits\":0,\"interpretation\":\"Exact title equality supplies no natural-language relevance matching\",\"phrases\":12},\"semanticRelevance\":\"unmeasured\",\"truncatedDirectoryRows\":[5,8],\"unsupportedTextQueriesRejected\":5}\ntest actual_v2_corpus_search_is_bounded_exact_and_dependency_complete ... ok\n\ntest result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.24s\n\n"
+  },
+  "metrics": {
+    "aboveHardRowCapRejected": true,
+    "bodyProjectionsRejected": 5,
+    "corpusDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224",
+    "corpusVersionKey": "codex-instruction-graph-v2",
+    "exactTitleLookups": {
+      "passed": 23,
+      "total": 23
+    },
+    "foreignCorpusMatches": 0,
+    "manifestDependencyGoldCases": 4,
+    "naturalPhraseExactMatches": {
+      "hits": 0,
+      "interpretation": "Exact title equality supplies no natural-language relevance matching",
+      "phrases": 12
+    },
+    "semanticRelevance": "unmeasured",
+    "truncatedDirectoryRows": [
+      5,
+      8
+    ],
+    "unsupportedTextQueriesRejected": 5
+  },
+  "trustedNativeCache": {
+    "artifact": {
+      "manifestPath": ".relayer/instruction-graph-v1/lbug/manifest.json",
+      "manifestSha256": "972c70c6439756032532a002db9e12190d05d88b926dd789e3b6cc0e40b4b380",
+      "manifest": {
+        "version": 1,
+        "kind": "lbug-prebuilt",
+        "sourceCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+        "platform": "macos-arm64",
+        "rustcRelease": "1.98.0",
+        "cargoLockSha256": "83e8d4708f40f698ee161bb6178f0fe4f58a67284e30a36450799acd3d735b98",
+        "lbugVersion": "0.18.0",
+        "lbugFeatures": [],
+        "cargoProfile": "debug",
+        "library": {
+          "name": "liblbug.a",
+          "sha256": "b10c779e309e9fd44906dfa74ee54fd4fc6044ece563b4c06077ca6751d5b599",
+          "sizeBytes": 459246768,
+          "stripped": true
+        },
+        "contentsSha256": "53d1f3703fbf51ec832841c5ea5d93f0ed7c915ab6aa890b953835f1a38d1fe9"
+      }
+    },
+    "verification": {
+      "command": "node scripts/ci/lbug-artifact.mjs verify --artifact-dir .relayer/instruction-graph-v1/lbug --platform macos-arm64 --rustc-release 1.98.0",
+      "exitCode": 0,
+      "output": "Prebuilt Ladybug bundle verified for lbug 0.18.0 (built at 2ef4f7a4f14bb444a955a180a2f90cec34873e93)."
+    },
+    "reuse": "Reused the repository-verified native bundle and warm private target; the actual Rust test executable ran freshly. No native provisioning or paid inference."
+  },
+  "supersededRuns": [
+    {
+      "corpusDigest": "31764d62c70c7606e3db3d8c64c42d28d8edcd34d63caf6f42966d99623fd55f",
+      "result": "Passed, superseded by reviewed corpus corrections."
+    },
+    {
+      "corpusDigest": "3130d5e94fafa5d238be62a56e261bc390e985f9f2875c42ec3e6d22bebaa2e4",
+      "result": "Passed, superseded by reviewed backend and corpus corrections."
+    },
+    {
+      "corpusDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224",
+      "result": "Earlier attempt passed but corpus changed during compilation; this final receipt comes from a separate clean run with unchanged listed hashes."
+    }
+  ],
+  "limits": [
+    "Exact canonical-title coverage is lookup correctness, not evidence of natural-language relevance.",
+    "All 12 unchanged natural-phrase exact-equality probes returned zero matches. Query-v1 has no substring, case folding, synonym expansion, full-text or semantic ranking.",
+    "Prerequisite checks compare manifest transitive closure with four reviewed gold cases and resolve those titles through the authenticated engine route; generic CONNECTED neighbors are not treated as dependency authority.",
+    "This scoped benchmark does not prove task quality, rendered presentation, model topic selection, usage savings, paid inference performance or complete native-helper coverage.",
+    "No full npm check/build/eval-web proof was run by this reviewer. Review remains non-certifying without a pull request; later source changes invalidate the corresponding snapshot assertion."
+  ]
+}

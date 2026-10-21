@@ -1657,7 +1657,10 @@ mod tests {
         .fetch_all(&pool)
         .await
         .unwrap();
-        assert_eq!(versions, [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]);
+        assert_eq!(
+            versions,
+            [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]
+        );
         sqlx::query(
             "INSERT INTO thread_icon_proposals(interaction_node_id,icon) VALUES (1,'compass')",
         )

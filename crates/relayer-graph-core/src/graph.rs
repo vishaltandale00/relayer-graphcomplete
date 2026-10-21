@@ -3,6 +3,7 @@ mod completion;
 mod database;
 mod history;
 mod import;
+mod instruction_graph;
 mod interaction_scope;
 mod invocation;
 mod live_answers;
@@ -69,3 +70,8 @@ pub(crate) use model::{
 pub use model::artifact;
 pub use model::image_icon::{ImageIcon, image_icon};
 pub use model::image_icon::{optional_wire as optional_icon_serde, wire as icon_serde};
+
+pub use instruction_graph::{
+    INSTRUCTION_GRAPH_THREAD_MAX, INSTRUCTION_GRAPH_THREAD_MIN, InstructionGraphDefinition,
+    InstructionGraphManifest, InstructionModuleDefinition, InstructionModulePointer,
+};

@@ -1,0 +1,117 @@
+{
+  "decision": "2026-10-21 human promotion of exact V2 as codex-basic revision19",
+  "evidenceStatus": "planned; see verification-results.json for actual commands and outcomes",
+  "changedSeams": [
+    {
+      "checkpoints": [
+        "IG-001",
+        "IG-002",
+        "IG-003",
+        "IG-008",
+        "IG-009",
+        "IG-010"
+      ],
+      "seams": [
+        "graph core immutable corpus publication, private scope and attachment",
+        "server reasoned retrieval, bounded metadata search, active epoch delivery"
+      ],
+      "tests": [
+        "crates/relayer-graph-core/src/graph/instruction_graph.rs",
+        "crates/relayer-graph-server/tests/graph_search_route.rs",
+        "crates/relayer-graph-server/tests/instruction_graph_search_v2.rs"
+      ]
+    },
+    {
+      "checkpoints": [
+        "IG-004",
+        "IG-011",
+        "IG-014",
+        "IG-016"
+      ],
+      "seams": [
+        "typed graph client instruction routes",
+        "Codex bootstrap selection and exact manifest pin validation",
+        "trusted desktop corpus startup publication and app-server attachment",
+        "default config revision and pin; no-search retrieval"
+      ],
+      "tests": [
+        "packages/graph-client/test/instruction-graph.test.ts",
+        "packages/harness-host/test/configuration.test.ts",
+        "packages/harness-host/test/codex-basic.test.ts",
+        "test/instruction-graph-e2e.test.mjs"
+      ]
+    },
+    {
+      "checkpoints": [
+        "IG-015"
+      ],
+      "seams": [
+        "saved descriptor migration and strict live configuration comparison",
+        "catalog version/digest admission and historical receipt immutability (unchanged seam)"
+      ],
+      "tests": [
+        "packages/harness-host/test/host.test.ts",
+        "packages/harness-host/test/host-legacy-continuity.test.ts",
+        "catalog::tests::an_upgraded_digest_is_due_one_automatic_evaluation",
+        "attempts::tests::attempt_admission_rejects_a_stale_harness_policy_snapshot",
+        "attempts::tests::attempt_receipt_is_immutable_and_terminal_transition_is_one_shot",
+        "catalog::tests::desktop_catalog_retires_product_codex_high_without_rewriting_history"
+      ]
+    },
+    {
+      "checkpoints": [
+        "IG-005",
+        "IG-006",
+        "IG-012",
+        "IG-017"
+      ],
+      "seams": [
+        "Eval frozen full-prompt control catalog and pair authorization",
+        "live route equality before dispatch and metrics finalization",
+        "reviewer retrieval reason and physical delivery display",
+        "historical pair fallback and artifacts"
+      ],
+      "tests": [
+        "test/eval-configuration-paths.test.mjs",
+        "test/eval-instruction-graph.test.mjs",
+        "test/eval-graph-timing-directory.test.mjs",
+        "test/graph-operation-recorder.test.mjs"
+      ]
+    },
+    {
+      "checkpoints": [
+        "IG-013",
+        "IG-014",
+        "TEL-005"
+      ],
+      "seams": [
+        "packaging corpus module and client API inventory",
+        "sanitized telemetry module inventory"
+      ],
+      "tests": [
+        "test/desktop-shell.test.mjs",
+        "test/desktop-telemetry-module-inventory.test.mjs"
+      ]
+    },
+    {
+      "checkpoints": [
+        "IG-006"
+      ],
+      "seams": [
+        "serialized whole screenshot capture transaction and fail-closed uncertain mutation recovery"
+      ],
+      "tests": [
+        "test/review-session.test.mjs"
+      ]
+    }
+  ],
+  "heavyEntryPoints": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-web",
+    "npm run test:eval-compiled-runtime",
+    "npm run desktop:pack"
+  ],
+  "paidProof": "Historical two matched quality trials retained unchanged; no new inference for promotion. No general quality equivalence claim.",
+  "cache": "Debug Ladybug native bundle verified platform macos-arm64, rustc1.98.0, Cargo.lock and content hashes. First packaging attempt stopped after detecting ambient RELAYER_CARGO_TARGET_DIR mismatch; retry clears both target overrides and uses repository packaging cache identities."
+}

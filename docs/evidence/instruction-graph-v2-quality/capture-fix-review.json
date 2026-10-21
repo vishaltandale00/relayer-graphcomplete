@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/eval_comparison",
+  "reviewedAt": "2026-10-20T19:06:53.787009+00:00",
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "sourceFilesHashVerified": 44,
+  "reviewedFiles": {
+    "desktop/eval-main/review-session.mjs": "84534d2939921beb7d9d29e7d7adaa9bdda09ff32d89005f45c116bec5b5b8e4",
+    "test/review-session.test.mjs": "6d52ae344db53fbcc0f601c5324f3129bc9d78b8a2cab1147b587556a03ae808"
+  },
+  "scope": "Independent source, regression-subsumption and authority review of ReviewSession screenshot serialization and ambiguous-capture containment against PRD 13.4/JUDGE-CAP-001.",
+  "verdict": "no_remaining_reviewed_capture_fix_blocker",
+  "status": "non_certifying_without_pr",
+  "observations": [
+    "Every screenshot target uses one per-session queue, acquired before its initial snapshot and held through all tiles, restoration and artifact registration. Queued inputs are cloned and open-state authority is checked again on execution.",
+    "Before and after platform pixel capture, the existing exact execution/thread/revision/turn/layer/selection/action/navigation binding checks remain. Concurrent Graph/Esc presentation changes reject evidence instead of relabeling pixels.",
+    "Ambiguous capture-mutating renderer timeouts and failed restoration invalidate subsequent screenshot work. A timed-out underlying command may complete late, but queued and later requests are refused before creating another capture.",
+    "Ordinary failed platform captures and rejected unknown targets do not poison a successfully restored session. Invalid requests cannot restore another request's target. A preceding capture failure and cleanup failure are both preserved through AggregateError.",
+    "Server-enforced read-only constructor authority, visible-control interaction/history boundaries, scoped screenshot evidence and graph acceptance behavior are unchanged."
+  ],
+  "testSubsumption": {
+    "replacedTest": "does not restore an element capture owned by an overlapping request",
+    "replacementTest": "binds overlapping full-element captures to their own target pixels",
+    "verdict": "replacement_and_distinct_failure_cases_preserve_boundary",
+    "reason": "The old fixture acquired capture ownership synchronously and could not reproduce the production pre-animation-frame race. The replacement models that race and verifies every persisted tile byte against its declared node-detail, graph or viewport target. Serialization eliminates overlapping ownership; separate queued failure, unknown-target, late-timeout, restoration-failure and closed-window cases retain the old cleanup and authority failure boundaries. Existing Graph/Esc tests remain."
+  },
+  "independentVerification": {
+    "command": "npx vitest run test/review-session.test.mjs test/judge-screenshot-loader.test.mjs test/review-workspace-readiness.test.mjs packages/eval-runner/test/simulated-user-evidence-validator.test.ts",
+    "exitCode": 0,
+    "filesPassed": 4,
+    "testsPassed": 43,
+    "durationSeconds": 2.93,
+    "kind": "in_process_and_inference_free",
+    "sourceFilesStillMatch": true
+  },
+  "requiredHandoffPortfolio": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-compiled-runtime",
+    "npm run test:eval-web"
+  ],
+  "unresolvedFindings": [],
+  "limits": [
+    "This scoped review and warm verification do not claim completion of the new full repository, compiled-runtime or real-browser proofs; the main agent records those separately.",
+    "This change does not repair or revalidate already saved mismatched screenshots. Prior pilot and failed-attempt artifacts remain immutable evidence.",
+    "No paid inference was executed by this reviewer. Provider-capacity failure, candidate acceptance, screenshot-grounded judge coverage and comparative quality remain separate outcomes."
+  ],
+  "invalidation": "Any change to the reviewed source or tests invalidates this source assertion. Review is non-certifying without a PR.",
+  "sourceRebinding": {
+    "previousSourceDigest": "a967325fa6813cfcdf9ed5060901a7e7f231a749da2a347f914c1c2819aafdbd",
+    "finalSourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+    "changedPaths": [
+      "docs/prd/index.html"
+    ],
+    "executableAndTestHashesUnchanged": true,
+    "exactTextChange": {
+      "before": "Concurrent screenshot requests must retain their own capture targets and tile sequences.",
+      "after": "Concurrent screenshots must retain their capture targets and tile sequences."
+    },
+    "verification": "Replacing this single new sentence with its old wording reconstructs the prior PRD SHA-256 exactly. Every one of the final 44 snapshot hashes matches the workspace. The product meaning and prior 43-test capture review remain unchanged.",
+    "priorReview": "capture-fix-review-before-readability-rebind.json",
+    "priorReviewSha256": "72b349071cfc714e0020ff888c0d5411525eaa1da5012283c7a189ce38274181"
+  },
+  "secondaryReceiptRefreshAudit": {
+    "path": "social-preview-refresh-review.json",
+    "sha256": "cbc8d8d540cda41cdb9fe16c126b18559d449d3abc120f84b19437cfac096ccb"
+  }
+}

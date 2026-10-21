@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "harnessConfiguration": "harnesses/codex-instruction-graph-v2.yaml",
+  "control": "codex-basic",
+  "treatment": "codex-instruction-graph-v2",
+  "caseCount": 1,
+  "acceptedRootTurns": 4,
+  "completedJudgments": 4,
+  "allJudgeCoverageComplete": true,
+  "orderedScaleMaximum": 8,
+  "perTurnScores": [
+    {
+      "criterion": "answer_quality",
+      "control": [
+        5,
+        5
+      ],
+      "treatment": [
+        5,
+        4
+      ]
+    },
+    {
+      "criterion": "recursive_coherence",
+      "control": [
+        7,
+        7
+      ],
+      "treatment": [
+        5,
+        6
+      ]
+    },
+    {
+      "criterion": "navigation_value",
+      "control": [
+        3,
+        5
+      ],
+      "treatment": [
+        4,
+        5
+      ]
+    },
+    {
+      "criterion": "presentation_quality",
+      "control": [
+        4,
+        5
+      ],
+      "treatment": [
+        4,
+        3
+      ]
+    },
+    {
+      "criterion": "follow_up_progress",
+      "control": [
+        null,
+        8
+      ],
+      "treatment": [
+        null,
+        7
+      ]
+    }
+  ],
+  "productionAggregate": {
+    "graphPresentation": {
+      "control": 4.5,
+      "treatment": 3.5
+    },
+    "comprehension": {
+      "control": 5,
+      "treatment": 4.5
+    }
+  },
+  "observedCandidateInputTokens": {
+    "control": 415138,
+    "treatment": 275254,
+    "reductionPercent": 33.69578308899691,
+    "scope": "Observed native-session receipts; excludes judge inference; full native-child coverage unknown."
+  },
+  "conclusion": "Lower observed candidate input, lower graph-presentation rating in this one paired two-turn pilot. Quality equivalence remains unproven; do not promote by this evidence.",
+  "judgeFindings": [
+    "V2 initial four-node layout shows parallel workers but undirected edges do not communicate process direction; judge identifies a missing contention-timeline expansion.",
+    "V2 follow-up explains the transition and links to earlier context, while its single-node canvas provides little graphical sequence."
+  ],
+  "scopeLimits": [
+    "One case, one unblinded judge per turn, no repeated-trial estimate or statistical significance.",
+    "Initial capacity-failed attempt excluded from these paired scores and metrics.",
+    "Declared $10 cap is recorded, not metered or enforced; actual dollar spend remains unknown."
+  ],
+  "verification": "verification.json",
+  "sourceReview": "capture-fix-review.json",
+  "rawEvidence": "quality-result.json",
+  "candidateMetrics": "candidate-metrics.json",
+  "renderedSamples": "rendered-samples.json",
+  "independentEvidenceReview": "quality-result-review.json",
+  "independentReviewStatus": "132 checks passed; non-certifying without PR"
+}

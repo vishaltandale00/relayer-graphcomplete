@@ -441,6 +441,7 @@ export class GraphCompleteRuntimeService {
         digestHarnessConfiguration,
         createClaudeBasicFactory,
         createCodexBasicFactory,
+        codexInstructionGraphCorpus,
         createPrimeAgentFactory,
         loadHarnessConfigurations,
         productHarnessImplementations,
@@ -642,6 +643,28 @@ export class GraphCompleteRuntimeService {
           },
         ));
         if (!previewBridgeResponse.ok) throw new Error(`Draft preview bridge registration failed (${previewBridgeResponse.status}).`);
+      }
+      const instructionConfigurations = [...configurations.values()].filter((configuration) =>
+        ["instruction-graph-v1", "instruction-graph-v2"].includes(configuration.settings.promptProfile));
+      for (const configuration of instructionConfigurations) {
+        const corpus = codexInstructionGraphCorpus(configuration.settings.instructionGraphVersionKey);
+        if (configuration.settings.instructionGraphVersionKey !== corpus.versionKey
+          || configuration.settings.instructionGraphDigest !== corpus.digest) {
+          throw new Error("Instruction graph configuration does not match the reviewed corpus.");
+        }
+        const published = await this.#awaitStartupOperation(this.fetchRequest(
+          new URL(`/api/control/instruction-graphs/${corpus.versionKey}`, graphUrl), {
+            method: "PUT", headers: { Authorization: `Bearer ${graphControlToken}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ digest: corpus.digest, modules: corpus.modules,
+              ...(corpus.retrievalContractVersion ? { retrievalContractVersion: corpus.retrievalContractVersion } : {}) }),
+          },
+        ));
+        if (!published.ok) throw new Error(`Instruction graph publication failed (${published.status}).`);
+        const manifest = await this.#awaitStartupOperation(published.json());
+        if (manifest.versionKey !== corpus.versionKey || manifest.digest !== corpus.digest
+          || (manifest.retrievalContractVersion ?? 1) !== (corpus.retrievalContractVersion ?? 1)) {
+          throw new Error("Instruction graph publication returned a different corpus identity.");
+        }
       }
       this.session = Object.freeze({
         graphUrl: graphOperationRecorder?.url ?? graphUrl,

@@ -1,3 +1,5 @@
+import { instructionMetricsFromTrace, aggregateInstructionMetrics } from "./instruction-graph-metrics.mjs";
+import { validateInstructionGraphComparison, finalizeInstructionGraphComparison, preflightInstructionGraphComparison, isInstructionGraphTreatment, instructionGraphControlName } from "./instruction-graph-comparison.mjs";
 import { completionArtifactEvidence } from "./task-completion-artifacts.mjs";
 import { abortable } from "./abortable.mjs";
 import { interactiveTripCase } from "./interactive-trip-case.mjs";
@@ -150,7 +152,13 @@ export const evalCases = Object.freeze([
 
 // Ablation presets hold one case constant while changing one product capability.
 // The graph-search on/off ablation retired once search became the configuration default.
-const evalAblations = Object.freeze([]);
+const evalAblations = Object.freeze(["v1", "v2"].map((version) => Object.freeze({
+  id: `codex-instruction-graph-${version}`,
+  name: `Codex · instruction graph ${version}`,
+  description: "Compare the frozen full prompt against graph-retrieved instructions with the same Codex model, permissions, V6 preferences and recursion.",
+  testCaseIds: [basicEvalCaseId],
+  harnessPairs: [{ control: instructionGraphControlName, treatment: `codex-instruction-graph-${version}` }],
+})));
 
 // Search is a default harness capability, so qualification follows the cases whose
 // evidence depends on search rather than every configuration that may search.
@@ -560,7 +568,12 @@ export async function graphTimingFromTraceDirectory(directory, sentAt, descripto
     status: manifest?.status, truncated: manifest?.truncated });
   const graphOperations = await lines("graph-operations.jsonl", descriptor.graphOperations);
   return graphTimingFromTrace({ sentAt, events: events ?? [], graphOperations: graphOperations ?? [],
-    eventsComplete: events !== null && providerArtifactMatches && providerIdentityMatches && manifest?.achievedCoverage?.toolCalls === "full", ledgerComplete: graphOperations !== null });
+    eventsComplete: events !== null && providerArtifactMatches && providerIdentityMatches && manifest?.achievedCoverage?.toolCalls === "full", ledgerComplete: graphOperations !== null,
+    instructionMetrics: instructionMetricsFromTrace(events ?? [], { graphOperations: graphOperations ?? [], ledgerComplete: graphOperations !== null,
+      complete: events !== null && providerArtifactMatches && providerIdentityMatches
+        && descriptor.status === "complete" && descriptor.truncated !== true
+        && manifest?.status === "complete" && manifest?.truncation === null }),
+  });
 }
 
 export async function validateCandidateTrace(directory, descriptor, interaction, correlation, { requireComplete = false } = {}) {
@@ -1466,6 +1479,12 @@ export class EvalService {
         throw new Error(`The recursive graph-memory experiment requires explicit authorization for ${rootProviderExecutions} live roots and additional model-controlled agent-authored child execution.`);
       }
     }
+    const instructionGraphComparison = validateInstructionGraphComparison({
+      names: harnessConfigurationNames, configurations: this.configurations,
+      cases: testCaseIds.map((id) => this.cases.find((definition) => definition.id === id)),
+      targetKey: this.targetKey, authorization: selection?.liveAuthorization, externalCaseIds: [...this.externalCases.keys()],
+    });
+    if (instructionGraphComparison && suiteId) throw new Error("Choose ordinary cases for the instruction-graph comparison.");
     if (testCaseIds.some((id) => projectCaseIds.has(id)) && this.platform !== "darwin") {
       throw new Error("Pinned project cases are local Mac only.");
     }
@@ -1500,7 +1519,12 @@ export class EvalService {
       authorization: selection?.liveAuthorization,
       ...authorizationCatalog,
     });
-    const pinnedLiveModelResolutions = new Map();
+    const pinnedLiveModelResolutions = instructionGraphComparison
+      ? await preflightInstructionGraphComparison({ names: harnessConfigurationNames,
+        configurations: this.configurations, validateLiveCredential: this.validateLiveCredential,
+        credentialReference: selection.liveAuthorization.credentialReference })
+      : new Map();
+    if (instructionGraphComparison) instructionGraphComparison.preflight = Object.fromEntries(pinnedLiveModelResolutions);
     if (externalLiveAuthorization) {
       if (typeof this.validateLiveCredential !== "function") {
         throw new Error("External live Eval has no trusted credential validator.");
@@ -1549,10 +1573,10 @@ export class EvalService {
       judgeConfigurationName,
       ...(judgeSetup ? { judgeSetup: copy(judgeSetup) } : {}),
       liveAuthorization: externalLiveAuthorization ?? (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID)
-        || testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID)
+        || testCaseIds.includes(RECURSIVE_GRAPH_MEMORY_CASE_ID) || instructionGraphComparison
         ? copy(selection?.liveAuthorization || null)
         : null),
-      comparison: testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID) ? {
+      comparison: instructionGraphComparison ?? (testCaseIds.includes(RECURSIVE_COMPLETE_EVAL_CASE_ID) ? {
         kind: "visual-node-details-pair",
         temporalRuntimeFeatures: copy(RECURSIVE_TEMPORAL_FEATURES),
         controlledFields: [
@@ -1579,7 +1603,7 @@ export class EvalService {
         ],
         variedField: "complete.agentAuthored",
         passed: null,
-      } : null,
+      } : null),
       executions: plans.map((plan) => {
         const definition = this.cases.find((candidate) => candidate.id === plan.testCaseId);
         return {
@@ -1593,7 +1617,7 @@ export class EvalService {
         caseSnapshotDigest: definition?.caseSnapshotDigest || null,
         suiteIdentity: plan.suiteIdentity ? copy(plan.suiteIdentity) : null,
         catalogIdentity: this.externalCases.has(plan.testCaseId) ? copy(this.externalCatalog.identity) : null,
-        ...(this.externalCases.has(plan.testCaseId) && pinnedLiveModelResolutions.has(plan.harnessConfigurationName)
+        ...(pinnedLiveModelResolutions.has(plan.harnessConfigurationName)
           ? { pinnedModelResolution: copy(pinnedLiveModelResolutions.get(plan.harnessConfigurationName)) }
           : {}),
         judgeConfiguration: plan.judgeConfiguration,
@@ -2083,8 +2107,9 @@ export class EvalService {
     let controlledComparisonModelResolution;
     for (const execution of run.executions) {
       const controlledComparison = execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
-        || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID;
-      if (controlledComparison && controlledComparisonModelResolution !== undefined) {
+        || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID
+        || run.comparison?.kind === "instruction-graph-pair";
+      if (controlledComparison && run.comparison?.kind !== "instruction-graph-pair" && controlledComparisonModelResolution !== undefined) {
         execution.pinnedModelResolution = copy(controlledComparisonModelResolution);
       }
       await this.#execute(execution);
@@ -2101,6 +2126,16 @@ export class EvalService {
     }
     if (run.comparison?.kind === "graph-memory-recursion-pair") {
       this.#finalizeRecursiveGraphMemoryComparison(run);
+      await this.#changed();
+    }
+    if (run.comparison?.kind === "instruction-graph-pair") {
+      const evidence = finalizeInstructionGraphComparison(run.executions, run.testCaseIds, run.comparison.expectedTurnsByCase, run.comparison);
+      run.comparison = { ...run.comparison, ...evidence, metrics: run.executions.map((execution) => ({ caseId: execution.testCaseId, harnessConfigurationName: execution.harnessConfigurationName, ...aggregateInstructionMetrics(execution, { expectedRootTurns: run.comparison.expectedTurnsByCase[execution.testCaseId] }) })) };
+      for (const execution of run.executions) {
+        const checks = evidence.checks.filter(({ name }) => name.endsWith(`:${execution.testCaseId}`));
+        execution.checks.push(...copy(checks));
+        if (checks.some((check) => !check.passed) && execution.status !== "error") { execution.status = "failed"; execution.passed = false; }
+      }
       await this.#changed();
     }
     const terminalStatus = run.executions.some((execution) => execution.status === "error")
@@ -2257,6 +2292,7 @@ export class EvalService {
         candidateTrace: copy(execution.candidateTraceCaptures?.[String(interaction.id)] || disabledCandidateTrace()),
         // Time to first graph and repair counts, read from the trace. Null when there is no trace.
         timing: copy(execution.graphTimings?.[String(interaction.id)] ?? null),
+        instructionMetrics: copy(execution.graphTimings?.[String(interaction.id)]?.instructionMetrics ?? null),
         ...(artifact === null ? {} : { artifact: copy(artifact) }),
       }));
       delete execution.candidateTraceCaptures;
@@ -3081,6 +3117,8 @@ export class EvalService {
             execution: copy(invocation.execution || null),
             authoringErrors: copy(execution.authoringErrorMetrics?.[String(child.id)] ?? unavailableAuthoringErrors()),
             candidateTrace: copy(execution.candidateTraceCaptures?.[String(child.id)] || disabledCandidateTrace()),
+            timing: copy(execution.graphTimings?.[String(child.id)] ?? null),
+            instructionMetrics: copy(execution.graphTimings?.[String(child.id)]?.instructionMetrics ?? null),
             projectionObservations: copy(
               execution.currentProjectionEvidence?.observations?.filter((observation) => (
                 String(observation.completionId) === String(child.graphNodeId)
@@ -3227,7 +3265,8 @@ export class EvalService {
         correlation,
         {
           requireComplete: execution.testCaseId === RECURSIVE_COMPLETE_EVAL_CASE_ID
-            || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID,
+            || execution.testCaseId === RECURSIVE_GRAPH_MEMORY_CASE_ID
+            || isInstructionGraphTreatment(execution.harnessConfigurationName),
         },
       );
       execution.candidateTraceCaptures ||= {};

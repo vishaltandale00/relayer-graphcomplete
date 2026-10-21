@@ -181,6 +181,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
     "packages/harness-host/dist/implementations/graph-authoring-command.js",
     "packages/harness-host/dist/implementations/graph-presentation-guidance.js",
     "packages/harness-host/dist/implementations/graph-search-guidance.js",
+    "packages/harness-host/dist/implementations/instruction-graph-v2.js",
     "packages/harness-host/dist/implementations/layer-edge-shape-guidance.js",
     "packages/harness-host/dist/implementations/model-family-guidance.js",
     "packages/harness-host/dist/implementations/personal-presentation-guidance.js",
@@ -262,6 +263,7 @@ export const APPROVED_TELEMETRY_MODULES = Object.freeze({
   ]),
   "rust-graph-server": Object.freeze([
     "crates/relayer-graph-server/src/draft_preview.rs",
+    "crates/relayer-graph-server/src/instruction_retrieval.rs",
     "crates/relayer-graph-server/src/lib.rs",
     "crates/relayer-graph-server/src/main.rs",
     "crates/relayer-graph-server/src/search_index.rs",

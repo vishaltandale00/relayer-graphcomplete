@@ -1,0 +1,34 @@
+[
+  {
+    "file": "baseline-first-turn.png",
+    "sourceScreenshotId": "shot-13c8e896-3a73-4207-be10-71a090710743",
+    "sha256": "15fca7c4969ee05867b0e809cc71614cb26455565b909aac23d474b2a26ef537",
+    "interactionId": 18,
+    "rootLayerId": 71,
+    "selectedNodeId": "141"
+  },
+  {
+    "file": "baseline-followup.png",
+    "sourceScreenshotId": "shot-12cfc39d-b9e5-4f05-bcbf-2ff0a63e1929",
+    "sha256": "fcde31ff3edd6d2f3d0361370a160cf369a788bc202500248238d7a20e9e0414",
+    "interactionId": 19,
+    "rootLayerId": 72,
+    "selectedNodeId": "143"
+  },
+  {
+    "file": "v2-first-turn.png",
+    "sourceScreenshotId": "shot-ac76b888-2925-48f7-a9c7-a47ce4bde9e2",
+    "sha256": "27f8a2a9ce4485a229b10ad69a7ee5fe183e79f89430f7b636d97ddc0d85067a",
+    "interactionId": 20,
+    "rootLayerId": 73,
+    "selectedNodeId": "145"
+  },
+  {
+    "file": "v2-followup.png",
+    "sourceScreenshotId": "shot-5b11f483-2d1d-480f-bd16-69b22d6bea0d",
+    "sha256": "6b4dbf1f38dfa00ac208acc9ed291e66bf32bae471e90a8111e2e8f80c380a77",
+    "interactionId": 21,
+    "rootLayerId": 74,
+    "selectedNodeId": "150"
+  }
+]

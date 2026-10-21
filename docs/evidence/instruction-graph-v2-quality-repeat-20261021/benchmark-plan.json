@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "status": "completed",
+  "purpose": "Independent unchanged-source repeat of the paired two-turn graph-quality comparison",
+  "selection": {
+    "testCaseIds": [
+      "empty-project.task-system.two-turn"
+    ],
+    "harnessConfigurationNames": [
+      "codex-basic",
+      "codex-instruction-graph-v2"
+    ],
+    "judgeConfigurationName": "simulated-user",
+    "judgeSetupRevisionId": "setup-40cb65be-943d-448f-9867-3e953d564e44"
+  },
+  "candidateHarness": {
+    "name": "codex-instruction-graph-v2",
+    "configuration": "harnesses/codex-instruction-graph-v2.yaml",
+    "configurationFileSha256": "3def9b5328edd23399c91cf1a204b9d017bdcdde7f96392d60617a70dcd4080a",
+    "revision": 1,
+    "corpusDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+  },
+  "judgePin": {
+    "id": "setup-40cb65be-943d-448f-9867-3e953d564e44",
+    "digest": "sha256:d7d8d6185a7acb7a151d6c71bbf46218b6eeca621c5e106c6ad25492db659d59",
+    "promptVersion": "simulated-user-judge-prompt-v11",
+    "settings": {
+      "model": "gpt-5.6-sol",
+      "modelReasoningEffort": "high",
+      "shellAccess": false
+    },
+    "scoringRules": {
+      "contractId": "recursive-presentation-judge-v6",
+      "dimension": "graph-presentation",
+      "scale": "ordered-1-8"
+    }
+  },
+  "executionScope": {
+    "candidateRootCompletions": 4,
+    "candidateNativeOrSemanticChildren": "model-selected",
+    "expectedAcceptedTurnJudgeSessions": 4,
+    "judgeInternalModelRequests": "not fixed"
+  },
+  "requestedDeclaredCostCapUsd": 10,
+  "capSemantics": "Declared evidence; Eval does not meter or enforce spend.",
+  "assessedDimensions": [
+    "answer_quality",
+    "recursive_coherence",
+    "navigation_value",
+    "presentation_quality",
+    "follow_up_progress"
+  ],
+  "evidenceRequirements": [
+    "Same candidate model/family/provider, permissions and V6 pin across harnesses",
+    "Identical frozen judge setup, model, rubric, prompt version and scoring rules across harnesses",
+    "Production read-only rendered workspace and screenshot-grounded layer/node/action/turn reviews",
+    "Deterministic acceptance checked separately from quality",
+    "Missing or incomplete judgments reported as unknown; no quality-equivalence threshold invented",
+    "One paired two-turn pilot; no population-average or statistical equivalence claim",
+    "Candidate timing/token receipts remain separate from judge inference and grading-inclusive cell latency",
+    "Preserve prior V2 pilot directory and bundle unchanged"
+  ],
+  "implementationChanges": "None. Reuse exact prior tested executable snapshot and saved harness/judge settings.",
+  "sourceSnapshot": "source-snapshot.json",
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "qualityEquivalence": "unproven",
+  "priorRunId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+  "authorization": "User requested same comparison again with prior $10 cap; explicit normal Eval confirmation submitted.",
+  "createdAt": "2026-10-21T13:46:00.242402+00:00",
+  "initialAttemptRunId": "run-2026-10-21T13-47-16-083Z-ad7fb067",
+  "failedAttemptEvidence": "failed-attempt.json",
+  "retryPolicy": "One unchanged paired retry after provider serverOverloaded; same authorized $10 declared budget, spend not metered or enforced.",
+  "runId": "run-2026-10-21T14-00-47-155Z-40538473",
+  "result": "quality-result.json",
+  "summary": "summary.json"
+}

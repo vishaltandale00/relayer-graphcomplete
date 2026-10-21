@@ -84,6 +84,7 @@ export async function verifyBundledAppServer(
     "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
     "node_modules/@relayer/graph-client/dist/index.js",
     "node_modules/@relayer/harness-host/dist/index.js",
+    "node_modules/@relayer/harness-host/dist/implementations/instruction-graph-v2.js",
     "node_modules/@relayer/visual-assets/dist/index.js",
     "node_modules/sharp/dist/index.cjs",
     "node_modules/sharp/dist/index.mjs",
@@ -267,9 +268,11 @@ export async function verifyPackagedGraphClient(graphClientPath) {
   } catch (error) {
     throw new Error("Bundled Relayer graph client cannot be imported.", { cause: error });
   }
-  if (typeof graphClient.RelayerGraphClient !== "function"
-    || typeof graphClient.RelayerGraphClient.prototype?.search !== "function") {
-    throw new Error("Bundled Relayer graph client is missing RelayerGraphClient.prototype.search.");
+  for (const method of ["search", "getInstructionGraph", "retrieveInstructions", "searchInstructions"]) {
+    if (typeof graphClient.RelayerGraphClient !== "function"
+      || typeof graphClient.RelayerGraphClient.prototype?.[method] !== "function") {
+      throw new Error(`Bundled Relayer graph client is missing RelayerGraphClient.prototype.${method}.`);
+    }
   }
 }
 

@@ -335,62 +335,227 @@ describe("ReviewSession", () => {
     expect(electron.captures).toHaveLength(1);
   });
 
-  it("does not restore an element capture owned by an overlapping request", async () => {
+  it("binds overlapping full-element captures to their own target pixels", async () => {
     const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
     directories.push(directory);
-    let captureActive = false;
-    let restorations = 0;
-    let releaseFirstPlan;
-    let markFirstPlanActive;
-    const firstPlanActive = new Promise((resolve) => { markFirstPlanActive = resolve; });
-    const firstPlanRelease = new Promise((resolve) => { releaseFirstPlan = resolve; });
-    const plan = {
-      target: { kind: "element", elementRef: "node-detail" },
-      mode: "visible",
-      clip: { x: 20, y: 40, width: 300, height: 200 },
-      tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }],
+    let capture = null;
+    const clips = {
+      "node-detail": { x: 20, y: 40, width: 300, height: 200 },
+      graph: { x: 400, y: 40, width: 600, height: 400 },
+      viewport: { x: 0, y: 0, width: 1200, height: 800 },
     };
     const electron = fakeElectron({
       snapshot: async () => reviewState({ selectedNodeId: "node-2" }),
-      capturePlan: async () => {
-        if (captureActive) throw new Error("A review capture is already active.");
-        captureActive = true;
-        markFirstPlanActive();
-        await firstPlanRelease;
-        return plan;
+      capturePlan: async ({ target, mode }) => {
+        // The production adapter checks ownership before its animation-frame awaits.
+        if (capture) throw new Error("A review capture is already active.");
+        await new Promise((resolve) => setImmediate(resolve));
+        if (target.kind === "viewport") {
+          return { target, mode, clip: clips.viewport, tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }] };
+        }
+        capture = target.elementRef;
+        await new Promise((resolve) => setImmediate(resolve));
+        return {
+          target, mode, clip: clips[capture],
+          tiles: [0, 1].map((index) => ({ index, row: index, column: 0, scrollX: 0, scrollY: index * 200 })),
+        };
       },
-      prepareCaptureTile: async ({ index }) => ({ index, clip: plan.clip }),
-      restoreCapture: async () => {
-        captureActive = false;
-        restorations += 1;
-      },
+      prepareCaptureTile: async ({ index }) => ({ index, clip: clips[capture] }),
+      restoreCapture: async () => { capture = null; },
+    });
+    electron.webContents.capturePage = async (clip) => ({
+      toPNG: () => Buffer.from(clip.x === clips.graph.x ? "graph pixels" : clip.x === clips.viewport.x ? "viewport pixels" : "node-detail pixels"),
+      getSize: () => ({ width: clip.width, height: clip.height }),
     });
     const session = new ReviewSession({
-      executionId: "execution-1",
-      readOnly: true,
-      webContents: electron.webContents,
-      artifactDirectory: directory,
-      ipc: electron.ipc,
+      executionId: "execution-1", readOnly: true, webContents: electron.webContents,
+      artifactDirectory: directory, ipc: electron.ipc,
     });
     await session.open();
+    const results = await Promise.allSettled([
+      session.screenshot({ target: { kind: "element", elementRef: "node-detail" }, mode: "full", label: "detail" }),
+      session.screenshot({ target: { kind: "element", elementRef: "graph" }, mode: "full", label: "graph" }),
+      session.screenshot({ target: { kind: "viewport" }, label: "viewport" }),
+    ]);
+    for (const [index, target] of ["node-detail", "graph", "viewport"].entries()) {
+      expect(results[index].status).toBe("fulfilled");
+      const screenshot = results[index].value.screenshot;
+      expect(screenshot.captureTarget).toEqual(target === "viewport" ? { kind: "viewport" } : { kind: "element", elementRef: target });
+      expect(screenshot.tileCount).toBe(target === "viewport" ? 1 : 2);
+      for (const tile of screenshot.tiles) {
+        const bytes = await readFile(join(directory, screenshot.screenshotId, `${screenshot.screenshotId}-${String(tile.index + 1).padStart(3, "0")}.png`));
+        expect(bytes.toString()).toBe(`${target} pixels`);
+      }
+    }
+  });
 
-    const first = session.screenshot({
-      target: { kind: "element", elementRef: "node-detail" },
-      label: "winning capture",
+  it("releases a failed capture for a queued retry without letting malformed requests restore its target", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    let startCapture;
+    let releaseCapture;
+    const started = new Promise((resolve) => { startCapture = resolve; });
+    const release = new Promise((resolve) => { releaseCapture = resolve; });
+    let plans = 0;
+    let restorations = 0;
+    const clip = { x: 20, y: 40, width: 300, height: 200 };
+    const electron = fakeElectron({
+      snapshot: async () => reviewState(),
+      capturePlan: async ({ target }) => {
+        if (target.elementRef === "missing") throw new Error("Unknown review target: missing");
+        plans += 1;
+        return { clip, tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }] };
+      },
+      prepareCaptureTile: async ({ index }) => ({ index, clip }),
+      restoreCapture: async () => { restorations += 1; },
     });
-    await firstPlanActive;
-    await expect(session.screenshot({
-      target: { kind: "element", elementRef: "node-detail" },
-      label: "overlapping capture",
-    })).rejects.toThrow("A review capture is already active");
-    expect(captureActive).toBe(true);
+    const capturePage = electron.webContents.capturePage;
+    electron.webContents.capturePage = async (captureClip) => {
+      if (plans === 1) {
+        startCapture();
+        await release;
+        throw new Error("platform capture failed");
+      }
+      return capturePage(captureClip);
+    };
+    const session = new ReviewSession({
+      executionId: "execution-1", readOnly: true, webContents: electron.webContents,
+      artifactDirectory: directory, ipc: electron.ipc,
+    });
+    await session.open();
+    const request = { target: { kind: "element", elementRef: "node-detail" }, label: "detail" };
+    const first = session.screenshot(request);
+    await started;
+    await expect(session.screenshot({ ...request, label: "" })).rejects.toThrow();
     expect(restorations).toBe(0);
+    const outcomes = Promise.allSettled([
+      first,
+      session.screenshot({ ...request, target: { kind: "element", elementRef: "missing" } }),
+      session.screenshot(request),
+    ]);
+    releaseCapture();
+    const [failed, missing, retry] = await outcomes;
+    expect(failed.reason.message).toBe("platform capture failed");
+    expect(missing.reason.message).toBe("Unknown review target: missing");
+    expect(retry.status).toBe("fulfilled");
+    expect(plans).toBe(2);
+    expect(restorations).toBe(2);
+    expect(session.artifacts.size).toBe(1);
+  });
 
-    releaseFirstPlan();
-    await expect(first).resolves.toMatchObject({ ok: true });
-    expect(captureActive).toBe(false);
-    expect(restorations).toBe(1);
-    expect(electron.captures).toHaveLength(1);
+  it("refuses a queued capture after the review window closes before its plan starts", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    let startCapture;
+    let releaseCapture;
+    const started = new Promise((resolve) => { startCapture = resolve; });
+    const release = new Promise((resolve) => { releaseCapture = resolve; });
+    let plans = 0;
+    const clip = { x: 0, y: 0, width: 300, height: 200 };
+    const electron = fakeElectron({
+      snapshot: async () => reviewState(),
+      capturePlan: async () => {
+        plans += 1;
+        return { clip, tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }] };
+      },
+    });
+    const capturePage = electron.webContents.capturePage;
+    electron.webContents.capturePage = async (captureClip) => {
+      startCapture();
+      await release;
+      return capturePage(captureClip);
+    };
+    const session = new ReviewSession({
+      executionId: "execution-1", readOnly: true, webContents: electron.webContents,
+      artifactDirectory: directory, ipc: electron.ipc,
+    });
+    await session.open();
+    const request = { target: { kind: "viewport" }, label: "viewport" };
+    const first = session.screenshot(request);
+    await started;
+    const outcomes = Promise.allSettled([first, session.screenshot(request)]);
+    electron.webContents.isDestroyed = () => true;
+    releaseCapture();
+    const [failed, queued] = await outcomes;
+    expect(failed.status).toBe("rejected");
+    expect(queued.reason.message).toMatch(/window is closed/);
+    expect(plans).toBe(1);
+    expect(session.artifacts.size).toBe(0);
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
+  it("refuses queued captures after a timed-out plan even when that plan completes late", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    let finishPlan;
+    const pendingPlan = new Promise((resolve) => { finishPlan = resolve; });
+    const commands = [];
+    let active = false;
+    const transport = {
+      url: () => "http://127.0.0.1:43123/?review=1",
+      isClosed: () => false,
+      command: async (command) => {
+        commands.push(command);
+        if (command === "snapshot") return reviewState();
+        if (command === "capturePlan") {
+          await pendingPlan;
+          active = true;
+          return { tiles: [{ index: 0 }] };
+        }
+        throw new Error(`Unexpected command: ${command}`);
+      },
+      capture: vi.fn(),
+    };
+    const session = new ReviewSession({
+      executionId: "execution-1", readOnly: true, transport, artifactDirectory: directory, commandTimeoutMs: 10,
+    });
+    await session.open();
+    const request = { target: { kind: "element", elementRef: "node-detail" }, label: "detail" };
+    const [failed, queued] = await Promise.allSettled([session.screenshot(request), session.screenshot(request)]);
+    expect(failed.reason.message).toMatch(/timed out: capturePlan/);
+    expect(queued.reason.message).toMatch(/unavailable after an uncertain capture/);
+    finishPlan();
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(active).toBe(true);
+    await expect(session.screenshot(request)).rejects.toThrow(/unavailable after an uncertain capture/);
+    expect(commands.filter((command) => command === "capturePlan")).toHaveLength(1);
+    expect(transport.capture).not.toHaveBeenCalled();
+    expect(session.artifacts.size).toBe(0);
+    await expect(readdir(directory)).resolves.toEqual([]);
+  });
+
+  it.each([false, true])("withholds evidence after restoration failure and preserves a preceding capture failure (%s)", async (captureFails) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-review-session-"));
+    directories.push(directory);
+    const clip = { x: 20, y: 40, width: 300, height: 200 };
+    let plans = 0;
+    const electron = fakeElectron({
+      snapshot: async () => reviewState(),
+      capturePlan: async () => {
+        plans += 1;
+        return { clip, tiles: [{ index: 0, row: 0, column: 0, scrollX: 0, scrollY: 0 }] };
+      },
+      prepareCaptureTile: async ({ index }) => ({ index, clip }),
+      restoreCapture: async () => { throw new Error("restore failed"); },
+    });
+    if (captureFails) electron.webContents.capturePage = async () => { throw new Error("capture failed"); };
+    const session = new ReviewSession({
+      executionId: "execution-1", readOnly: true, webContents: electron.webContents,
+      artifactDirectory: directory, ipc: electron.ipc,
+    });
+    await session.open();
+    const request = { target: { kind: "element", elementRef: "node-detail" }, label: "detail" };
+    const [failed, queued] = await Promise.allSettled([session.screenshot(request), session.screenshot(request)]);
+    if (captureFails) {
+      expect(failed.reason).toBeInstanceOf(AggregateError);
+      expect(failed.reason.errors.map((error) => error.message)).toEqual(["capture failed", "restore failed"]);
+    } else {
+      expect(failed.reason.message).toBe("restore failed");
+    }
+    expect(queued.reason.message).toMatch(/unavailable after an uncertain capture/);
+    expect(plans).toBe(1);
+    expect(session.artifacts.size).toBe(0);
+    await expect(readdir(directory)).resolves.toEqual([]);
   });
 
   it("activates only current controls and delegates arbitrary signed history deltas to the workspace", async () => {

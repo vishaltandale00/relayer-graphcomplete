@@ -1,0 +1,129 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/eval_comparison",
+  "scope": "Read-only independent diagnosis of control native provider failure; full attempt still settling when inspected.",
+  "runId": "run-2026-10-21T13-47-16-083Z-ad7fb067",
+  "interactionId": 22,
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "artifacts": [
+    {
+      "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/4f077da5-6a45-4a57-bb1c-45e52030032b/turns/22/candidate-trace/manifest.json",
+      "sha256": "077ff7598a2267afea59a98b247ba1102250c2d42065b0dd129a9070ab346b59",
+      "bytes": 2094
+    },
+    {
+      "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/4f077da5-6a45-4a57-bb1c-45e52030032b/turns/22/candidate-trace/events.jsonl",
+      "sha256": "484472ec213c50e30e10c088551478c40b76e0b4ea723e9bad3dce707cec16df",
+      "bytes": 334214
+    },
+    {
+      "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/4f077da5-6a45-4a57-bb1c-45e52030032b/turns/22/candidate-trace/graph-operations.jsonl",
+      "sha256": "7cd6ff545f984cfe6893c4ae973d783fd358c9e8134aaaddfe81e035144fa233",
+      "bytes": 4480
+    }
+  ],
+  "nativeError": {
+    "schemaVersion": 1,
+    "sequence": 69,
+    "observedAt": "2026-10-21T13:48:05.791Z",
+    "type": "provider.event",
+    "streamId": "875d963f-f52e-4aee-8adf-e1fdcf63974d",
+    "implementation": "codex.basic",
+    "data": {
+      "provider": "codex",
+      "method": "error",
+      "params": {
+        "error": {
+          "message": "Selected model is at capacity. Please try a different model.",
+          "codexErrorInfo": "serverOverloaded",
+          "additionalDetails": null,
+          "misalignment": null
+        },
+        "willRetry": false,
+        "threadId": "01a15eb7-5c6c-7ed0-9016-8bdb4db6c813",
+        "turnId": "01a15eb7-5ce3-7900-9e45-163bafb2c85d"
+      }
+    }
+  },
+  "nativeTurnCompletion": {
+    "schemaVersion": 1,
+    "sequence": 71,
+    "observedAt": "2026-10-21T13:48:05.798Z",
+    "type": "provider.event",
+    "streamId": "875d963f-f52e-4aee-8adf-e1fdcf63974d",
+    "implementation": "codex.basic",
+    "data": {
+      "provider": "codex",
+      "method": "turn/completed",
+      "params": {
+        "threadId": "01a15eb7-5c6c-7ed0-9016-8bdb4db6c813",
+        "turn": {
+          "id": "01a15eb7-5ce3-7900-9e45-163bafb2c85d",
+          "items": [],
+          "itemsView": "notLoaded",
+          "status": "failed",
+          "error": {
+            "message": "Selected model is at capacity. Please try a different model.",
+            "codexErrorInfo": "serverOverloaded",
+            "additionalDetails": null,
+            "misalignment": null
+          },
+          "startedAt": 1792590437,
+          "completedAt": 1792590485,
+          "durationMs": 48178
+        }
+      }
+    }
+  },
+  "terminalReason": "Selected model is at capacity. Please try a different model.",
+  "checks": [
+    {
+      "check": "events manifest hash/byte/count binding",
+      "passed": true
+    },
+    {
+      "check": "graphOperations manifest hash/byte/count binding",
+      "passed": true
+    },
+    {
+      "check": "Native capacity failure with no provider retry",
+      "passed": true
+    }
+  ],
+  "verdict": "confirmed-provider-capacity-failure",
+  "qualityComparison": "unavailable; failed control excluded from matched quality comparison",
+  "limits": [
+    "Other arm and final run status were not assessed in this failure-only review.",
+    "No inference, retry dispatch or UI mutation was performed by this reviewer.",
+    "No PR is attached; workspace review is non-certifying."
+  ],
+  "nonComparativePixelSamples": [
+    {
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/8c1c62ec-5199-4245-8cd4-d58b462780fa/turns/23/simulated-user/173753e2-e48c-4840-bb32-85e570490413/screenshots/shot-27756669-7d79-415c-8720-8cc6267e94b4/metadata.json",
+      "metadataSha256": "be99af99e5a568f8e1a238bf336b22fafa42ae0800da5f1c680e2934068f0de3",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/8c1c62ec-5199-4245-8cd4-d58b462780fa/turns/23/simulated-user/173753e2-e48c-4840-bb32-85e570490413/screenshots/shot-27756669-7d79-415c-8720-8cc6267e94b4/shot-27756669-7d79-415c-8720-8cc6267e94b4-001.png",
+      "tileSha256": "23220d775d3060ceb96de7db8b6334e1fabd229159a25258e89c51874cf321ab",
+      "selectedNodeId": "157",
+      "layerId": "76",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "targetPixelMatch": true,
+      "observation": "Queue article and four-node graph viewport preserve their respective capture targets; both show selected queue157/layer76. No comparative quality rating assigned."
+    },
+    {
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/8c1c62ec-5199-4245-8cd4-d58b462780fa/turns/23/simulated-user/173753e2-e48c-4840-bb32-85e570490413/screenshots/shot-50f21b6d-608e-460e-ba4e-a1bae5e9a5c2/metadata.json",
+      "metadataSha256": "f05012703658e0f0ec887df36ecb92c0ed23257d7737f8ecbcee262758a31045",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/executions/8c1c62ec-5199-4245-8cd4-d58b462780fa/turns/23/simulated-user/173753e2-e48c-4840-bb32-85e570490413/screenshots/shot-50f21b6d-608e-460e-ba4e-a1bae5e9a5c2/shot-50f21b6d-608e-460e-ba4e-a1bae5e9a5c2-001.png",
+      "tileSha256": "3bf5adcee49f5a95ac2f0ffa23ed9d91698927b1319559195cf9e2876391a535",
+      "selectedNodeId": "157",
+      "layerId": "76",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "targetPixelMatch": true,
+      "observation": "Queue article and four-node graph viewport preserve their respective capture targets; both show selected queue157/layer76. No comparative quality rating assigned."
+    }
+  ]
+}

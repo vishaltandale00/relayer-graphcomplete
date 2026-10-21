@@ -8,7 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import { loadHarnessConfiguration } from "../src/configuration.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { CodexAppServerTurnOptions } from "../src/implementations/codex-app-server.js";
-import { buildLayeredNavigationPrompt, CODEX_PREVIEW_VIEWING, CodexBasicHarness, draftPreviewGuidance, isFallbackGraphAuthoringCommand, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
+import { buildInstructionGraphPrompt, buildInstructionGraphV2Prompt, buildLayeredNavigationPrompt, codexInstructionGraphCorpus, CODEX_PREVIEW_VIEWING, CodexBasicHarness, draftPreviewGuidance, isFallbackGraphAuthoringCommand, type CodexBasicDependencies } from "../src/implementations/codex-basic.js";
 import { isExactGraphAuthoringLauncherCommand } from "../src/implementations/codex-approvals.js";
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEvent, HarnessTraceEventInput, HarnessTracePolicy, HarnessTraceSink } from "../src/types.js";
 
@@ -37,7 +37,121 @@ const codexBasicConfiguration: HarnessConfiguration = {
   },
 };
 
+function productInstructionManifest() {
+  const corpus = codexInstructionGraphCorpus("codex-instruction-graph-v2");
+  return { versionKey: corpus.versionKey, digest: corpus.digest, retrievalContractVersion: 2,
+    threadId: 8000000000000000, interactionNodeId: 200, rootLayerId: 300,
+    modules: corpus.modules.map((module, index) => ({ key: module.key, title: module.title, nodeId: index + 201,
+      prerequisites: module.prerequisites.map(key => corpus.modules.findIndex(entry => entry.key === key) + 201) })) };
+}
+
 describe("CodexBasicHarness", () => {
+  it("delivers an exact pinned instruction bootstrap through the production Codex turn without eagerly loading manuals", async () => {
+    const corpus = codexInstructionGraphCorpus();
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-instruction-graph-v1.yaml"));
+    const manifest = { versionKey: corpus.versionKey, digest: corpus.digest, threadId: 8000000000000000,
+      interactionNodeId: 200, rootLayerId: 300, modules: corpus.modules.map((module, index) => ({
+        key: module.key, title: module.title, nodeId: index + 201,
+        prerequisites: module.prerequisites.map(key => corpus.modules.findIndex(entry => entry.key === key) + 201),
+      })) };
+    const events: HarnessTraceEventInput[] = [];
+    const turn: HarnessRunContext = { ...personalPresentationRunContext(true), instructionGraph: manifest,
+      trace: { ...createNoopHarnessTraceSink(), emit: event => { events.push(event); } } };
+    const calls: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({ ...context("auto"), configuration }, {
+      codexPathOverride: "/managed/codex", clientModuleUrl: "file:///managed/graph-client.js",
+      runAppServerTurn: async options => { calls.push(options); await options.onTurnId?.("native", "turn");
+        return { threadId: "native", turnId: "turn", status: "completed" }; },
+    });
+    await harness.complete(turn);
+    expect(calls).toHaveLength(1);
+    const prompt = calls[0]!.prompt;
+    expect(prompt).toContain(JSON.stringify(manifest));
+    expect(prompt).toContain("graph.getInstructionNode(nodeId)");
+    expect(prompt).toContain("graph.searchInstructions");
+    expect(prompt).toContain("Personal graph presentation preferences:");
+    expect(prompt).toContain("Normalized interaction input:");
+    expect(prompt).toContain("Draft, accepted, and stopped states remain distinct");
+    expect(prompt.length).toBeLessThan(buildLayeredNavigationPrompt(turn, "file:///managed/graph-client.js").length * 0.35);
+    for (const module of corpus.modules) expect(prompt).not.toContain(module.detail);
+    expect(events.find(event => event.type === "prompt")?.data).toMatchObject({
+      actualPromptCharacters: prompt.length, actualPromptUtf8Bytes: Buffer.byteLength(prompt),
+      instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest,
+    });
+    expect(calls[0]!.threadParams.developerInstructions).toContain("exact rendered Personal graph presentation preferences block");
+    const { instructionGraph: _pin, ...unpinned } = turn;
+    expect(() => buildInstructionGraphPrompt(unpinned, "client", "complete")).toThrow("control-pinned");
+    expect(() => buildInstructionGraphPrompt({ ...turn, instructionGraph: { ...manifest, digest: "0".repeat(64) } }, "client", "complete")).toThrow("control-pinned");
+  });
+
+  it("publishes task-independent instruction modules with reproducible content identity and discoverable prerequisites", async () => {
+    const corpus = codexInstructionGraphCorpus();
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-instruction-graph-v1.yaml"));
+    expect(corpus.digest).toBe(createHash("sha256").update(JSON.stringify(corpus.modules)).digest("hex"));
+    expect(configuration.settings.instructionGraphDigest).toBe(corpus.digest);
+    const keys = new Set(corpus.modules.map(module => module.key));
+    for (const module of corpus.modules) for (const prerequisite of module.prerequisites) expect(keys.has(prerequisite)).toBe(true);
+    const text = JSON.stringify(corpus.modules);
+    expect(text).toContain("INTERACTION_NODE_ID");
+    expect(text).toContain("GRAPH_CLIENT_MODULE_URL");
+    expect(text).toContain("COMPLETION_MODULE_URL");
+    expect(text).toContain("rerunGraphProgram");
+    expect(text).not.toContain("Normalized interaction input:");
+    expect(text).not.toContain("Personal graph presentation preferences:");
+    expect(() => new CodexBasicHarness({ ...context("auto"), configuration: { ...configuration,
+      settings: { ...configuration.settings, instructionGraphDigest: "0".repeat(64) } } })).toThrow("exact published corpus");
+  });
+
+  it("runs v2 with small pinned recipes, reasoned delivery and the unchanged V6/native propagation", async () => {
+    const corpus = codexInstructionGraphCorpus("codex-instruction-graph-v2");
+    const configuration = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-instruction-graph-v2.yaml"));
+    const frozen = JSON.parse(await readFile(join(repositoryRoot, "fixtures/instruction-graph-v2.json"), "utf8"));
+    expect(corpus).toEqual(frozen);
+    expect(configuration.settings.instructionGraphDigest).toBe(corpus.digest);
+    expect(corpus.digest).toBe(createHash("sha256").update(JSON.stringify(corpus.modules)).digest("hex"));
+    expect(corpus.modules.length).toBe(23);
+    expect(Math.max(...corpus.modules.map(module => Buffer.byteLength(module.detail)))).toBeLessThanOrEqual(2400);
+    const manifest = { versionKey: corpus.versionKey, digest: corpus.digest, retrievalContractVersion: 2,
+      threadId: 8000000000000000, interactionNodeId: 200, rootLayerId: 300,
+      modules: corpus.modules.map((module,index) => ({ key: module.key,title: module.title,nodeId: index+201,
+        prerequisites: module.prerequisites.map(key => corpus.modules.findIndex(entry=>entry.key===key)+201) })) };
+    const turn = { ...personalPresentationRunContext(true),instructionGraph:manifest };
+    const calls: CodexAppServerTurnOptions[] = [];
+    const harness = new CodexBasicHarness({ ...context("auto"), configuration }, {
+      codexPathOverride:"/managed/codex",clientModuleUrl:"file:///managed/graph-client.js",
+      runAppServerTurn:async options=>{ calls.push(options);return {threadId:"native",turnId:"turn",status:"completed"}; },
+    });
+    await harness.complete(turn);
+    const prompt=calls[0]!.prompt;
+    expect(prompt).toContain(JSON.stringify(manifest));
+    expect(prompt).toContain("graph.retrieveInstructions");
+    expect(prompt).toContain("rereadReason");
+    expect(prompt).toContain("Personal graph presentation preferences:");
+    expect(prompt).toContain("Normalized interaction input:");
+    expect(prompt).toContain("has no full-text");
+    expect(prompt.length).toBeLessThan(buildLayeredNavigationPrompt(turn,"client").length*0.35);
+    for(const module of corpus.modules) expect(prompt).not.toContain(module.detail);
+    expect(calls[0]!.threadParams.developerInstructions).toContain("exact rendered Personal graph presentation preferences block");
+    expect(()=>buildInstructionGraphV2Prompt({...turn,instructionGraph:{...manifest,retrievalContractVersion:1}},"client","complete")).toThrow("control-pinned");
+    expect(()=>buildInstructionGraphV2Prompt({...turn,instructionGraph:{...manifest,digest:"0".repeat(64)}},"client","complete")).toThrow("control-pinned");
+    const product = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-basic.yaml"));
+    const offlineCalls: CodexAppServerTurnOptions[] = [];
+    const offline = new CodexBasicHarness({ ...context("auto"), configuration: { ...product,
+      graphCapabilityProfile: { ...product.graphCapabilityProfile, search: "disabled" } } }, {
+      codexPathOverride: "/managed/codex", runAppServerTurn: async options => {
+        offlineCalls.push(options); return { threadId: "offline", turnId: "turn", status: "completed" };
+      },
+    });
+    await offline.complete(turn);
+    expect(offlineCalls[0]!.prompt).toContain("Instruction search is unavailable");
+    expect(offlineCalls[0]!.prompt).toContain("graph.retrieveInstructions");
+    expect(offlineCalls[0]!.prompt).not.toContain("graph.searchInstructions");
+    expect(offlineCalls[0]!.prompt).not.toContain("experimental");
+    const v1 = await loadHarnessConfiguration(join(repositoryRoot, "harnesses/codex-instruction-graph-v1.yaml"));
+    expect(() => new CodexBasicHarness({ ...context("auto"), configuration: { ...v1,
+      graphCapabilityProfile: { ...v1.graphCapabilityProfile, search: "disabled" } } })).toThrow("query-v1 search");
+  });
+
   it.each(["basic", "layered-navigation-v1"])("delivers roles without cross-provider credential routing in root and invoked %s turns", async (promptProfile) => {
     const calls: CodexAppServerTurnOptions[] = [];
     const harness = new CodexBasicHarness({ ...context("auto"), configuration: { ...codexBasicConfiguration,
@@ -896,13 +1010,14 @@ describe("CodexBasicHarness", () => {
 
     await harness.complete({
       ...runContext(1, "token"),
+      instructionGraph: productInstructionManifest(),
       model: { providerId: "codex", adapterId: "codex-subscription", modelId: "gpt-picker-selected" },
       access: codexAccess(),
     });
 
     expect(submitted?.threadParams).toMatchObject({ model: "gpt-picker-selected" });
     expect(submitted?.turnParams).toMatchObject({ model: "gpt-picker-selected", effort: "medium" });
-    expect(submitted?.prompt).toContain("Codex native subagents are available when useful");
+    expect(submitted?.prompt).toContain("Native Codex subagents remain available");
     expect(configuration.settings).not.toHaveProperty("model");
     expect(configuration.modelCompatibility?.[0]).not.toHaveProperty("preferredModelId");
   });
@@ -933,7 +1048,8 @@ describe("CodexBasicHarness", () => {
         },
       });
 
-      await harness.complete({ ...runContext(1, "token"), access: codexAccess() });
+      await harness.complete({ ...runContext(1, "token"), access: codexAccess(),
+        ...(name === "codex-basic" ? { instructionGraph: productInstructionManifest() } : {}) });
 
       expect(submitted?.threadParams).toMatchObject(nativeApproval);
       if (permissionProfileId === "full") {

@@ -1,0 +1,99 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "requiredPlan": {
+    "warm": "ReviewSession transaction ownership, failure recovery, uncertain command refusal, queued close and existing presentation guards",
+    "deterministicHeavy": [
+      "npm run check",
+      "npm run build",
+      "npm run test:eval-web",
+      "npm run test:eval-compiled-runtime"
+    ],
+    "live": "One matched two-turn comparison with separately versioned baseline/V2 and frozen screenshot judge; $10 declared cap approved"
+  },
+  "results": [
+    {
+      "command": "npm run test:eval-web",
+      "exitCode": 0,
+      "passChapters": 46,
+      "log": "logs/instruction-graph-v2-quality-eval-web.log",
+      "logSha256": "b04c67694f0b57d5124fbb43d717fc9d4c4b18d2b03c50ab6594b8963370edfa"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "files": 1,
+      "testsPassed": 12,
+      "log": "logs/instruction-graph-v2-quality-compiled.log",
+      "logSha256": "6b9d954c4a47b8359f28d782da2912099206dedb9c78f91e3d962f845eed4f8a"
+    },
+    {
+      "command": "npm run check",
+      "status": "failed",
+      "log": "logs/instruction-graph-v2-quality-check.log",
+      "exitCode": 1,
+      "vitest": {
+        "filesPassed": 342,
+        "filesFailed": 1,
+        "filesSkipped": 1,
+        "testsPassed": 4598,
+        "testsFailed": 1,
+        "testsSkipped": 3
+      },
+      "failure": "Stale social-preview evidence bound the pre-inventory-update hash. Refreshed through real capture and repaired binding test passed; full command not rerun.",
+      "logSha256": "1a9b4bd5ccead4958e4d76a9767f3ef97d36cf4bf462186f1295c358d90f4067"
+    },
+    {
+      "command": "npm run build",
+      "status": "passed",
+      "exitCode": 0,
+      "log": "logs/instruction-graph-v2-quality-build.log",
+      "logSha256": "98291ab49eedc76fdfd955d01df49a71fd5bffd38fb9f0bd11b5697ccc3c9e3a"
+    },
+    {
+      "command": "npm run evidence:share-preview",
+      "exitCode": 0,
+      "evidence": "../desktop-social-preview/receipt.json",
+      "inspection": "Both real PNGs inspected; both byte-identical to prior captures. Old generated set saved under social-preview-before-refresh."
+    },
+    {
+      "command": "npx vitest run test/desktop-social-preview-evidence.test.mjs",
+      "exitCode": 0,
+      "testsPassed": 1
+    },
+    {
+      "command": "npm run test:codex-secret-boundary",
+      "exitCode": 0,
+      "testsPassed": 2
+    },
+    {
+      "command": "PYTHONPATH=python/relayer-graph/src python3 -m unittest discover -s python/relayer-graph/tests",
+      "exitCode": 0,
+      "testsPassed": 100
+    },
+    {
+      "command": "npm run lint:ladybug-receipt",
+      "exitCode": 0
+    },
+    {
+      "command": "npm run prd:check-readability",
+      "exitCode": 0,
+      "priorFailure": "27-word JUDGE-CAP-001 paragraph; shortened without changing product promise"
+    }
+  ],
+  "independentReview": "capture-fix-review.json",
+  "focusedRegression": "capture-fix-verification.json",
+  "scopeLimit": "No release or platform certification; no PR, so adversarial review is non-certifying.",
+  "sourcePhaseNote": "Full executable checks ran before a meaning-preserving PRD sentence shortening; only checkpoint prose changed afterward, and PRD readability passed. Final executable source matches tested snapshot.",
+  "note": "Original full check remains failed; only its stale generated receipt was refreshed, with focused revalidation. Remaining chain checks were run separately. No complete full-check rerun claimed.",
+  "liveResults": {
+    "runId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+    "status": "completed",
+    "acceptedRootTurns": 4,
+    "completedJudgeReviews": 4,
+    "qualityResult": "quality-result.json",
+    "independentReview": "quality-result-review.json",
+    "reviewStatus": "132/132 checks passed; non-certifying without PR"
+  },
+  "socialPreviewReview": "social-preview-refresh-review.json"
+}

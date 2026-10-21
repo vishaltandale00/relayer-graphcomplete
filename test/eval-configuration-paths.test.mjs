@@ -64,8 +64,11 @@ describe("Eval harness configuration availability", () => {
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
+      "codex-full-prompt-control.yaml",
       "codex-eval-visual-node-details-control.yaml",
       "codex-eval-visual-node-details-treatment.yaml",
+      "codex-instruction-graph-v1.yaml",
+      "codex-instruction-graph-v2.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
@@ -94,8 +97,11 @@ describe("Eval harness configuration availability", () => {
       "fixture-graph-memory.yaml",
       "codex-basic.yaml",
       "codex-basic-high.yaml",
+      "codex-full-prompt-control.yaml",
       "codex-eval-visual-node-details-control.yaml",
       "codex-eval-visual-node-details-treatment.yaml",
+      "codex-instruction-graph-v1.yaml",
+      "codex-instruction-graph-v2.yaml",
       "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
       "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       "codex-layered-navigation-luna.yaml",
@@ -125,6 +131,8 @@ describe("Eval harness configuration availability", () => {
       ]));
       expect(available).not.toEqual(expect.arrayContaining([
         "fixture-graph-memory.yaml",
+        "codex-instruction-graph-v1.yaml",
+        "codex-instruction-graph-v2.yaml",
         "codex-eval-lantern-search-query-v1-recursion-disabled.yaml",
         "codex-eval-lantern-search-query-v1-recursion-enabled.yaml",
       ]));
@@ -170,7 +178,7 @@ describe("Eval harness configuration availability", () => {
     expect(catalog.has("prime-agent-eval-complete-graph-search")).toBe(false);
   });
 
-  it("keeps the layered Codex harness product-facing and the high variant internal", async () => {
+  it("keeps graph-retrieved Codex product-facing and the full-prompt control internal", async () => {
 
     const productPackaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
     const codexBasic = await loadHarnessConfigurations([
@@ -178,9 +186,10 @@ describe("Eval harness configuration availability", () => {
     ]);
 
     expect(DEFAULT_DESKTOP_HARNESS_CONFIGURATION).toBe("codex-basic");
-    expect(codexBasic.get("codex-basic")?.settings).toMatchObject({
-      promptProfile: "layered-navigation-multi-agent-v1",
-    });
+    expect(codexBasic.get("codex-basic")).toMatchObject({ revision: 19, settings: {
+      promptProfile: "instruction-graph-v2", instructionGraphVersionKey: "codex-instruction-graph-v2",
+      instructionGraphDigest: JSON.parse(await readFile(resolve(repositoryRoot, "fixtures/instruction-graph-v2.json"), "utf8")).digest,
+    } });
     expect(codexBasic.get("codex-basic")?.modelRules?.allow.map(({ adapterId }) => adapterId)).toEqual([
       "codex-subscription",
       "openai-api",
@@ -229,6 +238,26 @@ describe("Eval harness configuration availability", () => {
     }
     if (treatment) treatment.name = "comparison";
     expect(treatment).toEqual(control);
+  });
+
+  it.each(["v1", "v2"])("keeps instruction graph %s matched to the frozen full-prompt control outside instruction delivery", async (version) => {
+    const catalog = await loadHarnessConfigurations([
+      resolve(repositoryRoot, "harnesses/codex-full-prompt-control.yaml"),
+      resolve(repositoryRoot, `harnesses/codex-instruction-graph-${version}.yaml`),
+    ]);
+    const control = structuredClone(catalog.get("codex-full-prompt-control"));
+    const treatment = structuredClone(catalog.get(`codex-instruction-graph-${version}`));
+    expect(treatment.settings).toMatchObject({ promptProfile: `instruction-graph-${version}`, instructionGraphVersionKey: `codex-instruction-graph-${version}`, instructionGraphDigest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(control).toMatchObject({ name: "codex-full-prompt-control", revision: 1, settings: { promptProfile: "layered-navigation-multi-agent-v1" } });
+    for (const configuration of [control, treatment]) {
+      delete configuration.name; delete configuration.revision;
+      delete configuration.settings.promptProfile;
+      delete configuration.settings.instructionGraphVersionKey; delete configuration.settings.instructionGraphDigest;
+    }
+    expect(treatment).toEqual(control);
+    const packaging = await readFile(new URL("../desktop/packaging/electron-builder.mjs", import.meta.url), "utf8");
+    expect(packaging).not.toContain(`codex-instruction-graph-${version}.yaml`);
+    expect(packaging).not.toContain("codex-full-prompt-control.yaml");
   });
 
   it("disables search for every configuration only off the qualified target", () => {

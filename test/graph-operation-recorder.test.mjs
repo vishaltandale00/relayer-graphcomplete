@@ -30,6 +30,26 @@ async function startUpstream({ holdNodeResponse = false, rejectVisualAssetOperat
     const chunks = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     const body = chunks.length === 0 ? {} : JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    if (request.url === "/api/graph/instruction-graph") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ versionKey: "codex-instruction-graph-v1", digest: "a".repeat(64), modules: [{ detail: "private instruction body" }] }));
+      return;
+    }
+    if (request.url === "/api/graph/instruction-graph/retrieve") {
+      response.writeHead(200, {"content-type":"application/json"});
+      response.end(JSON.stringify({requestKey:body.requestKey,replayed:false,reason:body.reason,
+        entries:[{nodeId:41,key:"publish",delivery:"body",detail:"private instruction body",bodyCharacters:24,bodyBytes:24}],
+        rereadReason:body.rereadReason}));return;
+    }
+    if (request.url === "/api/graph/instruction-graph/search") {
+      response.writeHead(200, {"content-type":"application/json"});
+      response.end(JSON.stringify({queryContractVersion:1,rows:[],truncated:false,instructionSearchReceipt:{reason:body.reason}}));return;
+    }
+    if (request.url === "/api/graph/instruction-graph/nodes/41") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ node: { id: 41, state: "accepted", detail: "private instruction body" } }));
+      return;
+    }
     if ((request.url === "/api/graph/visual-assets/operations"
       || request.url === "/api/control/visual-assets/imports/validate"
       || request.url === "/api/control/conversation-import-stages/test/visual-asset-contents") && request.method === "POST") {
@@ -196,6 +216,32 @@ function rawTargetRequest(origin, target) {
 }
 
 describe("desktop graph-operation recorder", () => {
+  it("records instruction identity and successful body retrieval without copying instruction text or credentials", async () => {
+    const upstream = await startUpstream();
+    const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url }); resources.push(recorder);
+    await bindCapability(recorder.url, "instruction-token");
+    await jsonRequest(`${recorder.url}/api/graph/instruction-graph`, { token: "instruction-token" });
+    await jsonRequest(`${recorder.url}/api/graph/instruction-graph/nodes/41`, { token: "instruction-token" });
+    const target = await createCandidateTraceDirectory(); await recorder.exportInteraction(17, target);
+    const text = await readFile(join(target, "graph-operations.jsonl"), "utf8");
+    const receipts = text.trim().split("\n").map(JSON.parse);
+    expect(receipts[0]).toMatchObject({ instructionGraphVersionKey: "codex-instruction-graph-v1", instructionGraphDigest: "a".repeat(64), status: 200 });
+    expect(receipts[1]).toMatchObject({ recordKind: "instruction-node", recordId: 41, recordState: "accepted", status: 200 });
+    expect(text).not.toContain("private instruction body"); expect(text).not.toContain("instruction-token");
+  });
+  it("records sanitized v2 purposes and physical delivery without retaining instruction bodies",async()=>{
+    const upstream=await startUpstream();const recorder=await startGraphOperationRecorder({upstreamUrl:upstream.url});resources.push(recorder);
+    await bindCapability(recorder.url,"instruction-token");
+    const reason={purpose:"authoring",detail:"Publish result using instruction-token"};
+    await jsonRequest(`${recorder.url}/api/graph/instruction-graph/retrieve`,{method:"POST",token:"instruction-token",body:{requestKey:"😀".repeat(127)+"A",nodeIds:[41],reason,rereadReason:"Recover missing instruction-token output"}});
+    await jsonRequest(`${recorder.url}/api/graph/instruction-graph/search`,{method:"POST",token:"instruction-token",body:{queryContractVersion:1,query:"MATCH (n:Content) RETURN n.title AS title",reason}});
+    const target=await createCandidateTraceDirectory();await recorder.exportInteraction(17,target);
+    const text=await readFile(join(target,"graph-operations.jsonl"),"utf8");const receipts=text.trim().split("\n").map(JSON.parse);
+    expect(receipts[0].instructionRetrieval).toMatchObject({requestKey:"😀".repeat(127)+"A",replayed:false,reason:{purpose:"authoring",detail:"Publish result using [REDACTED]"},entries:[{nodeId:41,delivery:"body",bodyCharacters:24,bodyBytes:24}],rereadReason:"Recover missing [REDACTED] output"});
+    expect(receipts[1].instructionSearchReceipt.reason.detail).toBe("Publish result using [REDACTED]");
+    expect(text).not.toContain("private instruction body");expect(text).not.toContain("instruction-token");
+  });
+
   it("exports closed transition outcomes without stop reasons or request payloads", async () => {
     const upstream = await startUpstream();
     const recorder = await startGraphOperationRecorder({ upstreamUrl: upstream.url });

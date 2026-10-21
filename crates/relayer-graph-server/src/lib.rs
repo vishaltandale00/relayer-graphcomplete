@@ -4,7 +4,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
 };
 use relayer_graph_core::query::{QueryError, preflight_public_request_json};
 use relayer_graph_core::{
@@ -25,6 +25,7 @@ use std::{
 use uuid::Uuid;
 
 mod draft_preview;
+mod instruction_retrieval;
 #[cfg(feature = "ladybug")]
 pub mod search_index;
 
@@ -41,6 +42,7 @@ pub struct ServerState {
     visual_assets_gate: Arc<Mutex<HashMap<NodeId, Arc<tokio::sync::Mutex<u64>>>>>,
     http_client: reqwest::Client,
     draft_previews: Arc<DraftPreviews>,
+    instruction_retrievals: Arc<instruction_retrieval::InstructionRetrievals>,
     #[cfg(feature = "ladybug")]
     search_index: Option<Arc<search_index::LadybugSearchIndex>>,
     #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
@@ -114,6 +116,7 @@ impl ServerState {
                 .build()
                 .expect("visual-assets HTTP client configuration is valid"),
             draft_previews: Arc::new(DraftPreviews::new(draft_preview::DEFAULT_RENDER_LIMIT)),
+            instruction_retrievals: Arc::default(),
             #[cfg(feature = "ladybug")]
             search_index: None,
             #[cfg(all(feature = "ladybug", feature = "crash-test-support"))]
@@ -253,6 +256,34 @@ pub fn router(state: ServerState) -> Router {
         .route(
             "/api/control/current-projections",
             get(control_current_projections).post(control_current_projection_page),
+        )
+        .route(
+            "/api/control/instruction-graphs/{version_key}",
+            put(ensure_instruction_graph),
+        )
+        .route(
+            "/api/control/interactions/{id}/instruction-graph",
+            post(attach_instruction_graph),
+        )
+        .route(
+            "/api/graph/instruction-graph",
+            get(graph_instruction_manifest),
+        )
+        .route(
+            "/api/graph/instruction-graph/nodes/{id}",
+            get(graph_instruction_node),
+        )
+        .route(
+            "/api/graph/instruction-graph/layers/{id}",
+            get(graph_instruction_layer),
+        )
+        .route(
+            "/api/graph/instruction-graph/retrieve",
+            post(instruction_retrieval::retrieve),
+        )
+        .route(
+            "/api/graph/instruction-graph/search",
+            post(instruction_search),
         )
         .route(
             "/api/control/personal-presentation",
@@ -1394,6 +1425,157 @@ struct PublishPersonalPresentationVersionRequest {
     version_interaction_node_id: NodeId,
 }
 
+async fn ensure_instruction_graph(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(version_key): Path<String>,
+    Json(definition): Json<relayer_graph_core::InstructionGraphDefinition>,
+) -> Result<Json<relayer_graph_core::InstructionGraphManifest>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .ensure_instruction_graph(&version_key, definition)
+            .await?,
+    ))
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct InstructionGraphPin {
+    version_key: String,
+    digest: String,
+}
+async fn attach_instruction_graph(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+    Json(pin): Json<InstructionGraphPin>,
+) -> Result<Json<relayer_graph_core::InstructionGraphManifest>, ApiError> {
+    require_bearer(&headers, &state.control_token)?;
+    Ok(Json(
+        state
+            .graph
+            .attach_instruction_graph(id, &pin.version_key, &pin.digest)
+            .await?,
+    ))
+}
+async fn graph_instruction_manifest(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<relayer_graph_core::InstructionGraphManifest>, ApiError> {
+    let authority = capability(&state, &headers)?;
+    Ok(Json(
+        state
+            .graph
+            .instruction_graph(authority.node_id, authority.epoch)
+            .await?,
+    ))
+}
+async fn graph_instruction_node(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<NodeId>,
+) -> Result<Json<Value>, ApiError> {
+    let authority = capability(&state, &headers)?;
+    Ok(Json(
+        json!({"node":state.graph.instruction_node(authority.node_id,authority.epoch,id).await?}),
+    ))
+}
+async fn graph_instruction_layer(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<LayerId>,
+) -> Result<Json<relayer_graph_core::ResolvedLayer>, ApiError> {
+    let authority = capability(&state, &headers)?;
+    Ok(Json(
+        state
+            .graph
+            .instruction_layer(authority.node_id, authority.epoch, id)
+            .await?,
+    ))
+}
+async fn instruction_search(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let (preflight, reason) = instruction_retrieval::search_preflight(&body)?;
+    let authority = capability(&state, &headers)?;
+    let envelope: Value =
+        serde_json::from_slice(&body).map_err(|e| ApiError::invalid(&e.to_string()))?;
+    if envelope.get("target").is_some() {
+        return Err(ApiError::invalid(
+            "Instruction search does not accept a target selector.",
+        ));
+    }
+
+    if authority.profile.search != GraphSearchCapability::QueryV1 {
+        return Err(ApiError::capability_not_granted());
+    }
+    let manifest = state
+        .graph
+        .instruction_graph(authority.node_id, authority.epoch)
+        .await?;
+    let reason = if manifest.retrieval_contract_version == 2 {
+        let reason = reason.ok_or_else(|| {
+            ApiError::invalid("Instruction retrieval contract 2 searches require reason.")
+        })?;
+        reason.validate()?;
+        Some(reason)
+    } else {
+        None
+    };
+    let permit = state
+        .graph
+        .instruction_query_read_permit(authority.node_id, authority.epoch)
+        .await?;
+    let prepared = permit
+        .bind_prepared_public_query(preflight)
+        .map_err(ApiError::query_contract)?;
+    if manifest.retrieval_contract_version == 2 {
+        instruction_retrieval::enforce_metadata_projection(&prepared)?;
+    }
+    #[cfg(feature = "ladybug")]
+    {
+        let index = state
+            .search_index
+            .as_ref()
+            .cloned()
+            .ok_or_else(ApiError::search_unavailable)?;
+        let cancellation = state.search_cancellation();
+        let mut cancel_on_drop = CancelSearchOnDrop(Some(cancellation.clone()));
+        let query = tokio::spawn(async move {
+            index
+                .execute_prepared(&permit, prepared, cancellation)
+                .await
+        });
+        let result = query
+            .await
+            .map_err(|_| ApiError::internal("instruction search task stopped unexpectedly"))?
+            .map_err(|failure| match failure {
+                search_index::GraphQueryFailure::Contract(error) => ApiError::query_contract(error),
+                search_index::GraphQueryFailure::TargetNotReady { .. } => {
+                    ApiError::search_unavailable()
+                }
+            })?;
+        cancel_on_drop.0 = None;
+        state
+            .graph
+            .writer_for_completion_authority(authority.node_id, authority.epoch)
+            .await?
+            .require_active_authority()
+            .await?;
+        let mut response = result.outcome.to_json();
+        instruction_retrieval::search_receipt(&mut response, reason);
+        Ok(Json(response))
+    }
+    #[cfg(not(feature = "ladybug"))]
+    {
+        let _ = (prepared, reason);
+        Err(ApiError::search_unavailable())
+    }
+}
+
 async fn personal_presentation_contract(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -2334,6 +2516,7 @@ async fn mint_capability_with_profile(
     let gate = completion_asset_gate(state, node_id)?;
     let mut asset_generation = gate.lock().await;
     let epoch = state.graph.activate_completion_authority(node_id).await?;
+    state.instruction_retrievals.forget(node_id)?;
     // The epoch already invalidated prior tokens even if activation acknowledgment
     // is lost. Never let a requested old token replay a now-stale session entry.
     state
@@ -2425,6 +2608,7 @@ async fn revoke_capability(
             before - sessions.len()
         };
         state.draft_previews.forget(node_id);
+        state.instruction_retrievals.forget(node_id)?;
     }
     Ok(Json(
         json!({"revoked": revoked > 0, "revokedCount": revoked}),
@@ -5358,6 +5542,142 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn instruction_graph_routes_require_control_and_preserve_exact_scoped_reads() {
+        use sha2::{Digest, Sha256};
+        let graph = GraphDatabase::in_memory().await.unwrap();
+        let task = graph
+            .create_interaction(None, ThreadId::new(1).unwrap(), "Task")
+            .await
+            .unwrap();
+        let other = graph
+            .create_interaction(None, ThreadId::new(2).unwrap(), "Other")
+            .await
+            .unwrap();
+        let state = ServerState::new(graph.clone(), "control");
+        let token = mint_capability(&state, task.id, None)
+            .await
+            .unwrap_or_else(|e| panic!("{}", e.1));
+        let other_token = mint_capability(&state, other.id, None)
+            .await
+            .unwrap_or_else(|e| panic!("{}", e.1));
+        let modules = vec![relayer_graph_core::InstructionModuleDefinition {
+            key: "authoring".into(),
+            title: "Authoring".into(),
+            detail: "Private trusted instruction body".into(),
+            prerequisites: vec![],
+        }];
+        let digest = format!(
+            "{:x}",
+            Sha256::digest(serde_json::to_vec(&modules).unwrap())
+        );
+        let body = json!({"digest":digest,"modules":modules}).to_string();
+        let app = router(state.clone());
+        let request = |method: &str, path: String, token: &str, body: String| {
+            Request::builder()
+                .method(method)
+                .uri(path)
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {token}"))
+                .body(Body::from(body))
+                .unwrap()
+        };
+        let denied = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "/api/control/instruction-graphs/v1".into(),
+                &token,
+                body.clone(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let created = app
+            .clone()
+            .oneshot(request(
+                "PUT",
+                "/api/control/instruction-graphs/v1".into(),
+                "control",
+                body,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(created.status(), StatusCode::OK);
+        let manifest: Value =
+            serde_json::from_slice(&to_bytes(created.into_body(), usize::MAX).await.unwrap())
+                .unwrap();
+        assert!(!manifest.to_string().contains("Private trusted"));
+        let pin = json!({"versionKey":"v1","digest":digest}).to_string();
+        let denied = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                format!("/api/control/interactions/{}/instruction-graph", task.id),
+                &token,
+                pin.clone(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let attached = app
+            .clone()
+            .oneshot(request(
+                "POST",
+                format!("/api/control/interactions/{}/instruction-graph", task.id),
+                "control",
+                pin,
+            ))
+            .await
+            .unwrap();
+        assert_eq!(attached.status(), StatusCode::OK);
+        let module = manifest["modules"][0]["nodeId"].as_i64().unwrap();
+        let read = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                format!("/api/graph/instruction-graph/nodes/{module}"),
+                &token,
+                String::new(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(read.status(), StatusCode::OK);
+        let denied = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                format!("/api/graph/instruction-graph/nodes/{module}"),
+                &other_token,
+                String::new(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::NOT_FOUND);
+        let denied = app
+            .clone()
+            .oneshot(request(
+                "GET",
+                format!("/api/graph/nodes/{module}"),
+                &token,
+                String::new(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::FORBIDDEN);
+        graph.cutover_completion_authority(task.id).await.unwrap();
+        let stale = app
+            .oneshot(request(
+                "GET",
+                "/api/graph/instruction-graph".into(),
+                &token,
+                String::new(),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(stale.status(), StatusCode::UNPROCESSABLE_ENTITY);
+    }
+
+    #[tokio::test]
     async fn personal_presentation_attachment_requires_control_authority_and_resolves_graph() {
         let graph = GraphDatabase::in_memory().await.unwrap();
         let version_text = "Personal presentation V1";
@@ -7787,6 +8107,7 @@ mod no_ladybug_search_tests {
             None,
             GraphCapabilityProfile {
                 search: GraphSearchCapability::QueryV1,
+                ..GraphCapabilityProfile::default()
             },
         )
         .await

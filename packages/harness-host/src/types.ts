@@ -1,4 +1,4 @@
-import type { CompletionOutput, GraphCapability, CompletionHistoryPage, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation } from "@relayer/graph-client";
+import type { CompletionOutput, GraphCapability, CompletionHistoryPage, GraphId, GraphNode, InteractionInput, ResolvedPersonalPresentation, InstructionGraphManifest } from "@relayer/graph-client";
 import type { HarnessApprovalChannel } from "./approval-coordinator.js";
 import type { NativeExecutionHandle } from "./completion-execution.js";
 
@@ -279,6 +279,8 @@ export interface HarnessRunContext {
   readonly interactionInput: InteractionInput;
   /** Control-attached hidden graph resolved from this exact interaction pointer. */
   readonly personalPresentation?: ResolvedPersonalPresentation;
+  /** Metadata only; instruction bodies remain in the exact graph-core-pinned accepted corpus. */
+  readonly instructionGraph?: InstructionGraphManifest;
   readonly graph: HarnessGraphScope;
   readonly completionBroker?: HarnessCompletionBrokerScope;
   readonly approvals: HarnessApprovalChannel;

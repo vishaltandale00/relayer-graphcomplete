@@ -146,7 +146,7 @@ describe("harness configuration", () => {
   });
 
   it.each([
-    ["codex-basic", "medium", 18, "layered-navigation-multi-agent-v1"],
+    ["codex-basic", "medium", 19, "instruction-graph-v2"],
     ["codex-basic-high", "high", 4, undefined],
   ])("loads the checked-in %s configuration", async (name, modelReasoningEffort, revision, promptProfile) => {
     await expect(loadHarnessConfiguration(join(repositoryRoot, `harnesses/${name}.yaml`))).resolves.toEqual({
@@ -175,7 +175,9 @@ describe("harness configuration", () => {
       ...(name === "codex-basic" ? { complete: { agentAuthored: true }, graphCapabilityProfile: { search: "query-v1", preview: "enabled" } } : {}),
       settings: {
         modelReasoningEffort,
-        ...(name === "codex-basic" ? { personalPresentationVersion: "personal-presentation-v6" } : {}),
+        ...(name === "codex-basic" ? { personalPresentationVersion: "personal-presentation-v6",
+          instructionGraphVersionKey: "codex-instruction-graph-v2",
+          instructionGraphDigest: "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224" } : {}),
         ...(promptProfile === undefined ? {} : { promptProfile }),
         skipGitRepoCheck: true,
       },

@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/adversarial_review",
+  "sourceScope": {
+    "files": [
+      {
+        "path": "harnesses/codex-full-prompt-control.yaml",
+        "sha256": "a91f65cb6977881c2346eed841cc2a121d3b2d9e143c58d0cc8b1b6cab544d6d"
+      },
+      {
+        "path": "desktop/eval-main/configuration-paths.mjs",
+        "sha256": "453769e769d63fefe7abeac827792b1ed8e3f71e77009e1d5e2f0e12fdfb3c84"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+        "sha256": "2416eb0b3465c124e5916b5e7e77406e5da897486065bd7614d0595c9fea1df0"
+      },
+      {
+        "path": "desktop/eval-main/eval-service.mjs",
+        "sha256": "9b05ce028f17f0e8a5f714166338dec7af1545ee4a210d1a790821866ea65f7b"
+      },
+      {
+        "path": "desktop/eval-renderer/run-model.js",
+        "sha256": "2590527538289f6e0eb6781d6c9d03ed04bc66989e2d3b48257da1095d0ec024"
+      },
+      {
+        "path": "test/eval-configuration-paths.test.mjs",
+        "sha256": "99c3b5da59ffc3326e58010700b7863dee65943e5b93037f670f487f342fda34"
+      },
+      {
+        "path": "test/eval-instruction-graph.test.mjs",
+        "sha256": "e26098f45fe349e29fb28c22ce2b5614c2ec8a778d1f6268c088ef0143d9aef5"
+      }
+    ],
+    "digest": "a1a059bfa30e8a18f6389e1986f8cc0b73458aee9593282a8210fe3a87d89839"
+  },
+  "scopeDigestAlgorithm": "SHA-256 of compact UTF-8 JSON file entries with sorted object keys",
+  "scope": [
+    "Frozen full-prompt control identity and copied revision18 bytes",
+    "Backend real createRun old-pair refusal, catalog presets and UI selection",
+    "Matched-route finalization using stored harnessPair or historical codex-basic fallback",
+    "Current revision19 catalog coexisting with immutable archived revision18 configuration and digest"
+  ],
+  "verdict": "No reviewed authority, identity or historical-mutation blocker",
+  "unresolvedFindings": [],
+  "fileHashesVerified": 7,
+  "controlIdentity": "Independent reviewer confirmed frozen control bytes equal base commit2ef4f7a4f14bb444a955a180a2f90cec34873e93 codex-basic revision18 except configuration name and revision.",
+  "testEvidence": "The implementing agent records final3-file48-test pass in eval-control-verification.json. Reviewer did not independently rerun those tests or certify logs.",
+  "limits": [
+    "Source/design review only; no inference or quality claim.",
+    "No PR is attached; this workspace assertion is non-certifying until recorded in the PR against its exact source state.",
+    "Any changed file hash invalidates this scoped assertion."
+  ]
+}

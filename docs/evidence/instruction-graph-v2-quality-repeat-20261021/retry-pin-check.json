@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "priorRunId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+  "runId": "run-2026-10-21T14-00-47-155Z-40538473",
+  "checks": [
+    {
+      "harness": "codex-basic",
+      "sameHarnessDigest": true,
+      "sameCaseSnapshotDigest": true,
+      "sameCandidatePin": true,
+      "sameJudgePin": true
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "sameHarnessDigest": true,
+      "sameCaseSnapshotDigest": true,
+      "sameCandidatePin": true,
+      "sameJudgePin": true
+    }
+  ]
+}

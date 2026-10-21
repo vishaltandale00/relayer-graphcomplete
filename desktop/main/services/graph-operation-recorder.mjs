@@ -181,9 +181,55 @@ function withCompletion(receipt, response) {
   };
 }
 
+function instructionReason(value, knownSecrets) {
+  const purposes = ["authority", "authoring", "presentation", "navigation", "search", "preview", "repair", "delegation", "verification", "recovery"];
+  if (!isObject(value) || !purposes.includes(value.purpose) || typeof value.detail !== "string"
+    || [...value.detail].length < 8 || [...value.detail].length > 240) return undefined;
+  return { purpose: value.purpose, detail: scrubKnownSecrets(value.detail, knownSecrets) };
+}
+
+function instructionRetrieval(response, knownSecrets) {
+  const reason = instructionReason(response?.reason, knownSecrets);
+  if (!reason || typeof response.requestKey !== "string" || typeof response.replayed !== "boolean"
+    || !Array.isArray(response.entries) || response.entries.length > 8) return undefined;
+  const entries = response.entries.flatMap((entry) => {
+    if (!positiveInteger(entry?.nodeId) || !["body", "already-returned", "reread"].includes(entry.delivery)
+      || typeof entry.key !== "string" || !Number.isSafeInteger(entry.bodyCharacters) || entry.bodyCharacters < 0
+      || !Number.isSafeInteger(entry.bodyBytes) || entry.bodyBytes < 0) return [];
+    return [{ nodeId: entry.nodeId, key: entry.key.slice(0, 160), delivery: entry.delivery,
+      bodyCharacters: entry.bodyCharacters, bodyBytes: entry.bodyBytes,
+      ...(typeof entry.firstRequestKey === "string" ? { firstRequestKey: scrubKnownSecrets([...entry.firstRequestKey].slice(0, 128).join(""), knownSecrets) } : {}) }];
+  });
+  if (entries.length !== response.entries.length) return undefined;
+  return { requestKey: scrubKnownSecrets([...response.requestKey].slice(0, 128).join(""), knownSecrets), replayed: response.replayed, reason, entries,
+    ...(typeof response.rereadReason === "string" && [...response.rereadReason].length <= 240
+      ? { rereadReason: scrubKnownSecrets(response.rereadReason, knownSecrets) } : {}) };
+}
+
 function sanitizeReceipt(method, path, status, request, response, knownSecrets) {
   const codesAtOrigin = errorCodes(response);
   const receipt = { schemaVersion: 1, method, path, status, ...(codesAtOrigin.length ? { errorCodes: codesAtOrigin } : {}) };
+  if (method === "GET" && path === "/api/graph/instruction-graph" && status >= 200 && status < 300) {
+    return { ...receipt,
+      ...(typeof response?.versionKey === "string" ? { instructionGraphVersionKey: response.versionKey } : {}),
+      ...(/^[a-f0-9]{64}$/.test(response?.digest ?? "") ? { instructionGraphDigest: response.digest } : {}),
+    };
+  }
+  if (method === "GET" && /^\/api\/graph\/instruction-graph\/nodes\/[1-9]\d*$/.test(path)) {
+    return withRecord(receipt, "instruction-node", response?.node);
+  }
+  if (method === "GET" && /^\/api\/graph\/instruction-graph\/layers\/[1-9]\d*$/.test(path)) {
+    return withRecord(receipt, "instruction-layer", response?.layer);
+  }
+  if (method === "POST" && path === "/api/graph/instruction-graph/retrieve" && status >= 200 && status < 300) {
+    const retrieval = instructionRetrieval(response, knownSecrets);
+    return { ...receipt, ...(retrieval ? { instructionRetrieval: retrieval } : {}) };
+  }
+  if (method === "POST" && path === "/api/graph/instruction-graph/search") {
+    const reason = status >= 200 && status < 300 ? instructionReason(response?.instructionSearchReceipt?.reason, knownSecrets) : undefined;
+    return { ...withSearch(withSearchRequest(receipt, request, knownSecrets), response),
+      ...(reason ? { instructionSearchReceipt: { reason } } : {}) };
+  }
   if (method === "POST" && path === "/api/graph/visual-assets/operations") {
     const kind = request?.operation?.kind;
     return {

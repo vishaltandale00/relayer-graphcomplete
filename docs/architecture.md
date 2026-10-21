@@ -189,6 +189,42 @@ A harness may define an internal multi-model policy for native delegation or rev
 
 ## Harness configurations and evaluation
 
+The 2026-10-21 human promotion selects instruction-graph V2 in the stable product
+`codex-basic` identity at revision 19. The exact immutable corpus pin is shared
+with the retained V2 Eval alias. Reopened saved full-prompt sessions may take the
+reviewed migration; live objects cannot swap prompt profiles. Existing execution
+receipts retain their original identities. Publication and pin failures stop
+execution. Directory and reasoned retrieval do not require search; disabled
+search remains denied and receives no executable search guidance. Future Eval
+comparisons select `codex-full-prompt-control`, while historical pairs remain
+unchanged. PRD 12.4B records this decision and its verification checkpoints.
+The two retained quality trials do not certify general quality equivalence.
+
+
+Eval's experimental `codex-instruction-graph-v1` configuration uses the existing
+`codex.basic` implementation with a compact instruction bootstrap. Trusted startup
+materializes generic manuals as an accepted graph in a private standalone thread
+per immutable corpus version. Preparation attaches the exact corpus key and
+content digest to the completion before inference; semantic children inherit that
+pin. Dedicated completion-scoped node/layer reads and query-v1 search use the same
+graph engine while restricting visibility to that corpus. The attachment grants
+neither corpus-write authority nor task-project access. V6 preferences retain
+their existing inline delivery and native-child propagation. The matched Eval
+pair records delivery, retrieval, available usage and quality separately; it is
+not a product-default promotion or evidence of equivalent quality. PRD 12.4A
+defines the experimental contract and checkpoint proof mapping.
+
+The V2 variant uses small independent instruction recipes and a reasoned body
+retrieval endpoint. Server memory tracks delivery per completion, active capability
+epoch and corpus digest across programs and native helpers. Exact request retries
+replay their original response; new requests suppress prior bodies unless an
+explicit recovery reason asks for a reread. Restart resets this bookkeeping.
+Semantic children have independent state. V2 requires operational reasons for
+search and retrieval, restricts instruction search to metadata projections, and
+rejects legacy body-read routes. The unchanged query-v1 engine supports structured
+lookup rather than semantic ranking. Eval preserves V1 history and shows physical
+body delivery, suppression, rereads and agent-stated reasons separately from usage.
+
 The packaged product `codex-basic` configuration selects the `codex.basic` implementation with layered navigation and Codex-native subagents available when useful. `codex-basic-high` remains a checked-in internal Eval configuration and is not loaded or packaged by Relayer Desktop. Before interrupted-turn recovery, product storage migrates threads formerly pinned to that retired configuration only when the active runtime catalog includes `codex-basic` and omits `codex-basic-high`; Eval catalogs that include both preserve the high configuration. Harness-state schema v6 backs up schema-v4/v5 bytes without guessing the caller's catalog. When Desktop later registers the exact layered `codex-basic` replacement for a revision-1 or revision-2 prior Codex configuration, the host preserves its native provider state and persists the current descriptor; deferred legacy sessions follow the same registration-scoped rule, while Eval high registrations remain unchanged. A named YAML configuration selects an implementation, contains that implementation's settings, declares provider/model compatibility, and supplies bindings for the three product permission profiles. The host treats implementation settings and bindings as opaque. A code-owned implementation map connects implementation types to executable factories without adding implementation-specific fields to product records.
 
 Configuration, implementation code, session state, and live authority are deliberately separate:

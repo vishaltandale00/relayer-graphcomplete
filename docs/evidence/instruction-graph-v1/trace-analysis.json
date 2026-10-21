@@ -1,0 +1,685 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-20T13-21-23-927Z-2b959113",
+  "sourceDigest": "e382558a8456b94d23040bf68edba924345a2db0928b6961cae04a64f336141d",
+  "corpus": {
+    "versionKey": "codex-instruction-graph-v1",
+    "digest": "3eec08053baf020b6492f0be1212e1aa9875973212bf6dc03a245f880dcae1ce",
+    "totalCharacters": 72251
+  },
+  "modules": [
+    {
+      "key": "presentation",
+      "title": "Graph presentation and affordances",
+      "characters": 3617,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 1
+      }
+    },
+    {
+      "key": "visual",
+      "title": "Visual Node Details, assets and compiler reference",
+      "characters": 13197,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 2
+      }
+    },
+    {
+      "key": "publication",
+      "title": "Current publication and acceptance rules",
+      "characters": 4900,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 1
+      }
+    },
+    {
+      "key": "interaction",
+      "title": "Input contracts and attached-node authority",
+      "characters": 4712,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 1,
+        "10": 1
+      }
+    },
+    {
+      "key": "authoring",
+      "title": "Executable Current and final response authoring recipe",
+      "characters": 19248,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 2
+      }
+    },
+    {
+      "key": "search",
+      "title": "Prior work search and invoke source context",
+      "characters": 5452,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 1
+      }
+    },
+    {
+      "key": "navigation",
+      "title": "Navigation, layout and draft repair",
+      "characters": 13613,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 2,
+        "10": 1
+      }
+    },
+    {
+      "key": "delegation",
+      "title": "Semantic child execution and integration",
+      "characters": 4307,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 0
+      }
+    },
+    {
+      "key": "previews",
+      "title": "Draft preview inspection",
+      "characters": 1195,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 1
+      }
+    },
+    {
+      "key": "program-repair",
+      "title": "Saved-program edits for a rejected draft",
+      "characters": 2010,
+      "readsByTurn": {
+        "7": 0,
+        "8": 0,
+        "9": 0,
+        "10": 1
+      }
+    }
+  ],
+  "turns": [
+    {
+      "harness": "codex-basic",
+      "interactionId": 7,
+      "promptCharacters": 79550,
+      "usageUpdates": 5,
+      "counters": {
+        "totalTokens": 182942,
+        "inputTokens": 180861,
+        "cachedInputTokens": 152832,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2081,
+        "reasoningOutputTokens": 110
+      },
+      "uncachedInputTokens": 28029,
+      "firstRequestInputTokens": 31130,
+      "largestRequestInputTokens": 39581,
+      "lastRequestInputTokens": 39581,
+      "perRequestInputTokens": [
+        31130,
+        33152,
+        37636,
+        39362,
+        39581
+      ],
+      "printedInstructionCharacters": 0,
+      "readOperations": [],
+      "commands": [
+        {
+          "sequence": 52,
+          "time": "2026-10-20T13:21:31.324Z",
+          "kind": "other",
+          "stdoutCharacters": 7102,
+          "exitCode": 0,
+          "includesCompilerReference": true,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 63,
+          "time": "2026-10-20T13:22:07.635Z",
+          "kind": "other",
+          "stdoutCharacters": 8566,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 75,
+          "time": "2026-10-20T13:22:16.460Z",
+          "kind": "other",
+          "stdoutCharacters": 27,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        }
+      ]
+    },
+    {
+      "harness": "codex-basic",
+      "interactionId": 8,
+      "promptCharacters": 79805,
+      "usageUpdates": 7,
+      "counters": {
+        "totalTokens": 256014,
+        "inputTokens": 253702,
+        "cachedInputTokens": 224768,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2312,
+        "reasoningOutputTokens": 59
+      },
+      "uncachedInputTokens": 28934,
+      "firstRequestInputTokens": 31202,
+      "largestRequestInputTokens": 40146,
+      "lastRequestInputTokens": 40146,
+      "perRequestInputTokens": [
+        31202,
+        33555,
+        34406,
+        36271,
+        38196,
+        39926,
+        40146
+      ],
+      "printedInstructionCharacters": 0,
+      "readOperations": [],
+      "commands": [
+        {
+          "sequence": 48,
+          "time": "2026-10-20T13:22:30.952Z",
+          "kind": "other",
+          "stdoutCharacters": 6570,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 55,
+          "time": "2026-10-20T13:22:36.318Z",
+          "kind": "other",
+          "stdoutCharacters": 5944,
+          "exitCode": 0,
+          "includesCompilerReference": true,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 60,
+          "time": "2026-10-20T13:23:05.691Z",
+          "kind": "other",
+          "stdoutCharacters": 1143,
+          "exitCode": 1,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 69,
+          "time": "2026-10-20T13:23:09.120Z",
+          "kind": "program-repair",
+          "stdoutCharacters": 5199,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 81,
+          "time": "2026-10-20T13:23:17.279Z",
+          "kind": "other",
+          "stdoutCharacters": 27,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        }
+      ]
+    },
+    {
+      "harness": "codex-instruction-graph-v1",
+      "interactionId": 9,
+      "promptCharacters": 14228,
+      "usageUpdates": 8,
+      "counters": {
+        "totalTokens": 263722,
+        "inputTokens": 261267,
+        "cachedInputTokens": 228864,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2455,
+        "reasoningOutputTokens": 149
+      },
+      "uncachedInputTokens": 32403,
+      "firstRequestInputTokens": 17756,
+      "largestRequestInputTokens": 43401,
+      "lastRequestInputTokens": 43401,
+      "perRequestInputTokens": [
+        17756,
+        19492,
+        28096,
+        31214,
+        37019,
+        41291,
+        42998,
+        43401
+      ],
+      "printedInstructionCharacters": 110245,
+      "readOperations": [
+        {
+          "time": "2026-10-20T13:23:34.800Z",
+          "nodeId": 69,
+          "key": "interaction",
+          "characters": 4712
+        },
+        {
+          "time": "2026-10-20T13:23:34.809Z",
+          "nodeId": 66,
+          "key": "presentation",
+          "characters": 3617
+        },
+        {
+          "time": "2026-10-20T13:23:38.509Z",
+          "nodeId": 68,
+          "key": "publication",
+          "characters": 4900
+        },
+        {
+          "time": "2026-10-20T13:23:38.516Z",
+          "nodeId": 72,
+          "key": "navigation",
+          "characters": 13613
+        },
+        {
+          "time": "2026-10-20T13:23:38.520Z",
+          "nodeId": 67,
+          "key": "visual",
+          "characters": 13197
+        },
+        {
+          "time": "2026-10-20T13:23:38.525Z",
+          "nodeId": 70,
+          "key": "authoring",
+          "characters": 19248
+        },
+        {
+          "time": "2026-10-20T13:23:42.637Z",
+          "nodeId": 67,
+          "key": "visual",
+          "characters": 13197
+        },
+        {
+          "time": "2026-10-20T13:23:47.607Z",
+          "nodeId": 70,
+          "key": "authoring",
+          "characters": 19248
+        },
+        {
+          "time": "2026-10-20T13:23:52.581Z",
+          "nodeId": 68,
+          "key": "publication",
+          "characters": 4900
+        },
+        {
+          "time": "2026-10-20T13:23:52.587Z",
+          "nodeId": 72,
+          "key": "navigation",
+          "characters": 13613
+        }
+      ],
+      "commands": [
+        {
+          "sequence": 56,
+          "time": "2026-10-20T13:23:34.848Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "for (const id of [69,66]) console.log((await graph.getInstructionNode(id)).detail);"
+          ],
+          "stdoutCharacters": 8358,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 61,
+          "time": "2026-10-20T13:23:38.811Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "for (const id of [68,72,67,70]) console.log((await graph.getInstructionNode(id)).detail);"
+          ],
+          "stdoutCharacters": 50989,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 68,
+          "time": "2026-10-20T13:23:42.675Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "console.log((await graph.getInstructionNode(67)).detail);"
+          ],
+          "stdoutCharacters": 13225,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 73,
+          "time": "2026-10-20T13:23:47.673Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "console.log((await graph.getInstructionNode(70)).detail);"
+          ],
+          "stdoutCharacters": 25193,
+          "exitCode": 0,
+          "includesCompilerReference": true,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 80,
+          "time": "2026-10-20T13:23:52.646Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "for (const id of [68,72]) console.log((await graph.getInstructionNode(id)).detail);"
+          ],
+          "stdoutCharacters": 18818,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 91,
+          "time": "2026-10-20T13:24:25.492Z",
+          "kind": "other",
+          "stdoutCharacters": 383,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 100,
+          "time": "2026-10-20T13:24:33.917Z",
+          "kind": "other",
+          "stdoutCharacters": 388,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        }
+      ]
+    },
+    {
+      "harness": "codex-instruction-graph-v1",
+      "interactionId": 10,
+      "promptCharacters": 14483,
+      "usageUpdates": 11,
+      "counters": {
+        "totalTokens": 403574,
+        "inputTokens": 400627,
+        "cachedInputTokens": 355840,
+        "cacheWriteInputTokens": 0,
+        "outputTokens": 2947,
+        "reasoningOutputTokens": 130
+      },
+      "uncachedInputTokens": 44787,
+      "firstRequestInputTokens": 17827,
+      "largestRequestInputTokens": 46465,
+      "lastRequestInputTokens": 46465,
+      "perRequestInputTokens": [
+        17827,
+        21015,
+        29536,
+        34148,
+        38556,
+        39098,
+        41451,
+        42086,
+        44363,
+        46082,
+        46465
+      ],
+      "printedInstructionCharacters": 100389,
+      "readOperations": [
+        {
+          "time": "2026-10-20T13:24:50.869Z",
+          "nodeId": 69,
+          "key": "interaction",
+          "characters": 4712
+        },
+        {
+          "time": "2026-10-20T13:24:50.878Z",
+          "nodeId": 66,
+          "key": "presentation",
+          "characters": 3617
+        },
+        {
+          "time": "2026-10-20T13:24:54.299Z",
+          "nodeId": 68,
+          "key": "publication",
+          "characters": 4900
+        },
+        {
+          "time": "2026-10-20T13:24:54.316Z",
+          "nodeId": 72,
+          "key": "navigation",
+          "characters": 13613
+        },
+        {
+          "time": "2026-10-20T13:24:54.348Z",
+          "nodeId": 67,
+          "key": "visual",
+          "characters": 13197
+        },
+        {
+          "time": "2026-10-20T13:24:54.379Z",
+          "nodeId": 70,
+          "key": "authoring",
+          "characters": 19248
+        },
+        {
+          "time": "2026-10-20T13:24:54.435Z",
+          "nodeId": 71,
+          "key": "search",
+          "characters": 5452
+        },
+        {
+          "time": "2026-10-20T13:24:58.623Z",
+          "nodeId": 67,
+          "key": "visual",
+          "characters": 13197
+        },
+        {
+          "time": "2026-10-20T13:25:02.545Z",
+          "nodeId": 70,
+          "key": "authoring",
+          "characters": 19248
+        },
+        {
+          "time": "2026-10-20T13:25:09.928Z",
+          "nodeId": 74,
+          "key": "previews",
+          "characters": 1195
+        },
+        {
+          "time": "2026-10-20T13:25:43.468Z",
+          "nodeId": 75,
+          "key": "program-repair",
+          "characters": 2010
+        }
+      ],
+      "commands": [
+        {
+          "sequence": 52,
+          "time": "2026-10-20T13:24:50.929Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "for (const id of [69,66]) console.log('INSTRUCTION',id,(await graph.getInstructionNode(id)).detail);"
+          ],
+          "stdoutCharacters": 13008,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 66,
+          "time": "2026-10-20T13:24:55.092Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "for (const id of [68,72,67,70,71]) console.log('INSTRUCTION',id,(await graph.getInstructionNode(id)).detail);"
+          ],
+          "stdoutCharacters": 56517,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 77,
+          "time": "2026-10-20T13:24:58.666Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "console.log((await graph.getInstructionNode(67)).detail);"
+          ],
+          "stdoutCharacters": 19152,
+          "exitCode": 0,
+          "includesCompilerReference": true,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 86,
+          "time": "2026-10-20T13:25:02.684Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "console.log((await graph.getInstructionNode(70)).detail);"
+          ],
+          "stdoutCharacters": 19552,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 137,
+          "time": "2026-10-20T13:25:09.945Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "console.log((await graph.getInstructionNode(74)).detail);"
+          ],
+          "stdoutCharacters": 1223,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 143,
+          "time": "2026-10-20T13:25:39.025Z",
+          "kind": "other",
+          "stdoutCharacters": 3042,
+          "exitCode": 1,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 151,
+          "time": "2026-10-20T13:25:43.484Z",
+          "kind": "instruction-retrieval",
+          "readLines": [
+            "console.log((await graph.getInstructionNode(75)).detail);"
+          ],
+          "stdoutCharacters": 2038,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 160,
+          "time": "2026-10-20T13:25:47.894Z",
+          "kind": "program-repair",
+          "stdoutCharacters": 6211,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": false,
+          "explicitTruncationMarker": false
+        },
+        {
+          "sequence": 175,
+          "time": "2026-10-20T13:25:55.496Z",
+          "kind": "other",
+          "stdoutCharacters": 383,
+          "exitCode": 0,
+          "includesCompilerReference": false,
+          "includesCurrentRead": true,
+          "explicitTruncationMarker": false
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "No explicit reason for repeated reads was recorded: reasoning summary/content fields are empty.",
+    "Exported command output contains no explicit truncation marker. Model-facing tool-output truncation cannot be confirmed from this export.",
+    "Printed instruction characters are corpus body lengths summed over successful reads, excluding metadata and other references. They are not token counts.",
+    "Input tokens are cumulative native-session receipts across requests, including cached input, not maximum occupied context.",
+    "No whole-task native-helper usage coverage or causal attribution of every extra token is established."
+  ],
+  "aggregates": {
+    "control": {
+      "recordedInputRequests": 12,
+      "inputTokens": 434563,
+      "uncachedInputTokens": 56963,
+      "printedInstructionCharacters": 0,
+      "averageInputTokensPerRecordedRequest": 36213.583333333336
+    },
+    "treatment": {
+      "recordedInputRequests": 19,
+      "inputTokens": 661894,
+      "uncachedInputTokens": 77190,
+      "printedInstructionCharacters": 210634,
+      "averageInputTokensPerRecordedRequest": 34836.52631578947
+    }
+  },
+  "integrity": {
+    "runBundleSha256": "c8778cb31916b420a690cf3ca8a6c37bea3b518e3e60917a4df07524d875ea6e",
+    "completeTraceAndLedgerArtifactsVerified": 4,
+    "perRequestInputsSumToCumulativeReceipts": true
+  },
+  "review": {
+    "reviewer": "/root/adversarial_review",
+    "verdict": "Counts independently verified against original bundle, traces, ledgers and corpus; reread motivation remains unknown.",
+    "status": "non_certifying_without_pr"
+  }
+}

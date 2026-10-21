@@ -94,6 +94,30 @@ import { evaluateDesktopReleaseAuthority } from "../scripts/audit-desktop-releas
 const WINDOWS_PUBLISHER_DN = "CN=Relayer Labs LLC, O=Relayer Labs LLC";
 const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
 
+// Model trusted publication independently of the runtime's readiness/close behavior.
+function runtimeStartupResponse(input, request) {
+  const url = new URL(input);
+  const prefix = "/api/control/instruction-graphs/";
+  if (!url.pathname.startsWith(prefix)) return new Response(null, { status: 204 });
+  const { digest, modules, retrievalContractVersion = 1 } = JSON.parse(request.body);
+  const nodeIds = new Map(modules.map((module, index) => [module.key, 1000 + index]));
+  return Response.json({
+    versionKey: decodeURIComponent(url.pathname.slice(prefix.length)),
+    digest,
+    retrievalContractVersion,
+    threadId: 8_000_000_000_000_000,
+    interactionNodeId: 900,
+    rootLayerId: 901,
+    modules: modules.map(({ key, title, prerequisites }) => ({
+      key, title, nodeId: nodeIds.get(key),
+      prerequisites: prerequisites.map((key) => {
+        if (!nodeIds.has(key)) throw new Error(`Missing fixture prerequisite: ${key}`);
+        return nodeIds.get(key);
+      }),
+    })),
+  });
+}
+
 describe("desktop skeleton", () => {
   it("uses electron-builder's architecture-specific unpacked application directories", () => {
     const distRoot = "/tmp/relayer-desktop-dist";
@@ -922,7 +946,7 @@ describe("desktop skeleton", () => {
     let suppliedToken = "";
     const unexpectedStops = [];
     const invocations = [];
-    const fetchRequest = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchRequest = vi.fn(runtimeStartupResponse);
     const child = Object.assign(new EventEmitter(), {
       stdin: new Writable({ write(chunk, _encoding, callback) { suppliedToken += String(chunk); callback(); } }),
       stdout: new PassThrough(),
@@ -965,7 +989,7 @@ describe("desktop skeleton", () => {
       expect(session.harnessControlToken).toMatch(/^[a-f0-9]{64}$/);
       expect(session.harnessControlToken).not.toBe(session.graphControlToken);
       expect(session.graphUrl).toBe("http://127.0.0.1:43125");
-      expect(fetchRequest).toHaveBeenCalledOnce();
+      expect(fetchRequest).toHaveBeenCalledTimes(2);
       const [bridgeUrl, bridgeRequest] = fetchRequest.mock.calls[0];
       expect(String(bridgeUrl)).toBe("http://127.0.0.1:43125/api/control/visual-assets/bridge");
       expect(bridgeRequest.headers.Authorization).toBe(`Bearer ${session.graphControlToken}`);
@@ -974,6 +998,14 @@ describe("desktop skeleton", () => {
       expect(bridge.token).toMatch(/^[a-f0-9]{64}$/);
       expect(bridge.token).not.toBe(session.graphControlToken);
       expect(bridge.generation).toBeGreaterThan(0);
+      const corpus = JSON.parse(await readFile(new URL("../fixtures/instruction-graph-v2.json", import.meta.url), "utf8"));
+      const [publicationUrl, publicationRequest] = fetchRequest.mock.calls[1];
+      expect(String(publicationUrl)).toBe(`http://127.0.0.1:43125/api/control/instruction-graphs/${corpus.versionKey}`);
+      expect(publicationRequest.method).toBe("PUT");
+      expect(publicationRequest.headers.Authorization).toBe(`Bearer ${session.graphControlToken}`);
+      expect(JSON.parse(publicationRequest.body)).toEqual({
+        digest: corpus.digest, modules: corpus.modules, retrievalContractVersion: 2,
+      });
       expect(session).not.toHaveProperty("visualAssetsToken");
       expect(service.graphOperationRecorder).toBeNull();
       expect(session.configurationNames).toEqual(["codex-basic"]);
@@ -1030,7 +1062,7 @@ describe("desktop skeleton", () => {
       kill: vi.fn(function kill() { this.exitCode = 0; this.emit("exit", 0, null); }),
     });
     const service = new GraphCompleteRuntimeService({
-      fetchRequest: async () => new Response(null, { status: 204 }),
+      fetchRequest: runtimeStartupResponse,
       userDataDirectory: directory,
       graphServerBinary: "/test/bin/relayer-graph-server",
       configurationPaths: [configurationPath],
@@ -1112,7 +1144,7 @@ describe("desktop skeleton", () => {
         kill: vi.fn(function kill() { this.exitCode = 0; this.emit("exit", 0, null); }),
       });
       const service = new GraphCompleteRuntimeService({
-        fetchRequest: async () => new Response(null, { status: 204 }),
+        fetchRequest: runtimeStartupResponse,
         userDataDirectory: directory,
         graphServerBinary: "/test/bin/relayer-graph-server",
         configurationPaths: [codex.path, claude.path],
@@ -2938,7 +2970,7 @@ describe("desktop skeleton", () => {
       await Promise.all([
         writeFile(bundledBinary, "binary-fixture"),
         writeFile(bundledGraphBinary, "binary-fixture"),
-        writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n"),
+        writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} getInstructionGraph() {} retrieveInstructions() {} searchInstructions() {} }\n"),
         writeFile(bundledMarked, "marked-fixture"),
         writeFile(join(appPath, "Contents", "Resources", "renderer", "vendor", "artifact-office.js"), "office-fixture"),
         writeFile(join(appPath, "Contents", "Resources", "renderer", "vendor", "artifact-office.LICENSES.txt"), "licences-fixture"),
@@ -2979,6 +3011,7 @@ describe("desktop skeleton", () => {
         "node_modules/chrome-devtools-mcp/build/src/bin/chrome-devtools-mcp.js",
         "node_modules/@relayer/graph-client/dist/index.js",
         "node_modules/@relayer/harness-host/dist/index.js",
+        "node_modules/@relayer/harness-host/dist/implementations/instruction-graph-v2.js",
         "node_modules/@relayer/visual-assets/dist/index.js",
         "node_modules/sharp/dist/index.cjs",
         "node_modules/sharp/dist/index.mjs",
@@ -3048,6 +3081,21 @@ describe("desktop skeleton", () => {
           verifyGraphServer, verifyPrimeAgent, verifyNotices,
         })).rejects.toThrow(`missing ${missing}`);
       }
+      for (const method of ["getInstructionGraph", "retrieveInstructions", "searchInstructions"]) {
+        const methods = ["search", "getInstructionGraph", "retrieveInstructions", "searchInstructions"]
+          .filter(candidate => candidate !== method).map(candidate => `${candidate}() {}`).join(" ");
+        await writeFile(bundledGraphClient, `export class RelayerGraphClient { ${methods} }\n`);
+        await expect(verifyBundledAppServer(appPath, {
+          readSharpPackage, expectedArchitecture: "arm64", listPackageEntries: packagedRuntimeEntries,
+          verifyGraphServer, verifyPrimeAgent, verifyNotices,
+        })).rejects.toThrow(`missing RelayerGraphClient.prototype.${method}`);
+      }
+      await writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} getInstructionGraph() {} retrieveInstructions() {} searchInstructions() {} }\n");
+      await expect(verifyBundledAppServer(appPath, {
+        readSharpPackage, expectedArchitecture: "arm64",
+        listPackageEntries: () => packagedRuntimeEntries().filter(entry => entry !== "node_modules/@relayer/harness-host/dist/implementations/instruction-graph-v2.js"),
+        verifyGraphServer, verifyPrimeAgent, verifyNotices,
+      })).rejects.toThrow("missing node_modules/@relayer/harness-host/dist/implementations/instruction-graph-v2.js");
       await writeFile(bundledGraphClient, "export class RelayerGraphClient {}\n");
       await expect(verifyBundledAppServer(appPath, {
         readSharpPackage,
@@ -3058,7 +3106,7 @@ describe("desktop skeleton", () => {
         verifyPrimeAgent,
         verifyNotices,
       })).rejects.toThrow("missing RelayerGraphClient.prototype.search");
-      await writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} }\n");
+      await writeFile(bundledGraphClient, "export class RelayerGraphClient { search() {} getInstructionGraph() {} retrieveInstructions() {} searchInstructions() {} }\n");
       await expect(verifyBundledAppServer(appPath, {
         readSharpPackage,
         execute: async () => ({ stdout: "arm64\n", stderr: "" }),
@@ -3156,7 +3204,7 @@ describe("desktop skeleton", () => {
       await Promise.all([
         writeFile(join(windowsPath, "resources", "bin", "relayer-app-server.exe"), "binary-fixture"),
         writeFile(join(windowsPath, "resources", "bin", "relayer-graph-server.exe"), "binary-fixture"),
-        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "export class RelayerGraphClient { search() {} }\n"),
+        writeFile(join(windowsPath, "resources", "graph-client", "index.js"), "export class RelayerGraphClient { search() {} getInstructionGraph() {} retrieveInstructions() {} searchInstructions() {} }\n"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "marked.umd.js"), "marked-fixture"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "artifact-office.js"), "office-fixture"),
         writeFile(join(windowsPath, "resources", "renderer", "vendor", "artifact-office.LICENSES.txt"), "licences-fixture"),

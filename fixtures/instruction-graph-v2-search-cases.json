@@ -1,0 +1,37 @@
+{
+  "description": "Engine-mechanics benchmark against the actual pinned v2 instruction corpus. Natural phrases are deliberately unchanged exact-equality probes; zero hits document the lack of semantic retrieval rather than a relevance pass.",
+  "naturalExactMisses": [
+    "fix rejected CSS",
+    "table borders",
+    "dark mode",
+    "choose an icon",
+    "link earlier work",
+    "ask the user a question",
+    "keep progress visible",
+    "finish without resending",
+    "create a child task",
+    "edit a saved program",
+    "compare two choices",
+    "publish an image"
+  ],
+  "unsupportedTextQueries": [
+    { "name": "substring", "query": "MATCH (n:Content) WHERE n.title CONTAINS $phrase RETURN n.title AS title" },
+    { "name": "case folding", "query": "MATCH (n:Content) WHERE lower(n.title) = $phrase RETURN n.title AS title" },
+    { "name": "regular expression", "query": "MATCH (n:Content) WHERE n.title =~ $phrase RETURN n.title AS title" },
+    { "name": "full text procedure", "query": "CALL QUERY_FTS_INDEX($phrase) RETURN n.title AS title" },
+    { "name": "vector relevance", "query": "MATCH (n:Content) WHERE vector_similarity(n.title, $phrase) > $score RETURN n.title AS title" }
+  ],
+  "bodyProjectionQueries": [
+    "MATCH (n:Content) RETURN n",
+    "MATCH (n:Content) RETURN n.detail AS detail",
+    "MATCH (n:Content) RETURN {body: n.detail} AS result",
+    "MATCH (n:Content) RETURN [n] AS result",
+    "MATCH (n:Content) RETURN collect(n.detail) AS result"
+  ],
+  "dependencyCases": [
+    { "rootKey": "css-reference", "prerequisiteKeys": ["detail-basic", "completion-authority"] },
+    { "rootKey": "detail-controls", "prerequisiteKeys": ["detail-basic", "navigation-reference", "completion-authority"] },
+    { "rootKey": "live-questions", "prerequisiteKeys": ["input-contract", "publish-current", "completion-authority"] },
+    { "rootKey": "saved-program-repair", "prerequisiteKeys": ["completion-authority"] }
+  ]
+}

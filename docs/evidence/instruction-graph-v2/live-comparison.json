@@ -1,0 +1,1241 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+  "runId": "run-2026-10-20T17-15-46-850Z-7c3b327d",
+  "status": "passed",
+  "authorization": {
+    "confirmed": true,
+    "credentialReference": "connected-product-provider",
+    "rootProviderExecutions": 4,
+    "agentAuthoredChildren": true,
+    "declaredCostCapUsd": 10
+  },
+  "comparison": {
+    "kind": "instruction-graph-pair",
+    "schemaVersion": 2,
+    "treatment": {
+      "name": "codex-instruction-graph-v2",
+      "promptProfile": "instruction-graph-v2",
+      "versionKey": "codex-instruction-graph-v2",
+      "readProtocol": 2,
+      "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+    },
+    "harnessPair": [
+      "codex-basic",
+      "codex-instruction-graph-v2"
+    ],
+    "controlledFields": [
+      "task",
+      "implementation",
+      "settings except instruction delivery profile and exact corpus pin",
+      "graphCapabilityProfile",
+      "permissionBindings",
+      "providerModelSelection",
+      "complete.agentAuthored"
+    ],
+    "variedField": "settings.promptProfile",
+    "instructionPinFields": [
+      "settings.instructionGraphVersionKey",
+      "settings.instructionGraphDigest"
+    ],
+    "rootProviderExecutions": 4,
+    "expectedTurnsByCase": {
+      "empty-project.task-system.two-turn": 2
+    },
+    "qualityEquivalence": "unproven",
+    "tokenUsage": {
+      "status": "unknown",
+      "totalInputTokens": null,
+      "reason": "No validated aggregate of provider usage across root and native child executions is available. Consult Candidate Trace for recorded provider usage."
+    },
+    "passed": true,
+    "preflight": {
+      "codex-basic": {
+        "selectedModel": {
+          "harnessId": "codex-basic",
+          "familyId": 1,
+          "providerId": "codex",
+          "modelId": "gpt-6.1-sol"
+        },
+        "productModelSelection": true,
+        "providerAdapterId": "codex-subscription"
+      },
+      "codex-instruction-graph-v2": {
+        "selectedModel": {
+          "harnessId": "codex-instruction-graph-v2",
+          "familyId": 1,
+          "providerId": "codex",
+          "modelId": "gpt-6.1-sol"
+        },
+        "productModelSelection": true,
+        "providerAdapterId": "codex-subscription"
+      }
+    },
+    "checks": [
+      {
+        "name": "instruction-graph:controlled-pair:empty-project.task-system.two-turn",
+        "passed": true,
+        "detail": "Both instruction-delivery cells recorded matching task, provider/model, permissions and V6 presentation pins. Quality equivalence requires separate review."
+      },
+      {
+        "name": "instruction-graph:retrieval:empty-project.task-system.two-turn",
+        "passed": true,
+        "detail": "Each captured treatment graph session recorded the exact configured instruction pin and a successful instruction-node or instruction-layer read. Incorporation remains a quality-review question."
+      }
+    ],
+    "metrics": [
+      {
+        "caseId": "empty-project.task-system.two-turn",
+        "harnessConfigurationName": "codex-basic",
+        "instructionRetrieval": {
+          "reasonCoverage": "unknown",
+          "returnedBodyCharacters": null,
+          "returnedBodyBytes": null,
+          "uniqueModuleReadsByGraphSession": null,
+          "replayBodyResponses": null,
+          "rereadBodyResponses": null,
+          "duplicateMetadataResponses": null
+        },
+        "actualPromptCharacters": 159383,
+        "observedInputTokens": 404531,
+        "observedOutputTokens": 4396,
+        "recordedSessions": 2,
+        "expectedGraphSessions": 2,
+        "totalInputTokens": null,
+        "coverage": "unknown",
+        "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+        "latencyScope": "evaluation-cell-including-grading",
+        "latencyMs": 104908,
+        "graphWriteRejections": 0
+      },
+      {
+        "caseId": "empty-project.task-system.two-turn",
+        "harnessConfigurationName": "codex-instruction-graph-v2",
+        "instructionRetrieval": {
+          "reasonCoverage": "complete",
+          "returnedBodyCharacters": 16835,
+          "returnedBodyBytes": 16839,
+          "uniqueModuleReadsByGraphSession": 16,
+          "replayBodyResponses": 0,
+          "rereadBodyResponses": 0,
+          "duplicateMetadataResponses": 0
+        },
+        "actualPromptCharacters": 32163,
+        "observedInputTokens": 281600,
+        "observedOutputTokens": 3841,
+        "recordedSessions": 2,
+        "expectedGraphSessions": 2,
+        "totalInputTokens": null,
+        "coverage": "unknown",
+        "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+        "latencyScope": "evaluation-cell-including-grading",
+        "latencyMs": 95734,
+        "graphWriteRejections": 0
+      }
+    ]
+  },
+  "bundle": {
+    "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T17-15-46-850Z-7c3b327d/bundle.json",
+    "sha256": "1410af35c076c28366e5ab656d8262634e9daba8b12f756b3173be3fe3bc6170",
+    "byteLength": 78654
+  },
+  "cells": [
+    {
+      "executionId": "dbe6cd70-2714-4815-94a1-32be9b40f832",
+      "harness": "codex-basic",
+      "status": "passed",
+      "modelResolution": {
+        "selectedModel": {
+          "harnessId": "codex-basic",
+          "familyId": 1,
+          "providerId": "codex",
+          "modelId": "gpt-6.1-sol"
+        },
+        "productModelSelection": true
+      },
+      "metrics": {
+        "instructionRetrieval": {
+          "reasonCoverage": "unknown",
+          "returnedBodyCharacters": null,
+          "returnedBodyBytes": null,
+          "uniqueModuleReadsByGraphSession": null,
+          "replayBodyResponses": null,
+          "rereadBodyResponses": null,
+          "duplicateMetadataResponses": null
+        },
+        "actualPromptCharacters": 159383,
+        "observedInputTokens": 404531,
+        "observedOutputTokens": 4396,
+        "recordedSessions": 2,
+        "expectedGraphSessions": 2,
+        "totalInputTokens": null,
+        "coverage": "unknown",
+        "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+        "latencyScope": "evaluation-cell-including-grading",
+        "latencyMs": 104908,
+        "graphWriteRejections": 0
+      },
+      "checks": [
+        {
+          "name": "turn-1:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-1:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-1:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-1:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-1:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-1:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-1:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-1:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "turn-2:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-2:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-2:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-2:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-2:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-2:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-2:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-2:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "instruction-graph:controlled-pair:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Both instruction-delivery cells recorded matching task, provider/model, permissions and V6 presentation pins. Quality equivalence requires separate review."
+        },
+        {
+          "name": "instruction-graph:retrieval:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Each captured treatment graph session recorded the exact configured instruction pin and a successful instruction-node or instruction-layer read. Incorporation remains a quality-review question."
+        }
+      ],
+      "semanticChildCount": 0,
+      "outcomeQualified": true,
+      "presentationStatus": "unjudged",
+      "turns": [
+        {
+          "interactionId": 11,
+          "graphNodeId": 118,
+          "status": "accepted",
+          "prompt": "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.",
+          "modelSelection": {
+            "familyId": 1,
+            "providerId": "codex",
+            "modelId": "gpt-6.1-sol"
+          },
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 79563,
+            "actualPromptUtf8Bytes": 79567,
+            "instructionDelivery": null,
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 0,
+              "reasonCoverage": "unknown",
+              "readProtocol": null,
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 182423,
+                "cachedInputTokens": 153856,
+                "outputTokens": 2211,
+                "reasoningOutputTokens": 125,
+                "totalTokens": 184634
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "candidateTrace": {
+            "status": "complete",
+            "format": "relayer-harness-trace-v1",
+            "traceId": "3a7bc1d1-cb1e-4a68-9b2f-5e1348b510db",
+            "sha256": "sha256:4eb72b18054cdb5560f16e7c126b4c2268c820bd897e37cd1426d6745d55c999",
+            "byteLength": 354387,
+            "eventCount": 147,
+            "coverage": {
+              "prompt": "full",
+              "messages": "full",
+              "reasoningSummaries": "full",
+              "modelCalls": "full",
+              "toolCalls": "full",
+              "usage": "full",
+              "childStreams": "none",
+              "nativeArtifacts": "none"
+            },
+            "redactionCount": 20,
+            "personalPresentationVersionId": 76,
+            "personalPresentationVersionKey": "personal-presentation-v6",
+            "graphOperations": {
+              "status": "complete",
+              "promotable": true,
+              "format": "relayer-graph-operations-v1",
+              "ref": "graph-operations.jsonl",
+              "sha256": "sha256:b9c9afc23fd7a7a6c71e4cbd3ab8080ee037ec0a7f7065a8aa0a96b22ebaa914",
+              "byteLength": 3421,
+              "eventCount": 18,
+              "truncated": false
+            },
+            "completionBrokerAvailable": true,
+            "ref": "executions/dbe6cd70-2714-4815-94a1-32be9b40f832/turns/11/candidate-trace/manifest.json",
+            "promotable": true
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79563,
+              "actualPromptUtf8Bytes": 79567,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "reasonCoverage": "unknown",
+                "readProtocol": null,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 182423,
+                  "cachedInputTokens": 153856,
+                  "outputTokens": 2211,
+                  "reasoningOutputTokens": 125,
+                  "totalTokens": 184634
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T17:15:47.714Z",
+            "firstGraphAt": "2026-10-20T17:16:23.216Z",
+            "acceptedAt": "2026-10-20T17:16:31.096Z",
+            "firstGraphSeconds": 35.5,
+            "acceptedSeconds": 43.4,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 12,
+          "graphNodeId": 120,
+          "status": "accepted",
+          "prompt": "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.",
+          "modelSelection": {
+            "familyId": 1,
+            "providerId": "codex",
+            "modelId": "gpt-6.1-sol"
+          },
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 79820,
+            "actualPromptUtf8Bytes": 79824,
+            "instructionDelivery": null,
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 0,
+              "reasonCoverage": "unknown",
+              "readProtocol": null,
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 222108,
+                "cachedInputTokens": 192768,
+                "outputTokens": 2185,
+                "reasoningOutputTokens": 36,
+                "totalTokens": 224293
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "candidateTrace": {
+            "status": "complete",
+            "format": "relayer-harness-trace-v1",
+            "traceId": "d624b458-f0fc-47fa-a07b-f04d19d025b9",
+            "sha256": "sha256:0b9212e464e9a78c6b7f49df606bf07bc2ca1e841219a4e9351779244dc60d59",
+            "byteLength": 352301,
+            "eventCount": 133,
+            "coverage": {
+              "prompt": "full",
+              "messages": "full",
+              "reasoningSummaries": "full",
+              "modelCalls": "full",
+              "toolCalls": "full",
+              "usage": "full",
+              "childStreams": "none",
+              "nativeArtifacts": "none"
+            },
+            "redactionCount": 24,
+            "personalPresentationVersionId": 76,
+            "personalPresentationVersionKey": "personal-presentation-v6",
+            "graphOperations": {
+              "status": "complete",
+              "promotable": true,
+              "format": "relayer-graph-operations-v1",
+              "ref": "graph-operations.jsonl",
+              "sha256": "sha256:907f5935dca645500c91d4d15bf43d808bf4569a7551c63c9f162f19d1ec8309",
+              "byteLength": 4011,
+              "eventCount": 21,
+              "truncated": false
+            },
+            "completionBrokerAvailable": true,
+            "ref": "executions/dbe6cd70-2714-4815-94a1-32be9b40f832/turns/12/candidate-trace/manifest.json",
+            "promotable": true
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79820,
+              "actualPromptUtf8Bytes": 79824,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "reasonCoverage": "unknown",
+                "readProtocol": null,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 222108,
+                  "cachedInputTokens": 192768,
+                  "outputTokens": 2185,
+                  "reasoningOutputTokens": 36,
+                  "totalTokens": 224293
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T17:16:39.213Z",
+            "firstGraphAt": "2026-10-20T17:17:17.606Z",
+            "acceptedAt": "2026-10-20T17:17:24.779Z",
+            "firstGraphSeconds": 38.4,
+            "acceptedSeconds": 45.6,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 1,
+              "failed": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "executionId": "3b67babe-cd8a-48b1-a1f0-b843614d90c5",
+      "harness": "codex-instruction-graph-v2",
+      "status": "passed",
+      "modelResolution": {
+        "selectedModel": {
+          "harnessId": "codex-instruction-graph-v2",
+          "familyId": 1,
+          "providerId": "codex",
+          "modelId": "gpt-6.1-sol"
+        },
+        "productModelSelection": true
+      },
+      "metrics": {
+        "instructionRetrieval": {
+          "reasonCoverage": "complete",
+          "returnedBodyCharacters": 16835,
+          "returnedBodyBytes": 16839,
+          "uniqueModuleReadsByGraphSession": 16,
+          "replayBodyResponses": 0,
+          "rereadBodyResponses": 0,
+          "duplicateMetadataResponses": 0
+        },
+        "actualPromptCharacters": 32163,
+        "observedInputTokens": 281600,
+        "observedOutputTokens": 3841,
+        "recordedSessions": 2,
+        "expectedGraphSessions": 2,
+        "totalInputTokens": null,
+        "coverage": "unknown",
+        "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+        "latencyScope": "evaluation-cell-including-grading",
+        "latencyMs": 95734,
+        "graphWriteRejections": 0
+      },
+      "checks": [
+        {
+          "name": "turn-1:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-1:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-1:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-1:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-1:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-1:visible-layer",
+          "passed": true,
+          "detail": "4 complete visible nodes."
+        },
+        {
+          "name": "turn-1:exact-edges",
+          "passed": true,
+          "detail": "4 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-1:connected",
+          "passed": true,
+          "detail": "4/4 nodes connected."
+        },
+        {
+          "name": "turn-2:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-2:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-2:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-2:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-2:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-2:visible-layer",
+          "passed": true,
+          "detail": "3 complete visible nodes."
+        },
+        {
+          "name": "turn-2:exact-edges",
+          "passed": true,
+          "detail": "2 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-2:connected",
+          "passed": true,
+          "detail": "3/3 nodes connected."
+        },
+        {
+          "name": "instruction-graph:controlled-pair:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Both instruction-delivery cells recorded matching task, provider/model, permissions and V6 presentation pins. Quality equivalence requires separate review."
+        },
+        {
+          "name": "instruction-graph:retrieval:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Each captured treatment graph session recorded the exact configured instruction pin and a successful instruction-node or instruction-layer read. Incorporation remains a quality-review question."
+        }
+      ],
+      "semanticChildCount": 0,
+      "outcomeQualified": true,
+      "presentationStatus": "unjudged",
+      "turns": [
+        {
+          "interactionId": 13,
+          "graphNodeId": 122,
+          "status": "accepted",
+          "prompt": "A task system has an incoming queue, two workers, and a results store. Explain how a task moves through the system and what happens when both workers are busy.",
+          "modelSelection": {
+            "familyId": 1,
+            "providerId": "codex",
+            "modelId": "gpt-6.1-sol"
+          },
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 15953,
+            "actualPromptUtf8Bytes": 15953,
+            "instructionDelivery": {
+              "versionKey": "codex-instruction-graph-v2",
+              "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+            },
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 7,
+              "reasonCoverage": "complete",
+              "readProtocol": 2,
+              "uniqueModulesRead": 7,
+              "uniqueReadRequests": 2,
+              "firstBodyResponses": 7,
+              "replayBodyResponses": 0,
+              "rereadBodyResponses": 0,
+              "duplicateMetadataResponses": 0,
+              "returnedBodyCharacters": 7528,
+              "returnedBodyBytes": 7530,
+              "readReasons": [
+                {
+                  "requestKey": "initial-authoring",
+                  "replayed": false,
+                  "sequence": 46,
+                  "reason": {
+                    "purpose": "authoring",
+                    "detail": "Read authority and visual publication instructions for task flow explanation"
+                  },
+                  "entries": [
+                    {
+                      "nodeId": 95,
+                      "key": "completion-authority",
+                      "delivery": "body",
+                      "bodyCharacters": 889,
+                      "bodyBytes": 889
+                    },
+                    {
+                      "nodeId": 97,
+                      "key": "publish-current",
+                      "delivery": "body",
+                      "bodyCharacters": 2025,
+                      "bodyBytes": 2025
+                    },
+                    {
+                      "nodeId": 99,
+                      "key": "detail-basic",
+                      "delivery": "body",
+                      "bodyCharacters": 1048,
+                      "bodyBytes": 1048
+                    },
+                    {
+                      "nodeId": 101,
+                      "key": "detail-theme",
+                      "delivery": "body",
+                      "bodyCharacters": 716,
+                      "bodyBytes": 716
+                    },
+                    {
+                      "nodeId": 103,
+                      "key": "layout",
+                      "delivery": "body",
+                      "bodyCharacters": 1231,
+                      "bodyBytes": 1233
+                    }
+                  ]
+                },
+                {
+                  "requestKey": "finish-and-preview",
+                  "replayed": false,
+                  "sequence": 47,
+                  "reason": {
+                    "purpose": "authoring",
+                    "detail": "Read final publication and advisory preview mechanics"
+                  },
+                  "entries": [
+                    {
+                      "nodeId": 98,
+                      "key": "finish-current",
+                      "delivery": "body",
+                      "bodyCharacters": 920,
+                      "bodyBytes": 920
+                    },
+                    {
+                      "nodeId": 115,
+                      "key": "preview",
+                      "delivery": "body",
+                      "bodyCharacters": 699,
+                      "bodyBytes": 699
+                    }
+                  ]
+                }
+              ],
+              "searchReasons": [],
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 135457,
+                "cachedInputTokens": 112896,
+                "outputTokens": 1879,
+                "reasoningOutputTokens": 89,
+                "totalTokens": 137336
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "candidateTrace": {
+            "status": "complete",
+            "format": "relayer-harness-trace-v1",
+            "traceId": "e970a66a-655a-4089-b550-bce55625c8f5",
+            "sha256": "sha256:ce754723484acafcec0eca57599bdb60e7fb87e9bc74538ea8e6d647dd6e5a8c",
+            "byteLength": 167724,
+            "eventCount": 159,
+            "coverage": {
+              "prompt": "full",
+              "messages": "full",
+              "reasoningSummaries": "full",
+              "modelCalls": "full",
+              "toolCalls": "full",
+              "usage": "full",
+              "childStreams": "none",
+              "nativeArtifacts": "none"
+            },
+            "redactionCount": 23,
+            "personalPresentationVersionId": 76,
+            "personalPresentationVersionKey": "personal-presentation-v6",
+            "graphOperations": {
+              "status": "complete",
+              "promotable": true,
+              "format": "relayer-graph-operations-v1",
+              "ref": "graph-operations.jsonl",
+              "sha256": "sha256:6af543cf82bf39f15e1b09c71bf0f54f6dc7178167ab313f82cb73b589b16f6d",
+              "byteLength": 5811,
+              "eventCount": 23,
+              "truncated": false
+            },
+            "completionBrokerAvailable": true,
+            "ref": "executions/3b67babe-cd8a-48b1-a1f0-b843614d90c5/turns/13/candidate-trace/manifest.json",
+            "promotable": true
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 15953,
+              "actualPromptUtf8Bytes": 15953,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v2",
+                "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 7,
+                "reasonCoverage": "complete",
+                "readProtocol": 2,
+                "uniqueModulesRead": 7,
+                "uniqueReadRequests": 2,
+                "firstBodyResponses": 7,
+                "replayBodyResponses": 0,
+                "rereadBodyResponses": 0,
+                "duplicateMetadataResponses": 0,
+                "returnedBodyCharacters": 7528,
+                "returnedBodyBytes": 7530,
+                "readReasons": [
+                  {
+                    "requestKey": "initial-authoring",
+                    "replayed": false,
+                    "sequence": 46,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Read authority and visual publication instructions for task flow explanation"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 95,
+                        "key": "completion-authority",
+                        "delivery": "body",
+                        "bodyCharacters": 889,
+                        "bodyBytes": 889
+                      },
+                      {
+                        "nodeId": 97,
+                        "key": "publish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 2025,
+                        "bodyBytes": 2025
+                      },
+                      {
+                        "nodeId": 99,
+                        "key": "detail-basic",
+                        "delivery": "body",
+                        "bodyCharacters": 1048,
+                        "bodyBytes": 1048
+                      },
+                      {
+                        "nodeId": 101,
+                        "key": "detail-theme",
+                        "delivery": "body",
+                        "bodyCharacters": 716,
+                        "bodyBytes": 716
+                      },
+                      {
+                        "nodeId": 103,
+                        "key": "layout",
+                        "delivery": "body",
+                        "bodyCharacters": 1231,
+                        "bodyBytes": 1233
+                      }
+                    ]
+                  },
+                  {
+                    "requestKey": "finish-and-preview",
+                    "replayed": false,
+                    "sequence": 47,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Read final publication and advisory preview mechanics"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 98,
+                        "key": "finish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 920,
+                        "bodyBytes": 920
+                      },
+                      {
+                        "nodeId": 115,
+                        "key": "preview",
+                        "delivery": "body",
+                        "bodyCharacters": 699,
+                        "bodyBytes": 699
+                      }
+                    ]
+                  }
+                ],
+                "searchReasons": [],
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 135457,
+                  "cachedInputTokens": 112896,
+                  "outputTokens": 1879,
+                  "reasoningOutputTokens": 89,
+                  "totalTokens": 137336
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T17:17:32.628Z",
+            "firstGraphAt": "2026-10-20T17:18:11.938Z",
+            "acceptedAt": "2026-10-20T17:18:12.011Z",
+            "firstGraphSeconds": 39.3,
+            "acceptedSeconds": 39.4,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 14,
+          "graphNodeId": 127,
+          "status": "accepted",
+          "prompt": "Follow up in the same thread: explain the task flow again, emphasizing what happens while both workers are busy and immediately after one worker finishes.",
+          "modelSelection": {
+            "familyId": 1,
+            "providerId": "codex",
+            "modelId": "gpt-6.1-sol"
+          },
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 16210,
+            "actualPromptUtf8Bytes": 16210,
+            "instructionDelivery": {
+              "versionKey": "codex-instruction-graph-v2",
+              "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+            },
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 9,
+              "reasonCoverage": "complete",
+              "readProtocol": 2,
+              "uniqueModulesRead": 9,
+              "uniqueReadRequests": 2,
+              "firstBodyResponses": 9,
+              "replayBodyResponses": 0,
+              "rereadBodyResponses": 0,
+              "duplicateMetadataResponses": 0,
+              "returnedBodyCharacters": 9307,
+              "returnedBodyBytes": 9309,
+              "readReasons": [
+                {
+                  "requestKey": "initial-authoring",
+                  "replayed": false,
+                  "sequence": 69,
+                  "reason": {
+                    "purpose": "authoring",
+                    "detail": "Read publication authority and visual authoring requirements"
+                  },
+                  "entries": [
+                    {
+                      "nodeId": 95,
+                      "key": "completion-authority",
+                      "delivery": "body",
+                      "bodyCharacters": 889,
+                      "bodyBytes": 889
+                    },
+                    {
+                      "nodeId": 97,
+                      "key": "publish-current",
+                      "delivery": "body",
+                      "bodyCharacters": 2025,
+                      "bodyBytes": 2025
+                    },
+                    {
+                      "nodeId": 99,
+                      "key": "detail-basic",
+                      "delivery": "body",
+                      "bodyCharacters": 1048,
+                      "bodyBytes": 1048
+                    },
+                    {
+                      "nodeId": 101,
+                      "key": "detail-theme",
+                      "delivery": "body",
+                      "bodyCharacters": 716,
+                      "bodyBytes": 716
+                    }
+                  ]
+                },
+                {
+                  "requestKey": "flow-publication",
+                  "replayed": false,
+                  "sequence": 72,
+                  "reason": {
+                    "purpose": "authoring",
+                    "detail": "Prepare sequence layout, prior-view control, preview and final return"
+                  },
+                  "entries": [
+                    {
+                      "nodeId": 103,
+                      "key": "layout",
+                      "delivery": "body",
+                      "bodyCharacters": 1231,
+                      "bodyBytes": 1233
+                    },
+                    {
+                      "nodeId": 104,
+                      "key": "navigation-reference",
+                      "delivery": "body",
+                      "bodyCharacters": 808,
+                      "bodyBytes": 808
+                    },
+                    {
+                      "nodeId": 102,
+                      "key": "detail-controls",
+                      "delivery": "body",
+                      "bodyCharacters": 971,
+                      "bodyBytes": 971
+                    },
+                    {
+                      "nodeId": 115,
+                      "key": "preview",
+                      "delivery": "body",
+                      "bodyCharacters": 699,
+                      "bodyBytes": 699
+                    },
+                    {
+                      "nodeId": 98,
+                      "key": "finish-current",
+                      "delivery": "body",
+                      "bodyCharacters": 920,
+                      "bodyBytes": 920
+                    }
+                  ]
+                }
+              ],
+              "searchReasons": [],
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 146143,
+                "cachedInputTokens": 128768,
+                "outputTokens": 1962,
+                "reasoningOutputTokens": 99,
+                "totalTokens": 148105
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "candidateTrace": {
+            "status": "complete",
+            "format": "relayer-harness-trace-v1",
+            "traceId": "aa55bf90-613e-499d-9620-5f8ccdf42ba2",
+            "sha256": "sha256:ada82a5ff719757e42ef7afb09b943621e9a28ea2cab0383af45512d710ccc42",
+            "byteLength": 187517,
+            "eventCount": 185,
+            "coverage": {
+              "prompt": "full",
+              "messages": "full",
+              "reasoningSummaries": "full",
+              "modelCalls": "full",
+              "toolCalls": "full",
+              "usage": "full",
+              "childStreams": "none",
+              "nativeArtifacts": "none"
+            },
+            "redactionCount": 23,
+            "personalPresentationVersionId": 76,
+            "personalPresentationVersionKey": "personal-presentation-v6",
+            "graphOperations": {
+              "status": "complete",
+              "promotable": true,
+              "format": "relayer-graph-operations-v1",
+              "ref": "graph-operations.jsonl",
+              "sha256": "sha256:d3d935554fbd2b37321d591dc3131f89371825ed828b9b6a63bcde14ec628e12",
+              "byteLength": 6337,
+              "eventCount": 25,
+              "truncated": false
+            },
+            "completionBrokerAvailable": true,
+            "ref": "executions/3b67babe-cd8a-48b1-a1f0-b843614d90c5/turns/14/candidate-trace/manifest.json",
+            "promotable": true
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 16210,
+              "actualPromptUtf8Bytes": 16210,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v2",
+                "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 9,
+                "reasonCoverage": "complete",
+                "readProtocol": 2,
+                "uniqueModulesRead": 9,
+                "uniqueReadRequests": 2,
+                "firstBodyResponses": 9,
+                "replayBodyResponses": 0,
+                "rereadBodyResponses": 0,
+                "duplicateMetadataResponses": 0,
+                "returnedBodyCharacters": 9307,
+                "returnedBodyBytes": 9309,
+                "readReasons": [
+                  {
+                    "requestKey": "initial-authoring",
+                    "replayed": false,
+                    "sequence": 69,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Read publication authority and visual authoring requirements"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 95,
+                        "key": "completion-authority",
+                        "delivery": "body",
+                        "bodyCharacters": 889,
+                        "bodyBytes": 889
+                      },
+                      {
+                        "nodeId": 97,
+                        "key": "publish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 2025,
+                        "bodyBytes": 2025
+                      },
+                      {
+                        "nodeId": 99,
+                        "key": "detail-basic",
+                        "delivery": "body",
+                        "bodyCharacters": 1048,
+                        "bodyBytes": 1048
+                      },
+                      {
+                        "nodeId": 101,
+                        "key": "detail-theme",
+                        "delivery": "body",
+                        "bodyCharacters": 716,
+                        "bodyBytes": 716
+                      }
+                    ]
+                  },
+                  {
+                    "requestKey": "flow-publication",
+                    "replayed": false,
+                    "sequence": 72,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Prepare sequence layout, prior-view control, preview and final return"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 103,
+                        "key": "layout",
+                        "delivery": "body",
+                        "bodyCharacters": 1231,
+                        "bodyBytes": 1233
+                      },
+                      {
+                        "nodeId": 104,
+                        "key": "navigation-reference",
+                        "delivery": "body",
+                        "bodyCharacters": 808,
+                        "bodyBytes": 808
+                      },
+                      {
+                        "nodeId": 102,
+                        "key": "detail-controls",
+                        "delivery": "body",
+                        "bodyCharacters": 971,
+                        "bodyBytes": 971
+                      },
+                      {
+                        "nodeId": 115,
+                        "key": "preview",
+                        "delivery": "body",
+                        "bodyCharacters": 699,
+                        "bodyBytes": 699
+                      },
+                      {
+                        "nodeId": 98,
+                        "key": "finish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 920,
+                        "bodyBytes": 920
+                      }
+                    ]
+                  }
+                ],
+                "searchReasons": [],
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 146143,
+                  "cachedInputTokens": 128768,
+                  "outputTokens": 1962,
+                  "reasoningOutputTokens": 99,
+                  "totalTokens": 148105
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T17:18:19.841Z",
+            "firstGraphAt": "2026-10-20T17:18:59.986Z",
+            "acceptedAt": "2026-10-20T17:19:00.087Z",
+            "firstGraphSeconds": 40.1,
+            "acceptedSeconds": 40.2,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "relativeChangesPercent": {
+    "initialPromptCharacters": -79.82030705909663,
+    "observedSessionInputTokens": -30.388523994452832,
+    "observedSessionOutputTokens": -12.625113739763416,
+    "elapsedIncludingGrading": -8.744804971975451
+  },
+  "limitations": [
+    "One two-turn pilot, not a population average or causal attribution",
+    "Instruction content/chunking and retrieval bookkeeping varied together",
+    "Native base context is excluded from initial harness prompt character totals",
+    "Native helper usage coverage and whole-task context savings remain unknown",
+    "Acceptance and deterministic graph checks do not establish semantic or presentation quality equivalence",
+    "No live search calls; exact lookup benchmark is separate",
+    "No duplicate retrieval was attempted in this pilot; suppression behavior is proven by deterministic tests"
+  ]
+}

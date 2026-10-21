@@ -1,0 +1,14 @@
+{
+  "receipt.json": {
+    "sha256": "30042ede1fcb47b844e2e336af92018c3f9a68b0cb64a4cc287acc4764fe7495",
+    "bytes": 17658
+  },
+  "light.png": {
+    "sha256": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+    "bytes": 68977
+  },
+  "dark.png": {
+    "sha256": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9",
+    "bytes": 62710
+  }
+}
