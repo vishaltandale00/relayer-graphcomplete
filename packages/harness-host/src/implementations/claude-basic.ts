@@ -198,7 +198,8 @@ export class ClaudeBasicHarness implements Harness {
           model,
           allowedTools: [
             "Bash",
-            ...(permissionMode === "acceptEdits" ? [CLAUDE_BROWSER_TOOL] : []),
+            // Auto pre-approves the coarse browser unit and native web search (PRD §11.6).
+            ...(permissionMode === "acceptEdits" ? [CLAUDE_BROWSER_TOOL, CLAUDE_WEB_SEARCH_TOOL] : []),
             ...(previewServer === undefined ? [] : [CLAUDE_PREVIEW_TOOL]),
           ],
           mcpServers: {
@@ -400,6 +401,7 @@ export function createClaudeBasicFactory(dependencies: ClaudeBasicDependencies =
 export const CLAUDE_PREVIEW_SERVER_NAME = "relayer_graph_preview";
 export const CLAUDE_PREVIEW_TOOL_NAME = "view_graph_preview";
 export const CLAUDE_PREVIEW_TOOL = `mcp__${CLAUDE_PREVIEW_SERVER_NAME}__${CLAUDE_PREVIEW_TOOL_NAME}`;
+export const CLAUDE_WEB_SEARCH_TOOL = "WebSearch";
 
 /** Keeps the base64 image within the Anthropic API's 5 MiB per-image limit. */
 const MAX_PREVIEW_BYTES = 3_932_160;
