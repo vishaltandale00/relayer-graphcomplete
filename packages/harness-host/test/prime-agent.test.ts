@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { MAX_HARNESS_APPROVAL_TEXT_LENGTH, parseHarnessApprovalRequestInput } from "../src/approval.js";
 import { PrimeAgentHarness, PYTHON_GRAPH_API_REFERENCE } from "../src/implementations/prime-agent.js";
+import { primeInstructionGraphV2Corpus } from "../src/implementations/prime-instruction-graph-v2.js";
 import { createNoopHarnessTraceSink, HarnessTraceStore } from "../src/trace.js";
 import type { HarnessConfiguration, HarnessRunContext, HarnessTraceEventInput, HarnessTraceSink } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
@@ -24,6 +25,76 @@ const configuration: HarnessConfiguration = {
 const fullPermission = { permissionProfileId: "full", permissionBinding: {} } as const;
 
 describe("PrimeAgentHarness", () => {
+
+  it("records actual full-prompt control sizes independently of redacted preference text", async () => {
+    const session = primeSession("/tmp/full-prompt-metrics.jsonl");
+    const harness = await createHarness(session);
+    const events: HarnessTraceEventInput[] = [];
+    const trace = { ...createNoopHarnessTraceSink(), emit: (event: HarnessTraceEventInput) => { events.push(event); } };
+    try {
+      await harness.complete({ ...presentationRunContext(11, "token", 90), trace });
+      const prompt = session.promptAndWait.mock.calls[0]![0];
+      const event = events.find(event => event.type === "prompt")!.data;
+      expect(event).toMatchObject({ actualPromptCharacters: prompt.length, actualPromptUtf8Bytes: Buffer.byteLength(prompt, "utf8") });
+      expect(event.text).not.toContain("Foreground the conclusion.");
+      expect(event).not.toHaveProperty("instructionGraphVersionKey");
+      expect(event).not.toHaveProperty("instructionGraphDigest");
+    } finally { await harness.dispose(); }
+  });
+
+  it.each([false, true])("delivers the exact Python V2 directory and actual prompt metrics (search=%s)", async (search) => {
+    const session = primeSession("/tmp/instruction-session.jsonl");
+    const corpus = primeInstructionGraphV2Corpus();
+    const harness = await createHarness(session, { ...configuration,
+      graphCapabilityProfile: { search: search ? "query-v1" : "disabled" },
+      settings: { ...configuration.settings, promptProfile: "instruction-graph-v2",
+        instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest },
+    });
+    const events: HarnessTraceEventInput[] = [];
+    const trace = { ...createNoopHarnessTraceSink(), emit: (event: HarnessTraceEventInput) => { events.push(event); } };
+    const context = primeInstructionContext({ ...presentationRunContext(11, "secret-graph-token", 90), trace,
+      contextMode: "graph-v1", threadHistory: [], graphHistory: { entries: [], nextBeforeNodeId: null },
+    });
+    try {
+      await harness.complete(context);
+      const prompt = session.promptAndWait.mock.calls[0]![0];
+      expect(prompt).toContain("from relayer_graph import GraphSession");
+      expect(prompt).toContain("await graph.retrieve_instructions(");
+      expect(prompt).toContain("reread_reason");
+      expect(prompt).toContain('delivery="already-returned"');
+      expect(prompt).toContain("Same-key exact retries");
+      expect(prompt).toContain("exact rendered personal-preference block");
+      expect(prompt).toContain("Foreground the conclusion.");
+      expect(prompt).toContain(JSON.stringify(context.instructionGraph));
+      expect(prompt).not.toContain(corpus.modules.find(module => module.key === "publish-current")!.detail);
+      expect(prompt).not.toContain("secret-graph-token");
+      expect(prompt.includes("graph.search_instructions")).toBe(search);
+      if (!search) expect(prompt).not.toContain("Use graph search");
+      const receipt = events.find(event => event.type === "prompt")!.data;
+      expect(receipt).toMatchObject({ actualPromptCharacters: prompt.length,
+        actualPromptUtf8Bytes: Buffer.byteLength(prompt, "utf8"),
+        instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest });
+      expect(receipt.text).not.toContain("Foreground the conclusion.");
+    } finally { await harness.dispose(); }
+  });
+
+  it("refuses a missing or foreign Prime instruction pin before sending native inference", async () => {
+    const session = primeSession("/tmp/instruction-refusal.jsonl");
+    const corpus = primeInstructionGraphV2Corpus();
+    const harness = await createHarness(session, { ...configuration, settings: { ...configuration.settings,
+      promptProfile: "instruction-graph-v2", instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest,
+    } });
+    try {
+      await expect(harness.complete(runContext(11, "token"))).rejects.toThrow("exact control-pinned");
+      const context = primeInstructionContext(runContext(12, "token"));
+      await expect(harness.complete({ ...context, instructionGraph: { ...context.instructionGraph!, digest: "0".repeat(64) } }))
+        .rejects.toThrow("exact control-pinned");
+      expect(session.promptAndWait).not.toHaveBeenCalled();
+    } finally { await harness.dispose(); }
+    await expect(createHarness(session, { ...configuration, settings: { ...configuration.settings,
+      promptProfile: "instruction-graph-v2", instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: "0".repeat(64),
+    } })).rejects.toThrow("exact reviewed Prime corpus");
+  });
 
   it.each(["basic", "layered-navigation-v1"])("delivers the Python communication baseline in actual %s Prime turns", async (profile) => {
     const session = primeSession("/tmp/communication-session.jsonl");
@@ -767,6 +838,7 @@ describe("PrimeAgentHarness", () => {
       "relayer.graph.visual-authoring": hostHandlers[1],
       "relayer.complete.current": hostHandlers[2],
       "relayer.graph.submit-layer": hostHandlers[3],
+      "relayer.graph.detail-authoring-reference": hostHandlers[4],
     } }));
     const layer = { version: 1, token: "first-token", nodeId: 11, layer: { clientKey: "root", nodes: [2], edges: [], layout: { version: 1, placements: [{ nodeId: 2, x: 0.5, y: 0.5 }], edgeShape: "default" } } };
     // Prime adds its native envelope fields to every IPython host request.
@@ -780,6 +852,10 @@ describe("PrimeAgentHarness", () => {
     await expect(hostHandlers[3]?.(layer, invocation(second))).rejects.toThrow("another run");
     await expect(hostHandlers[3]?.(layer, { ...invocation(first), isCurrent: () => false })).rejects.toThrow("no longer active");
     await expect(hostHandlers[3]?.(layer, { ...invocation(first), signal: AbortSignal.abort() })).rejects.toThrow("no longer active");
+    await expect(hostHandlers[4]?.({}, invocation(first))).resolves.toEqual(detailAuthoringReference());
+    await expect(hostHandlers[4]?.({}, { ...invocation(first), isCurrent: () => false })).rejects.toThrow("no longer active");
+    await expect(hostHandlers[4]?.({}, { ...invocation(first), signal: AbortSignal.abort() })).rejects.toThrow("no longer active");
+    await expect(hostHandlers[4]?.({}, { ...invocation(first), runContext: undefined })).rejects.toThrow("active GraphComplete run");
 
     expect(harness.state()).toEqual({});
   });
@@ -2497,6 +2573,18 @@ function runContext(nodeId: number, token: string, trace: HarnessTraceSink = cre
     accessBundle: { byProviderId: { [route.providerId]: access } },
     trace,
   };
+}
+
+function primeInstructionContext(context: HarnessRunContext): HarnessRunContext {
+  const corpus = primeInstructionGraphV2Corpus();
+  const ids = new Map(corpus.modules.map((module, index) => [module.key, 100 + index]));
+  return { ...context, instructionGraph: {
+    versionKey: corpus.versionKey, digest: corpus.digest, retrievalContractVersion: 2,
+    threadId: 8_000_000_000_000_000, interactionNodeId: 90, rootLayerId: 91,
+    modules: corpus.modules.map(module => ({ key: module.key, title: module.title,
+      nodeId: ids.get(module.key)!, prerequisites: module.prerequisites.map(key => ids.get(key)!),
+    })),
+  } };
 }
 
 /** Records the resource loader each native session was created with. */

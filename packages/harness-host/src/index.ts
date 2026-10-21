@@ -14,3 +14,4 @@ export * from "./trace.js";
 export * from "./types.js";
 export { ArtifactFileError, fingerprintPath } from "./artifact-files.js";
 export type { ArtifactNoteInteractionInput, ArtifactNoteScreenshot } from "./artifact-notes.js";
+export * from "./instruction-graph-corpora.js";

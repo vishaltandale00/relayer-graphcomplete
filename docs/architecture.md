@@ -200,6 +200,18 @@ comparisons select `codex-full-prompt-control`, while historical pairs remain
 unchanged. PRD 12.4B records this decision and its verification checkpoints.
 The two retained quality trials do not certify general quality equivalence.
 
+The subsequent human extension applies the same retrieval protocol to
+`claude-basic` revision 13 and `prime-agent-basic` revision 15. Code-owned corpus
+lookup selects separate immutable Claude JavaScript and Prime Python recipes.
+Claude retains its scoped preview tool; Prime retains the run-bound Python
+visual-authoring bridge and provider-native RLM. Exact manifests and V6 remain
+explicit while instruction bodies are retrieved with reasons. Saved compatible
+registrations upgrade on reopen; live profile changes remain forbidden. Eval
+keeps separate frozen full-prompt controls, and historical comparisons retain
+their identities. PRD 12.4C maps this extension's proof boundaries. Provider
+quality and whole-task savings require separate native evaluation.
+
+
 
 Eval's experimental `codex-instruction-graph-v1` configuration uses the existing
 `codex.basic` implementation with a compact instruction bootstrap. Trusted startup

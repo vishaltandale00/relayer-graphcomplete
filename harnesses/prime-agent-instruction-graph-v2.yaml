@@ -1,0 +1,44 @@
+schemaVersion: 1
+name: prime-agent-instruction-graph-v2
+implementation: prime.agent
+implementationVersion: 1
+revision: 1
+complete:
+  agentAuthored: true
+permissionBindings:
+  ask:
+    boundary: workspace-write@1
+    reviewer: user
+    networkAccessEnabled: true
+  auto:
+    boundary: workspace-write@1
+    reviewer: automatic
+    networkAccessEnabled: true
+  full: {}
+modelRules:
+  allow:
+    - adapterId: openai-api
+      modelIdRegex: ".*"
+    - adapterId: anthropic-api
+      modelIdRegex: ".*"
+    - adapterId: openrouter
+      modelIdRegex: ".*"
+    - adapterId: vercel-ai-router
+      modelIdRegex: ".*"
+  deny: []
+executionAccessContracts: [secret@1]
+modelDefaults:
+  familyPolicy:
+    id: prime-default-family
+    version: 1
+graphCapabilityProfile:
+  search: query-v1
+  preview: enabled
+settings:
+  personalPresentationVersion: personal-presentation-v6
+  thinkingLevel: medium
+  rlmMaxDepth: 1
+  prewarmIpythonKernel: true
+  promptProfile: instruction-graph-v2
+  instructionGraphVersionKey: prime-agent-instruction-graph-v2
+  instructionGraphDigest: 146eb4b1b68001ce0281d77f234bdc41a015d52053e86636df1726478a556f6a

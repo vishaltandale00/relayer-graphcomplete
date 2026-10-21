@@ -1,0 +1,23 @@
+{
+  "command": "npm run evidence:share-preview",
+  "exitCode": 0,
+  "beforeSourceCommit": "df86e63300f289e661f2faee3e660c23ba618f80",
+  "beforeSha256": {
+    "receipt.json": "3345d8a98034548435dc07cc5f6ca15b9e449729755e5a9ea69130ba67552a7a",
+    "light.png": "a8077468198b281a0dad0799786177b2d771f6cc2a5b27a32e1f520d3e0e2dd2",
+    "dark.png": "13b4e25984fbd66f4c257eb7b0dc5dd85f366287d19aaff58b8c46482e2774bd"
+  },
+  "afterSha256": {
+    "receipt.json": "701c1920ac6b07ad96d920c3999edd14debe1d26d81ba34b0d3de9f8117fa057",
+    "light.png": "0d64e23622f8e4d9dbe46907c8a02a46e8e53bd4dce236d38acce53bbaaf1979",
+    "dark.png": "ef5bd275a7732cdcd8186e9d85bf76d3f872c9416d1dce7d661d52ee87dcf2c9"
+  },
+  "actualCaptures": "Both1200x630 themes were freshly captured and visually inspected. Text, three-step graph, links and controls remain readable; no visible geometry regression.",
+  "pixelObservation": {
+    "lightDifferentPixels": 259334,
+    "darkDifferentPixels": 754265,
+    "maxChannelDelta": 13,
+    "cause": "Not established. No renderer source change is part of this extension."
+  },
+  "reason": "Telemetry inventory binding changed; evidence uses actual fresh receipt and corresponding actual PNG bytes."
+}

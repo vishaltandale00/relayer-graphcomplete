@@ -21,7 +21,7 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
     temporalFeatures: { schemaRead: true, rootCurrentWrite: true },
     graphServerBinary: join(root, 'target/debug/relayer-graph-server'), configurationPaths: [configurationPath],
     candidateTrace: { directory: join(directory, 'traces'), policy: { mode: 'required', requiredFeatures: {}, includeNativeArtifacts: false, maxBytesPerTurn: 100_000, maxEventsPerTurn: 200 } },
-    additionalImplementations: { 'prime.agent': primeVisualFixtureFactory },
+    additionalImplementations: { 'prime.agent': context => primeVisualFixtureFactory(context, { pinnedStructure: true }) },
     acquireProviderExecution: async (providerId) => ({
       definition: { id: providerId, adapterId: 'openai-api', accessContract: 'secret@1', endpoint: 'https://unused.invalid/v1' },
       descriptor: { adapterId: 'openai-api', accessContract: 'secret@1', implementationVersion: '2' },
@@ -106,7 +106,7 @@ it.each(["prime-agent-basic", "prime-agent-deep"])("%s accepts Python authored a
     expect(child.nodes[0].authoredDetail.components[0].html).toContain('Replace with supported evidence and uncertainty.');
     expect(freshTurn.completionOutput.rootLayer.nodes[0].authoredDetail.mounts[0].capability.action.clientKey).toBe(expansion.clientKey);
     const evidenceAction = child.actions.find((action) => action.label === 'Evidence');
-    expect(evidenceAction).toMatchObject({ kind: 'navigate', relation: 'expand' });
+    expect(evidenceAction, JSON.stringify(child.actions)).toMatchObject({ kind: 'navigate', relation: 'expand' });
     const evidence = await request(session, `/api/threads/${fresh.id}/interactions/${freshTurn.id}/layers/${evidenceAction.targetLayerId}`);
     expect(evidence.nodes[0].authoredDetail.components[0].html).toContain('Replace with useful supporting detail.');
 

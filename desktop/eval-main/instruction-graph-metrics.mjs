@@ -1,3 +1,5 @@
+import { instructionGraphTreatments } from "./instruction-graph-comparison.mjs";
+
 const counters = ["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"];
 const count = (value) => Number.isSafeInteger(value) && value >= 0;
 
@@ -54,6 +56,7 @@ function reasonedRetrievalMetrics(graphOperations, ledgerComplete) {
 export function instructionMetricsFromTrace(events, { complete = false, graphOperations = [], ledgerComplete = false } = {}) {
   const prompts = events.filter((event) => event.type === "prompt");
   const prompt = prompts.length === 1 ? prompts[0].data : null;
+  const readProtocol = instructionGraphTreatments[prompt?.instructionGraphVersionKey]?.readProtocol ?? null;
   const actualPromptCharacters = complete && count(prompt?.actualPromptCharacters) ? prompt.actualPromptCharacters : null;
   const actualPromptUtf8Bytes = complete && count(prompt?.actualPromptUtf8Bytes) ? prompt.actualPromptUtf8Bytes : null;
   const updates = events.filter((event) => event.type === "provider.event" && event.data?.method === "thread/tokenUsage/updated")
@@ -79,8 +82,8 @@ export function instructionMetricsFromTrace(events, { complete = false, graphOpe
         && /^\/api\/graph\/instruction-graph\/(nodes|layers)\/[1-9][0-9]*$/.test(operation.path)
         && operation.status >= 200 && operation.status < 300).length : null,
       reasonCoverage: "unknown",
-      readProtocol: prompt?.instructionGraphVersionKey === "codex-instruction-graph-v1" ? 1 : null,
-      ...(prompt?.instructionGraphVersionKey === "codex-instruction-graph-v2" ? reasonedRetrievalMetrics(graphOperations, ledgerComplete) : {}),
+      readProtocol,
+      ...(readProtocol === 2 ? reasonedRetrievalMetrics(graphOperations, ledgerComplete) : {}),
       successfulSearches: ledgerComplete ? graphOperations.filter((operation) => operation.method === "POST"
         && operation.path === "/api/graph/instruction-graph/search"
         && operation.status >= 200 && operation.status < 300).length : null,

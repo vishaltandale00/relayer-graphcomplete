@@ -1,0 +1,12 @@
+{
+  "reviewer": "/root/adversarial_review",
+  "sourceScopeDigest": "90de19cda0788327238d36f6fd303aacee92cc509b5abb0d0467a50cdbe4785b",
+  "sourceFileCount": 43,
+  "scope": "Native prompts/corpora/Python APIs; registry and trusted startup; saved-only migrations, permissions/workspace/live refusal; controls, provider consent/history/unknown usage; packaging/integrity; PRD/ADR mappings.",
+  "verdict": "No unresolved source blocker after Prime recipe corrections.",
+  "unresolvedSourceFindings": [],
+  "limits": [
+    "Heavy tests and live inference quality are separate.",
+    "Any source hash change invalidates the assertion. Record in PR against exact source."
+  ]
+}

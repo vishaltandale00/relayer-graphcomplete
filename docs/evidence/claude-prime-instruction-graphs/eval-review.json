@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/adversarial_review",
+  "sourceScope": {
+    "files": [
+      {
+        "path": "desktop/eval-main/configuration-paths.mjs",
+        "sha256": "7b9906b9e14946863ec04bbe9bffcfb489cb75ec38ebb52fd6ed1b0f1b23e520"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+        "sha256": "0c5c64e56a9c21b811d22d1837446133e7ba4198f973a8c9cc8b543077d06f3d"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-metrics.mjs",
+        "sha256": "6a86c2a475bdfcf9a815f0beed6cba744a75d85e50dd6189a39c59ae2b7be5b3"
+      },
+      {
+        "path": "desktop/eval-main/eval-service.mjs",
+        "sha256": "b016845aa67dc3e6a3ff98c95796f9db0b3e71f727a718f637527299fe8370a0"
+      },
+      {
+        "path": "desktop/eval-renderer/run-model.js",
+        "sha256": "880c9ae9e130f4298027c158ef5f5d479b908dc2077c1631d2761871fea5abad"
+      },
+      {
+        "path": "test/eval-configuration-paths.test.mjs",
+        "sha256": "e0b8751fb88e3ed736ada68386c04d48b74de39b946af5b03a91c747b0510274"
+      },
+      {
+        "path": "test/eval-instruction-graph.test.mjs",
+        "sha256": "774a338d4c952ebb3138c5cd34122ea8682e83df14ebfcbd6aaf6c8f8d1c2df8"
+      },
+      {
+        "path": "harnesses/claude-full-prompt-control.yaml",
+        "sha256": "e736e1b847ca101317a0089ba8bae0e4b23a85d13523c4ed59b8f54e849201ef"
+      },
+      {
+        "path": "harnesses/prime-agent-full-prompt-control.yaml",
+        "sha256": "a2bafc208be15d2be49651a49aa1b174cf93f6d62504ad2768c6d320b982355a"
+      }
+    ],
+    "digest": "c91e258a6399c12134be8c34e2e760ec41e8df1752be845f9e0587f1433f1016"
+  },
+  "scopeDigestAlgorithm": "SHA-256 of compact UTF-8 JSON file entries with sorted object keys",
+  "checkpoint": "IG-024",
+  "scope": [
+    "Provider-specific frozen control identity and matching implementation/settings",
+    "Exact family/provider/model/adapter preflight before candidate dispatch",
+    "Provider-neutral count/cap/native-helper and child consent",
+    "V1 target qualification versus V2 search-disabled catalog admission",
+    "Prime package gating and real provider readiness boundary",
+    "Historical Codex stored-pair/fallback preservation",
+    "All V2 reason receipts with unsupported native usage retained as unknown"
+  ],
+  "verdict": "No reviewed authority, identity, consent, history or provider-match blocker",
+  "unresolvedFindings": [],
+  "fileHashesVerified": 9,
+  "controlIdentity": "Reviewer independently confirmed Claude/Prime controls equal prior HEAD defaults revision12/14 except name/revision1.",
+  "limits": [
+    "Source/design review only; reviewer did not independently certify tests or logs.",
+    "Catalog presence is not native provider readiness or platform qualification. Actual preflight still owns that boundary.",
+    "No paid inference, quality equivalence or whole-task context-saving claim.",
+    "Workspace assertion is non-certifying without a PR; changed source hashes invalidate it."
+  ],
+  "rebind": {
+    "previousScopeDigest": "0487a2f3e81ccf8c5f89225a17a24885b9b664b6434373dd3da58c679a2c0905",
+    "previousReview": "eval-review-before-eof-cleanup.json",
+    "previousReviewSha256": "64a353723cfe3c22243d5759acf56ad79f6f2056c4f80bad789ab48e9bed70b1",
+    "change": "Removed one trailing blank EOF line from instruction-graph-metrics.mjs. Reviewer verified old bytes equal current bytes plus one newline; eight other scope files unchanged.",
+    "verdict": "Prior no-blocker source/design review remains applicable; all nine final hashes verified.",
+    "testLimit": "Reviewer did not independently rerun or certify the implementing agent five-file77-test portfolio."
+  }
+}

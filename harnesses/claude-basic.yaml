@@ -2,7 +2,7 @@ schemaVersion: 1
 name: claude-basic
 implementation: claude.basic
 implementationVersion: 1
-revision: 12
+revision: 13
 complete:
   agentAuthored: true
 permissionBindings:
@@ -33,3 +33,6 @@ graphCapabilityProfile:
   preview: enabled
 settings:
   personalPresentationVersion: personal-presentation-v6
+  promptProfile: instruction-graph-v2
+  instructionGraphVersionKey: claude-instruction-graph-v2
+  instructionGraphDigest: 2580a10176e39066aeb44f7e9dc022e78d0e0d0c21502289e1822f79d51c4c8b

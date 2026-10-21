@@ -1,19 +1,23 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { familyData, withFamilyRoles } from "./model-family-fixture.js";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_PREVIEW_TOOL,
   ClaudeBasicHarness,
+  buildClaudeInstructionGraphV2Prompt,
   claudePermissionMode,
   createClaudeBasicFactory,
   type ClaudeSdkQuery,
   type ClaudeSdkModule,
 } from "../src/implementations/claude-basic.js";
 import { CLAUDE_BROWSER_TOOL, type ClaudeSdkToolResult } from "../src/implementations/claude-basic-browser.js";
-import { CLAUDE_PREVIEW_VIEWING, draftPreviewGuidance } from "../src/implementations/codex-basic.js";
+import { buildLayeredNavigationPrompt, CLAUDE_PREVIEW_VIEWING, draftPreviewGuidance } from "../src/implementations/codex-basic.js";
+import { claudeInstructionGraphV2Corpus } from "../src/implementations/claude-instruction-graph-v2.js";
+import { instructionGraphV2Corpus } from "../src/implementations/instruction-graph-v2.js";
 import { createNoopHarnessTraceSink } from "../src/trace.js";
 import type { HarnessExecutionAccess, HarnessFactoryContext, HarnessRunContext, HarnessTraceEventInput } from "../src/types.js";
 import { expectGraphPresentationGuidance } from "./graph-presentation-guidance-assertions.js";
@@ -159,6 +163,98 @@ function personalPresentationRunContext(
     },
   };
 }
+
+function claudeInstructionManifest() {
+  const corpus = claudeInstructionGraphV2Corpus();
+  return { versionKey: corpus.versionKey, digest: corpus.digest, retrievalContractVersion: 2,
+    threadId: 8000000000000000, interactionNodeId: 200, rootLayerId: 300,
+    modules: corpus.modules.map((module, index) => ({ key: module.key, title: module.title, nodeId: index + 201,
+      prerequisites: module.prerequisites.map(key => corpus.modules.findIndex(entry => entry.key === key) + 201) })) };
+}
+
+describe("Claude instruction graph V2", () => {
+  it("freezes reviewed provider adaptation without changing the shared Codex corpus", async () => {
+    const corpus = claudeInstructionGraphV2Corpus();
+    const frozen = JSON.parse(await readFile(new URL("../../../fixtures/claude-instruction-graph-v2.json", import.meta.url), "utf8"));
+    const codexFrozen = JSON.parse(await readFile(new URL("../../../fixtures/instruction-graph-v2.json", import.meta.url), "utf8"));
+    expect(corpus).toEqual(frozen);
+    expect(instructionGraphV2Corpus()).toEqual(codexFrozen);
+    expect(corpus.digest).toBe(createHash("sha256").update(JSON.stringify(corpus.modules)).digest("hex"));
+    expect(corpus.versionKey).toBe("claude-instruction-graph-v2");
+    expect(corpus.modules).toHaveLength(23);
+    for (const module of corpus.modules) {
+      expect(Buffer.byteLength(module.detail)).toBeLessThanOrEqual(2400);
+      for (const key of module.prerequisites) expect(corpus.modules.some(candidate => candidate.key === key)).toBe(true);
+      if (module.key !== "preview") expect(module).toEqual(instructionGraphV2Corpus().modules.find(candidate => candidate.key === module.key));
+    }
+    expect(corpus.modules.find(module => module.key === "preview")!.detail).toContain(CLAUDE_PREVIEW_TOOL);
+  });
+
+  it.each(["disabled", "query-v1"] as const)("delivers compact pinned bodies-on-demand guidance to the real SDK seam with %s search", async search => {
+    const corpus = claudeInstructionGraphV2Corpus();
+    const base = factoryContext("acceptEdits", {}, search);
+    const context = { ...base, configuration: { ...base.configuration, settings: {
+      promptProfile: "instruction-graph-v2", instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest,
+    } } };
+    const calls: Parameters<ClaudeSdkQuery>[0][] = [];
+    const events: HarnessTraceEventInput[] = [];
+    const harness = await createClaudeBasicFactory({ browserSdk: browserSdk(),
+      clientModuleUrl: "file:///managed/client.js", completeModuleUrl: "file:///managed/complete.js",
+      graphAuthoringNodePath: "C:\\Users\\Test User\\Relayer\\resources\\node\\node.exe",
+      query: sdkQuery([{ type: "result", subtype: "success", result: "done", session_id: "native-session" }], input => calls.push(input)),
+    })(context);
+    const run = { ...personalPresentationRunContext(managedAccess(), true), instructionGraph: claudeInstructionManifest(),
+      trace: { ...createNoopHarnessTraceSink(), emit: (event: HarnessTraceEventInput) => { events.push(event); } } };
+    await harness.complete(run);
+    const prompt = calls[0]!.prompt;
+    expect(prompt).toContain(JSON.stringify(run.instructionGraph));
+    expect(prompt).toContain("graph.retrieveInstructions");
+    expect(prompt).toContain("rereadReason");
+    expect(prompt).toContain("Same-key exact retries replay");
+    expect(prompt).toContain("Restart resets delivery bookkeeping");
+    expect(prompt).toContain("Decision-useful center: Foreground the conclusion and material tradeoffs.");
+    expect(prompt).toContain("exact rendered Personal graph presentation preferences block");
+    expect(prompt).toContain("A helper lacking an already delivered body");
+    expect(prompt).toContain("Normalized interaction input:");
+    expect(prompt).toContain("complete(inputGraph)");
+    expect(prompt).toContain("'C:/Users/Test User/Relayer/resources/node/node.exe' --input-type=module");
+    expect(prompt).not.toContain("PowerShell");
+    expect(prompt).not.toContain("sandbox escalation");
+    if (search === "disabled") {
+      expect(prompt).toContain("Instruction search is unavailable");
+      expect(prompt).not.toContain("graph.searchInstructions");
+    } else expect(prompt).toContain("graph.searchInstructions");
+    for (const module of corpus.modules) expect(prompt).not.toContain(module.detail);
+    expect(prompt.length).toBeLessThan(buildLayeredNavigationPrompt(run, "client").length * 0.4);
+    const traced = events.find(event => event.type === "prompt")!.data;
+    expect(traced).toMatchObject({ actualPromptCharacters: prompt.length, actualPromptUtf8Bytes: Buffer.byteLength(prompt),
+      instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest });
+    expect(traced.text).not.toContain("Decision-useful center");
+    expect(traced.text).not.toContain("Foreground the conclusion");
+    expect(calls[0]!.options).not.toHaveProperty("resume");
+    expect(harness.state()).toEqual({});
+  });
+
+  it("refuses missing or foreign manifests and invalid configuration before SDK execution", async () => {
+    const corpus = claudeInstructionGraphV2Corpus();
+    const base = factoryContext("ask");
+    const settings = { promptProfile: "instruction-graph-v2", instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest };
+    for (const invalid of [{ ...settings, instructionGraphDigest: "0".repeat(64) }, { ...settings, instructionGraphVersionKey: "codex-instruction-graph-v2" },
+      { ...settings, promptProfile: "instruction-graph-v1" }, { instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest }]) {
+      expect(() => new ClaudeBasicHarness({ ...base, configuration: { ...base.configuration, settings: invalid } })).toThrow();
+    }
+    const query = vi.fn(sdkQuery([]));
+    const harness = new ClaudeBasicHarness({ ...base, configuration: { ...base.configuration, settings } }, { query, browserSdk: browserSdk() });
+    const run = runContext(managedAccess());
+    await expect(harness.complete(run)).rejects.toThrow("control-pinned");
+    const manifest = claudeInstructionManifest();
+    for (const patch of [{ digest: "0".repeat(64) }, { versionKey: "codex-instruction-graph-v2" }, { retrievalContractVersion: 1 },
+      { modules: manifest.modules.slice(1) }]) {
+      expect(() => buildClaudeInstructionGraphV2Prompt({ ...run, instructionGraph: { ...manifest, ...patch } }, "client", "complete")).toThrow("control-pinned");
+    }
+    expect(query).not.toHaveBeenCalled();
+  });
+});
 
 it("uses packaged Windows Node through Claude's Bash without granting launcher escalation", async () => {
   let prompt = "";

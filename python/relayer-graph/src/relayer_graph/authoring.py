@@ -24,6 +24,8 @@ from .preview import GraphPreview, materialize_preview
 from .visual_assets import GraphVisualAssets
 from .icon_discovery import GraphIcons
 from .query import GraphSearchRequest, GraphSearchResult
+from .instructions import (InstructionGraphManifest, InstructionRetrievalReason,
+                           InstructionRetrievalReceipt)
 from .query_errors_generated import (GRAPH_QUERY_CONTRACT_VERSION,
                                      GRAPH_QUERY_ERROR_PHASES)
 
@@ -475,6 +477,50 @@ class RelayerGraphClient:
     async def get_node(self, node: NodeReference) -> GraphNode:
         value = await self._request("GET", f"/api/graph/nodes/{_node_id(node)}")
         return GraphNode.from_dict(value["node"])
+
+    async def get_instruction_graph(self) -> InstructionGraphManifest:
+        """Read the metadata of this completion's exact trusted instruction pin."""
+        return await self._request("GET", "/api/graph/instruction-graph")
+
+    async def retrieve_instructions(
+        self, *, request_key: str, node_ids: Sequence[int],
+        reason: InstructionRetrievalReason, reread_reason: str | None = None,
+    ) -> InstructionRetrievalReceipt:
+        """Request server-owned epoch-scoped delivery, exact replay or explicit reread.
+
+        Suppressed bodies and replay receipts are returned unchanged. Receiving a
+        receipt is not evidence that a model read or incorporated its contents.
+        """
+        body: dict[str, Any] = {
+            "requestKey": request_key, "nodeIds": list(node_ids), "reason": dict(reason),
+        }
+        if reread_reason is not None:
+            body["rereadReason"] = reread_reason
+        return await self._request("POST", "/api/graph/instruction-graph/retrieve", body)
+
+    async def search_instructions(
+        self, request: GraphSearchRequest, *, reason: InstructionRetrievalReason | None = None,
+    ) -> GraphSearchResult:
+        """Run query-v1 only within the immutable pinned corpus, never a caller target.
+
+        V2 requires a reason and returns metadata projections only. The server
+        enforces that contract and the existing search capability independently.
+        """
+        if request.target is not None:
+            raise ValueError("Instruction search does not accept a target selector")
+        body = request.to_wire()
+        if reason is not None:
+            body["reason"] = dict(reason)
+        result = await self._request(
+            "POST", "/api/graph/instruction-graph/search", body, graph_query=True,
+        )
+        version = result.get("queryContractVersion") if isinstance(result, Mapping) else None
+        if type(version) is not int or version != GRAPH_QUERY_CONTRACT_VERSION:
+            raise APIError(
+                f"Instruction search response must use query contract version {GRAPH_QUERY_CONTRACT_VERSION}",
+                status=200, details=result,
+            )
+        return result
 
     async def get_node_presentation(self, node: NodeReference) -> Mapping[str, Any]:
         """Read the frozen-grant-authorized node, revision and existing actions."""

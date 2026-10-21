@@ -441,7 +441,7 @@ export class GraphCompleteRuntimeService {
         digestHarnessConfiguration,
         createClaudeBasicFactory,
         createCodexBasicFactory,
-        codexInstructionGraphCorpus,
+        instructionGraphCorpus,
         createPrimeAgentFactory,
         loadHarnessConfigurations,
         productHarnessImplementations,
@@ -647,7 +647,7 @@ export class GraphCompleteRuntimeService {
       const instructionConfigurations = [...configurations.values()].filter((configuration) =>
         ["instruction-graph-v1", "instruction-graph-v2"].includes(configuration.settings.promptProfile));
       for (const configuration of instructionConfigurations) {
-        const corpus = codexInstructionGraphCorpus(configuration.settings.instructionGraphVersionKey);
+        const corpus = instructionGraphCorpus(configuration.settings.instructionGraphVersionKey);
         if (configuration.settings.instructionGraphVersionKey !== corpus.versionKey
           || configuration.settings.instructionGraphDigest !== corpus.digest) {
           throw new Error("Instruction graph configuration does not match the reviewed corpus.");

@@ -51,6 +51,22 @@ fallback. The full prompt remains an Eval-only named control for future trials;
 historical comparisons keep their original configurations. PRD 12.4B owns the
 promotion checkpoints. The human choice is not a claim of quality equivalence.
 
+## Claude and Prime instruction delivery (2026-10-21)
+
+The human extension selects separate reviewed V2 corpora in `claude-basic`
+revision 13 and `prime-agent-basic` revision 15. Claude uses JavaScript recipes
+with its scoped native preview tool. Prime uses Python recipes and its existing
+run-bound visual-authoring bridge. This changes instruction delivery while
+retaining each provider's native execution, recursion, model and permission
+contracts. Codex's immutable corpus remains unchanged.
+
+Code-owned lookup and exact pins govern publication and retrieval. Compatible
+saved registrations upgrade only at reopen, and live factories cannot swap
+profiles. Prior graphs and execution receipts remain immutable. Frozen Eval
+controls retain full-prompt compatibility; new live comparisons need declared
+consent and spend caps. This decision asserts neither quality equivalence nor
+provider-native child coverage. PRD 12.4C records the verification boundaries.
+
 ## Consequences
 
 - Product requirements and acceptance criteria describe capabilities through the selected harness and provider rather than naming one implementation.

@@ -1,0 +1,119 @@
+{
+  "sourceSnapshotDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
+  "status": "All required deterministic entry points passed for the reviewed source snapshot",
+  "decision": "Claude and Prime graph instruction delivery becomes product default; separate immutable Eval aliases and full-prompt controls retained.",
+  "verificationPlan": "verification-plan.json",
+  "completed": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "log": ".relayer/claude-prime-check-final.log",
+      "results": {
+        "native": "Workspace/default and crash-reconciliation groups passed; formatting and clippy passed",
+        "mainVitest": {
+          "filesPassed": 347,
+          "filesSkipped": 1,
+          "testsPassed": 4668,
+          "testsSkipped": 3
+        },
+        "secretBoundary": {
+          "filesPassed": 1,
+          "testsPassed": 2
+        },
+        "python": {
+          "testsPassed": 107,
+          "result": "OK"
+        },
+        "other": "Workspace builds/type checks, Ladybug receipts/contract probes and PRD readability passed"
+      },
+      "logSha256": "eecbb431673c2156ed9b8ea3f8356cdb48d8f3e9c865a136fa2e2e5c54482539"
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "log": ".relayer/claude-prime-build-final.log",
+      "scope": "Native binaries, root and workspace packages; production source matches final snapshot. Later changes were only test fixtures and PRD proof mapping.",
+      "logSha256": "86aa46190acc1091f5119aa1dab16c202706ff0411705ff1c509bad90717b40e"
+    },
+    {
+      "command": "npm run test:eval-web",
+      "exitCode": 0,
+      "passedChapters": 50,
+      "log": ".relayer/claude-prime-eval-web-final.log",
+      "logSha256": "86cf286adcff453a5b4982e58c1c8f71d10fa6e5e8397e3a1bda5b52dca9f3d4"
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "passedTests": 12,
+      "log": ".relayer/claude-prime-compiled-final.log",
+      "logSha256": "0bd4b8de9492c4157939e01ac560f5074d370d668cbe28bc46210f464ea0d682"
+    },
+    {
+      "command": "npm run test:prime-managed-runtime",
+      "exitCode": 0,
+      "result": "ready:true with final three-contract Python pin",
+      "log": ".relayer/claude-prime-managed-runtime-final.log",
+      "receipt": "managed-runtime-proof.json",
+      "logSha256": "6c4087323d7466fb89e9953a8ebca8d334cbb3001445f4bf03321791bd8ae344"
+    },
+    {
+      "command": "npm run desktop:pack",
+      "exitCode": 0,
+      "result": "Unsigned macos-arm64 assembly and afterPack passed; verified runtime cache hit",
+      "log": ".relayer/claude-prime-pack-final.log",
+      "receipt": "packaging-receipt.json",
+      "logSha256": "562a4ac734249c2e547f6464af7a61335ae18e32fa29ef891eee56f0426bec82"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=\"$PWD/target\" npx vitest run test/prime-visual-integration.test.mjs",
+      "exitCode": 0,
+      "passedTests": 2,
+      "log": ".relayer/claude-prime-visual-fix.log",
+      "scope": "Fixture inference through production Prime factory, real Python client/host bridge, canonical visual compiler and Rust acceptance. Both basic V2 and deep V4. Optional managed IPython fixture branch source-reviewed, not exercised.",
+      "logSha256": "ae444dbb3d16d452bf08f760571a844f12ed54b445df7e6b7897ab096426090c"
+    },
+    {
+      "command": "CARGO_TARGET_DIR=\"$PWD/target\" npx vitest run test/instruction-graph-e2e.test.mjs",
+      "exitCode": 0,
+      "passedTests": 7,
+      "log": ".relayer/claude-prime-runtime-journey-complete.log",
+      "scope": "Publication/pin/retrieval/dedup/search refusal/acceptance/reopen with fixture provider execution; no native inference claim.",
+      "logSha256": "165f10f71ff0a7ba5e7d1e5ea16b9ca65d9d15bc33c139f2b84f2a6437526061"
+    }
+  ],
+  "priorFailures": [
+    {
+      "log": ".relayer/claude-prime-focused-integrated.log",
+      "result": "5 runtime cases used inherited stale shared native binary and failed404. Corrected private target; final7runtime cases passed."
+    },
+    {
+      "result": "Runtime integration fixtures initially lacked complete provider definitions and secret endpoint; corrected faithful fixture rather than weakening routing/admission."
+    },
+    {
+      "log": ".relayer/claude-prime-check.log",
+      "exitCode": 1,
+      "result": "4666 tests passed,2 failed: third managed-runtime Python pin missed, old visual fixture assumed full-prompt inline code. Both corrected; final full check passed on repaired source."
+    },
+    {
+      "log": ".relayer/claude-prime-visual-fix.log",
+      "result": "Append log preserves no-scenario package-rebuild import race, incorrect fixture corpus-publication/task identity assertion, and indentation issue skipping supplemental Evidence action on a fresh Current. Corrected fixture only; exact manifest and original assertions retained. Final2/2 passed."
+    }
+  ],
+  "unknowns": [
+    "No paid Claude or Prime quality comparison was run; quality equivalence and whole-task token/cost savings unmeasured.",
+    "Optional managed IPython visual fixture execution was not repeated; ordinary real-host bridge tests and managed-runtime readiness passed.",
+    "Fresh social-preview capture color differences have no established cause; actual captures and independent visual/source binding review are retained separately."
+  ],
+  "platform": "macos-arm64; no cross-platform native or release/notarization claim",
+  "sourceHashesReverifiedAfterCheck": true,
+  "adversarialAssertion": {
+    "reviewer": "/root/adversarial_review",
+    "sourceSnapshotDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
+    "sourceFiles": 46,
+    "verdict": "No unresolved source blocker; fixture replacement preserves original proof boundaries",
+    "record": "source-review.json",
+    "unresolvedSourceFindings": [],
+    "limits": "Native inference quality is separate. Optional managed IPython visual fixture mode remains source-reviewed only."
+  }
+}

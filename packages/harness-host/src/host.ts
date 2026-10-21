@@ -37,6 +37,7 @@ import {
 } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
 import { instructionGraphV2Corpus } from "./implementations/instruction-graph-v2.js";
+import { instructionGraphCorpus } from "./instruction-graph-corpora.js";
 import {
   HarnessTraceStore,
   NO_HARNESS_TRACE_SUPPORT,
@@ -559,7 +560,8 @@ export class HarnessHost {
     }
     const prior = this.saved.get(descriptor.threadId);
     const priorUpgrade = prior !== undefined
-      && productCodexUpgradeMatches(prior.configuration, descriptor.configuration);
+      && (productCodexUpgradeMatches(prior.configuration, descriptor.configuration)
+        || productInstructionPromotionMatches(prior.configuration, descriptor.configuration));
     const priorMatches = prior !== undefined && (canResumeHarnessExecutionConfiguration(prior.configuration, descriptor.configuration)
       || priorUpgrade);
     if (prior !== undefined && (!priorMatches
@@ -568,7 +570,7 @@ export class HarnessHost {
       throw new Error(`Thread ${descriptor.threadId} is already pinned to harness configuration ${prior.configuration.name}`);
     }
     if (priorUpgrade) {
-      console.warn(`Migrating retired product Codex configuration for harness thread ${descriptor.threadId} during registration`);
+      console.warn(`Migrating ${prior?.configuration.implementation === "codex.basic" ? "retired product Codex configuration" : "product instruction configuration"} for harness thread ${descriptor.threadId} during registration`);
     }
     const legacy = this.legacySaved.get(descriptor.threadId);
     const legacyUpgrade = legacy !== undefined
@@ -2716,6 +2718,28 @@ function productCodexInstructionPromotionMatches(
     ...current,
     settings: { ...settings, promptProfile: "layered-navigation-multi-agent-v1" },
   });
+}
+
+/** A saved factory may change instruction delivery only to its reviewed product revision.
+ * Native execution, model policy, permission bindings and scope remain unchanged.
+ */
+function productInstructionPromotionMatches(prior: HarnessConfiguration, current: HarnessConfiguration): boolean {
+  const target = current.name === "claude-basic"
+    ? { implementation: "claude.basic", revision: 13, versionKey: "claude-instruction-graph-v2" }
+    : current.name === "prime-agent-basic"
+      ? { implementation: "prime.agent", revision: 15, versionKey: "prime-agent-instruction-graph-v2" }
+      : undefined;
+  if (!target || prior.name !== current.name
+    || prior.implementation !== target.implementation || current.implementation !== target.implementation
+    || prior.implementationVersion !== 1 || current.implementationVersion !== 1
+    || prior.revision === undefined || prior.revision < 1 || prior.revision >= target.revision
+    || current.revision !== target.revision || prior.settings.promptProfile !== undefined
+    || current.settings.promptProfile !== "instruction-graph-v2") return false;
+  const corpus = instructionGraphCorpus(target.versionKey);
+  if (current.settings.instructionGraphVersionKey !== corpus.versionKey
+    || current.settings.instructionGraphDigest !== corpus.digest) return false;
+  const { instructionGraphVersionKey: _version, instructionGraphDigest: _digest, promptProfile: _profile, ...settings } = current.settings;
+  return sameHarnessExecutionConfiguration(prior, { ...current, settings });
 }
 
 function productCodexUpgradeMatches(
