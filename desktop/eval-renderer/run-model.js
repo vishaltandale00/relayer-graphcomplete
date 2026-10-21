@@ -22,6 +22,39 @@ export const recursiveGraphMemoryHarnessPair = Object.freeze([
   "codex-eval-lantern-search-query-v1-recursion-enabled",
 ]);
 
+export const instructionGraphControlName = "codex-full-prompt-control";
+export const instructionGraphHarnessPair = Object.freeze([instructionGraphControlName, "codex-instruction-graph-v1"]);
+export const instructionGraphTreatmentNames = Object.freeze(["codex-instruction-graph-v1", "codex-instruction-graph-v2"]);
+
+export function authorizeInstructionGraphSelection(selection, catalog, confirmLiveRun, requestCostCap) {
+  const treatments = selection.harnessConfigurationNames.filter((name) => instructionGraphTreatmentNames.includes(name));
+  if (treatments.length === 0) return structuredClone(selection);
+  const treatment = treatments[0];
+  if (treatments.length !== 1 || selection.harnessConfigurationNames.length !== 2 || selection.harnessConfigurationNames[0] !== instructionGraphControlName || selection.harnessConfigurationNames[1] !== treatment) throw new Error("Choose the frozen full-prompt control and exactly one instruction-graph treatment, in that order.");
+  if (selection.suiteId) throw new Error("Choose ordinary cases for the instruction-graph comparison.");
+  const rootProviderExecutions = selection.testCaseIds.reduce((total, id) => {
+    const definition = catalog.cases.find((item) => item.id === id);
+    if (catalog.externalCaseIds?.includes(id)) throw new Error("Choose built-in ordinary cases for the instruction-graph comparison.");
+    if (!Array.isArray(definition?.prompts)) throw new Error("Choose cases with a fixed prompt sequence for the instruction-graph comparison.");
+    return total + definition.prompts.length * instructionGraphHarnessPair.length;
+  }, 0);
+  const capInput = requestCostCap?.("Enter the maximum declared spend for this instruction-graph comparison in USD.");
+  if (capInput === null || capInput === undefined) return null;
+  const declaredCostCapUsd = typeof capInput === "number" ? capInput : Number(String(capInput).trim());
+  if (!Number.isFinite(declaredCostCapUsd) || declaredCostCapUsd <= 0) throw new Error("Enter a positive declared USD cost cap for the instruction-graph comparison.");
+  if (!confirmLiveRun(`Run ${treatment} against ${instructionGraphControlName} with ${rootProviderExecutions} paid/live Codex root turns? Both cells may launch additional model-controlled agent-authored child execution through the connected product provider. Declared maximum spend: $${declaredCostCapUsd.toFixed(2)} USD. Eval records this cap but does not meter or enforce provider spend.`)) return null;
+  return {
+    ...structuredClone(selection),
+    liveAuthorization: {
+      confirmed: true,
+      credentialReference: "connected-product-provider",
+      rootProviderExecutions,
+      agentAuthoredChildren: true,
+      declaredCostCapUsd,
+    },
+  };
+}
+
 export function judgeConfigurationCompatibleWithCases(cases, selectedCaseIds, judgeId) {
   return selectedCaseIds.every((caseId) => {
     const definition = cases.find((candidate) => candidate.id === caseId);
@@ -291,6 +324,13 @@ export function projectExecutionDossier(run, execution) {
         score: null,
         checks: asArray(coverage.checks).map(gateProjection),
       })),
+    instructionRetrieval: [...asArray(execution.turns), ...semanticChildren].flatMap((turn) => {
+      const retrieval = turn?.instructionMetrics?.instructionRetrieval;
+      return retrieval ? [{ interactionId: turn.interactionId, graphNodeId: turn.graphNodeId,
+        reasonCoverage: retrieval.reasonCoverage ?? "unknown", readProtocol: retrieval.readProtocol ?? null,
+        readReasons: retrieval.readReasons ?? null, searchReasons: retrieval.searchReasons ?? null,
+      }] : [];
+    }),
     timing: asArray(execution.turns).flatMap((turn, index) => (
       turn?.timing ? [timingProjection(turn, index)] : []
     )),

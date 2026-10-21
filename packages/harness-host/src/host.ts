@@ -36,6 +36,7 @@ import {
   canResumeHarnessExecutionConfiguration,
 } from "./configuration.js";
 import { resolveHarnessFactory } from "./registry.js";
+import { instructionGraphV2Corpus } from "./implementations/instruction-graph-v2.js";
 import {
   HarnessTraceStore,
   NO_HARNESS_TRACE_SUPPORT,
@@ -1256,7 +1257,7 @@ export class HarnessHost {
       if (!(error instanceof GraphApiError && error.status === 404 && error.code === "completion_not_found")) throw error;
     }
     const expectedPersonalPresentationVersionId = traceContext?.personalPresentationVersionId;
-    const [interaction, interactionInput, personalPresentation] = await Promise.all([
+    const [interaction, interactionInput, personalPresentation, instructionGraph] = await Promise.all([
       graph.getNode(interactionNodeId),
       graph.getInteractionInput(),
       graph.getPersonalPresentation().catch((error: unknown) => {
@@ -1264,7 +1265,13 @@ export class HarnessHost {
           && expectedPersonalPresentationVersionId === undefined) return undefined;
         throw error;
       }),
+      ["instruction-graph-v1", "instruction-graph-v2"].includes(String(descriptor.configuration.settings.promptProfile)) ? graph.getInstructionGraph() : undefined,
     ]);
+    if (instructionGraph !== undefined && (
+      instructionGraph.versionKey !== descriptor.configuration.settings.instructionGraphVersionKey
+      || instructionGraph.digest !== descriptor.configuration.settings.instructionGraphDigest)) {
+      throw new Error("Attached instruction graph does not match the admitted harness configuration");
+    }
     validateCompletionContract(interactionInput, interactionNodeId);
     if (origin.kind === "invoke") {
       const invocationMatches = interactionInput.completionContract?.input.invocationReferences.some((reference) =>
@@ -1409,6 +1416,7 @@ export class HarnessHost {
         inputGraph: interaction,
         interactionInput: await withArtifactNoteScreenshots(interactionInput, this.options.artifactNotesDirectory, programDirectory),
         ...(personalPresentation === undefined ? {} : { personalPresentation }),
+        ...(instructionGraph === undefined ? {} : { instructionGraph }),
         graph: scope,
         ...(completionBroker === undefined ? {} : { completionBroker }),
         approvals,
@@ -2681,12 +2689,43 @@ function migratedProductCodexConfiguration(configuration: HarnessConfiguration):
   });
 }
 
+/** Only saved registrations may cross this reviewed instruction-delivery change.
+ * Keep native execution, permissions and scope comparisons intact; live sessions
+ * deliberately continue using canResumeHarnessExecutionConfiguration alone.
+ */
+function productCodexInstructionPromotionMatches(
+  prior: HarnessConfiguration,
+  current: HarnessConfiguration,
+): boolean {
+  if (prior.name !== "codex-basic" || current.name !== "codex-basic"
+    || prior.implementation !== "codex.basic" || current.implementation !== "codex.basic"
+    || prior.implementationVersion !== 1 || current.implementationVersion !== 1
+    || prior.revision === undefined || prior.revision < 3 || prior.revision > 18
+    || current.revision !== 19
+    || prior.settings.promptProfile !== "layered-navigation-multi-agent-v1"
+    || current.settings.promptProfile !== "instruction-graph-v2") return false;
+  const corpus = instructionGraphV2Corpus();
+  if (current.settings.instructionGraphVersionKey !== corpus.versionKey
+    || current.settings.instructionGraphDigest !== corpus.digest) return false;
+  const {
+    instructionGraphVersionKey: _versionKey,
+    instructionGraphDigest: _digest,
+    ...settings
+  } = current.settings;
+  return sameHarnessExecutionConfiguration(prior, {
+    ...current,
+    settings: { ...settings, promptProfile: "layered-navigation-multi-agent-v1" },
+  });
+}
+
 function productCodexUpgradeMatches(
   prior: HarnessConfiguration,
   current: HarnessConfiguration,
 ): boolean {
+  if (productCodexInstructionPromotionMatches(prior, current)) return true;
   const migrated = migratedProductCodexConfiguration(prior);
-  return migrated !== prior && sameHarnessExecutionConfiguration(migrated, current);
+  return migrated !== prior && (sameHarnessExecutionConfiguration(migrated, current)
+    || productCodexInstructionPromotionMatches(migrated, current));
 }
 
 function migratedLegacyProductCodexConfiguration(
@@ -2718,7 +2757,11 @@ function legacyProductCodexUpgradeMatches(
   current: HarnessConfiguration,
 ): boolean {
   const migrated = migratedLegacyProductCodexConfiguration(prior);
-  return migrated !== prior && sameLegacyHarnessConfiguration(migrated, current);
+  return migrated !== prior && (sameLegacyHarnessConfiguration(migrated, current)
+    || ((prior.revision === undefined || prior.revision === 1 || prior.revision === 2)
+      && productCodexInstructionPromotionMatches(
+        { ...migrated, permissionBindings: current.permissionBindings }, current,
+      )));
 }
 
 function preAccessContractThreadId(value: unknown): number | undefined {

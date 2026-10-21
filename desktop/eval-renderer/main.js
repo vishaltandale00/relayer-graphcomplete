@@ -1,6 +1,7 @@
 import { initializeHumanTasks } from "./human-tasks.js";
 import {
   authorizeRecursiveCompleteSelection,
+  authorizeInstructionGraphSelection,
   isolateRecursiveCompleteSelection,
   judgeConfigurationCompatibleWithCases,
   projectExecutionCell,
@@ -104,7 +105,7 @@ async function configure() {
     </button>`).join("");
   bindAblationControls(document, catalog, (selection) => {
     syncJudgeCompatibility();
-    toast(`Selected ${selection.harnessConfigurationNames.length / 2} graph-search provider pairs.`);
+    toast(`Selected ${selection.harnessConfigurationNames.length / 2} comparison pairs.`);
   });
   for (const caseId of [recursiveCompleteCaseId, recursiveGraphMemoryCaseId]) {
     const recursiveOption = document.querySelector(`input[name="cases"][value="${caseId}"]`);
@@ -133,6 +134,8 @@ async function startRun() {
   if ((!selection.suiteId && !selection.testCaseIds.length) || !selection.harnessConfigurationNames.length) return toast("Select at least one case or suite and one harness.");
   try {
     selection = authorizeRecursiveCompleteSelection(selection, (message) => window.confirm(message));
+    if (selection === null) return;
+    selection = authorizeInstructionGraphSelection(selection, catalog, (message) => window.confirm(message), (message) => window.prompt(message, "10.00"));
     if (selection === null) return;
     selection = authorizeExternalLiveSelection(selection, catalog, {
       requestCostCap: (message) => window.prompt(message, "10.00"),
@@ -192,6 +195,17 @@ function renderRun(run) {
       : `${item.outcomeQualified}/${item.outcomeJudged} outcome-qualified · ${item.presentationJudged} graph-judged`;
     return `<div class="metric"><small>${escapeHtml(item.name)}</small><strong>${completed}/${item.total} completed</strong><span>${escapeHtml(detail)}</span><progress class="bar" max="100" value="${percentage}" aria-label="${percentage}% completed"></progress></div>`;
   }).join("");
+  if (run.comparison?.kind === "instruction-graph-pair") {
+    const metricValue = (value) => value === null || value === undefined ? "unknown" : String(value);
+    $("#aggregate").innerHTML += `<div class="metric"><small>Instruction graph comparison</small><strong>Quality equivalence unproven</strong><span>Whole-task input tokens: unknown. Provider-native child usage coverage is not established.</span></div>`;
+    for (const metric of run.comparison.metrics ?? []) {
+      $("#aggregate").innerHTML += `<div class="metric"><small>${escapeHtml(metric.harnessConfigurationName)} · ${escapeHtml(metric.caseId)}</small><strong>${escapeHtml(metricValue(metric.actualPromptCharacters))} initial prompt characters</strong><span>${escapeHtml(metricValue(metric.observedInputTokens))} observed input tokens · ${escapeHtml(metric.recordedSessions)}/${escapeHtml(metric.expectedGraphSessions)} graph sessions reported</span><span>${escapeHtml(metricValue(metric.latencyMs))} ms elapsed, including grading · ${escapeHtml(metricValue(metric.graphWriteRejections))} rejected graph writes</span></div>`;
+      if (metric.instructionRetrieval) {
+        const retrieval = metric.instructionRetrieval;
+        $("#aggregate").innerHTML += `<div class="metric"><small>Instruction retrieval · ${escapeHtml(metric.harnessConfigurationName)}</small><strong>${escapeHtml(metricValue(retrieval.returnedBodyCharacters))} returned body characters</strong><span>Reason coverage: ${escapeHtml(retrieval.reasonCoverage)} · ${escapeHtml(metricValue(retrieval.duplicateMetadataResponses))} duplicate metadata responses · ${escapeHtml(metricValue(retrieval.replayBodyResponses))} replay body responses</span><span>Returned characters measure transport output; they do not establish token savings or task quality.</span></div>`;
+      }
+    }
+  }
   if (run.kind === "imported-conversation") {
     const execution = run.executions[0];
     $("#matrixHead").innerHTML = "<tr><th>External conversation</th><th>Review and judging</th></tr>";
@@ -346,6 +360,7 @@ function renderExecutionDossier(run, execution) {
       <div><small>Substance</small><strong>${escapeHtml(dossier.substance.label)}</strong><span class="${dossier.substance.qualified === false ? "not-qualified" : "qualified"}">${escapeHtml(qualification)}</span></div>
       <div><small>Graph presentation</small><strong>${escapeHtml(dossier.presentation.label)}</strong><span>${escapeHtml(dossier.presentation.applicable ? dossier.presentation.status : "Not applicable")}</span></div>
     </section>
+    ${dossier.instructionRetrieval.length ? `<section class="dossier-block"><div class="block-heading"><span class="eyebrow">Instruction retrieval</span><h3>Recorded reasons by completion</h3></div><p>Reasons describe the agent's stated operational purpose. They do not establish why an earlier unrecorded reread happened.</p>${dossier.instructionRetrieval.map((item) => `<details><summary>Interaction ${escapeHtml(item.interactionId)} · reason coverage ${escapeHtml(item.reasonCoverage)}</summary><pre>${escapeHtml(JSON.stringify(item, null, 2))}</pre></details>`).join("")}</section>` : ""}
     ${dossier.error ? `<p class="dossier-error"><b>Execution failed:</b> ${escapeHtml(dossier.error)}</p>` : ""}
     <section class="dossier-block"><div class="block-heading"><span class="eyebrow">Case contract</span><h3>Visible task and identity</h3></div>
       <blockquote>${escapeHtml(dossier.case.prompt || "No visible prompt was captured in this run record.")}</blockquote>

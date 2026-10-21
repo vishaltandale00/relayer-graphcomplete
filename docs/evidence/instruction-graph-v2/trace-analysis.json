@@ -1,0 +1,312 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+  "runId": "run-2026-10-20T17-15-46-850Z-7c3b327d",
+  "traceAndLedgerIntegrity": "all four event streams and ledgers match manifest SHA256/length/count",
+  "turns": [
+    {
+      "harness": "codex-basic",
+      "interactionId": 11,
+      "graphNodeId": 118,
+      "integrity": {
+        "events": {
+          "sha256": "sha256:4eb72b18054cdb5560f16e7c126b4c2268c820bd897e37cd1426d6745d55c999",
+          "bytes": 354387,
+          "records": 147
+        },
+        "graphOperations": {
+          "sha256": "sha256:b9c9afc23fd7a7a6c71e4cbd3ab8080ee037ec0a7f7065a8aa0a96b22ebaa914",
+          "bytes": 3421,
+          "records": 18
+        }
+      },
+      "inputBearingRequests": 5,
+      "sumLastInputTokens": 182423,
+      "cumulativeInputTokens": 182423,
+      "uncachedInputTokens": 28567,
+      "firstRequestInputTokens": 31131,
+      "maxRequestInputTokens": 39942,
+      "instructionRetrieval": {
+        "status": "recorded",
+        "successfulReads": 0,
+        "reasonCoverage": "unknown",
+        "readProtocol": null,
+        "successfulSearches": 0
+      }
+    },
+    {
+      "harness": "codex-basic",
+      "interactionId": 12,
+      "graphNodeId": 120,
+      "integrity": {
+        "events": {
+          "sha256": "sha256:0b9212e464e9a78c6b7f49df606bf07bc2ca1e841219a4e9351779244dc60d59",
+          "bytes": 352301,
+          "records": 133
+        },
+        "graphOperations": {
+          "sha256": "sha256:907f5935dca645500c91d4d15bf43d808bf4569a7551c63c9f162f19d1ec8309",
+          "bytes": 4011,
+          "records": 21
+        }
+      },
+      "inputBearingRequests": 6,
+      "sumLastInputTokens": 222108,
+      "cumulativeInputTokens": 222108,
+      "uncachedInputTokens": 29340,
+      "firstRequestInputTokens": 31207,
+      "maxRequestInputTokens": 40539,
+      "instructionRetrieval": {
+        "status": "recorded",
+        "successfulReads": 0,
+        "reasonCoverage": "unknown",
+        "readProtocol": null,
+        "successfulSearches": 0
+      }
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "interactionId": 13,
+      "graphNodeId": 122,
+      "integrity": {
+        "events": {
+          "sha256": "sha256:ce754723484acafcec0eca57599bdb60e7fb87e9bc74538ea8e6d647dd6e5a8c",
+          "bytes": 167724,
+          "records": 159
+        },
+        "graphOperations": {
+          "sha256": "sha256:6af543cf82bf39f15e1b09c71bf0f54f6dc7178167ab313f82cb73b589b16f6d",
+          "bytes": 5811,
+          "records": 23
+        }
+      },
+      "inputBearingRequests": 6,
+      "sumLastInputTokens": 135457,
+      "cumulativeInputTokens": 135457,
+      "uncachedInputTokens": 22561,
+      "firstRequestInputTokens": 18177,
+      "maxRequestInputTokens": 26498,
+      "instructionRetrieval": {
+        "status": "recorded",
+        "successfulReads": 7,
+        "reasonCoverage": "complete",
+        "readProtocol": 2,
+        "uniqueModulesRead": 7,
+        "uniqueReadRequests": 2,
+        "firstBodyResponses": 7,
+        "replayBodyResponses": 0,
+        "rereadBodyResponses": 0,
+        "duplicateMetadataResponses": 0,
+        "returnedBodyCharacters": 7528,
+        "returnedBodyBytes": 7530,
+        "readReasons": [
+          {
+            "requestKey": "initial-authoring",
+            "replayed": false,
+            "sequence": 46,
+            "reason": {
+              "purpose": "authoring",
+              "detail": "Read authority and visual publication instructions for task flow explanation"
+            },
+            "entries": [
+              {
+                "nodeId": 95,
+                "key": "completion-authority",
+                "delivery": "body",
+                "bodyCharacters": 889,
+                "bodyBytes": 889
+              },
+              {
+                "nodeId": 97,
+                "key": "publish-current",
+                "delivery": "body",
+                "bodyCharacters": 2025,
+                "bodyBytes": 2025
+              },
+              {
+                "nodeId": 99,
+                "key": "detail-basic",
+                "delivery": "body",
+                "bodyCharacters": 1048,
+                "bodyBytes": 1048
+              },
+              {
+                "nodeId": 101,
+                "key": "detail-theme",
+                "delivery": "body",
+                "bodyCharacters": 716,
+                "bodyBytes": 716
+              },
+              {
+                "nodeId": 103,
+                "key": "layout",
+                "delivery": "body",
+                "bodyCharacters": 1231,
+                "bodyBytes": 1233
+              }
+            ]
+          },
+          {
+            "requestKey": "finish-and-preview",
+            "replayed": false,
+            "sequence": 47,
+            "reason": {
+              "purpose": "authoring",
+              "detail": "Read final publication and advisory preview mechanics"
+            },
+            "entries": [
+              {
+                "nodeId": 98,
+                "key": "finish-current",
+                "delivery": "body",
+                "bodyCharacters": 920,
+                "bodyBytes": 920
+              },
+              {
+                "nodeId": 115,
+                "key": "preview",
+                "delivery": "body",
+                "bodyCharacters": 699,
+                "bodyBytes": 699
+              }
+            ]
+          }
+        ],
+        "searchReasons": [],
+        "successfulSearches": 0
+      }
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "interactionId": 14,
+      "graphNodeId": 127,
+      "integrity": {
+        "events": {
+          "sha256": "sha256:ada82a5ff719757e42ef7afb09b943621e9a28ea2cab0383af45512d710ccc42",
+          "bytes": 187517,
+          "records": 185
+        },
+        "graphOperations": {
+          "sha256": "sha256:d3d935554fbd2b37321d591dc3131f89371825ed828b9b6a63bcde14ec628e12",
+          "bytes": 6337,
+          "records": 25
+        }
+      },
+      "inputBearingRequests": 6,
+      "sumLastInputTokens": 146143,
+      "cumulativeInputTokens": 146143,
+      "uncachedInputTokens": 17375,
+      "firstRequestInputTokens": 18251,
+      "maxRequestInputTokens": 28741,
+      "instructionRetrieval": {
+        "status": "recorded",
+        "successfulReads": 9,
+        "reasonCoverage": "complete",
+        "readProtocol": 2,
+        "uniqueModulesRead": 9,
+        "uniqueReadRequests": 2,
+        "firstBodyResponses": 9,
+        "replayBodyResponses": 0,
+        "rereadBodyResponses": 0,
+        "duplicateMetadataResponses": 0,
+        "returnedBodyCharacters": 9307,
+        "returnedBodyBytes": 9309,
+        "readReasons": [
+          {
+            "requestKey": "initial-authoring",
+            "replayed": false,
+            "sequence": 69,
+            "reason": {
+              "purpose": "authoring",
+              "detail": "Read publication authority and visual authoring requirements"
+            },
+            "entries": [
+              {
+                "nodeId": 95,
+                "key": "completion-authority",
+                "delivery": "body",
+                "bodyCharacters": 889,
+                "bodyBytes": 889
+              },
+              {
+                "nodeId": 97,
+                "key": "publish-current",
+                "delivery": "body",
+                "bodyCharacters": 2025,
+                "bodyBytes": 2025
+              },
+              {
+                "nodeId": 99,
+                "key": "detail-basic",
+                "delivery": "body",
+                "bodyCharacters": 1048,
+                "bodyBytes": 1048
+              },
+              {
+                "nodeId": 101,
+                "key": "detail-theme",
+                "delivery": "body",
+                "bodyCharacters": 716,
+                "bodyBytes": 716
+              }
+            ]
+          },
+          {
+            "requestKey": "flow-publication",
+            "replayed": false,
+            "sequence": 72,
+            "reason": {
+              "purpose": "authoring",
+              "detail": "Prepare sequence layout, prior-view control, preview and final return"
+            },
+            "entries": [
+              {
+                "nodeId": 103,
+                "key": "layout",
+                "delivery": "body",
+                "bodyCharacters": 1231,
+                "bodyBytes": 1233
+              },
+              {
+                "nodeId": 104,
+                "key": "navigation-reference",
+                "delivery": "body",
+                "bodyCharacters": 808,
+                "bodyBytes": 808
+              },
+              {
+                "nodeId": 102,
+                "key": "detail-controls",
+                "delivery": "body",
+                "bodyCharacters": 971,
+                "bodyBytes": 971
+              },
+              {
+                "nodeId": 115,
+                "key": "preview",
+                "delivery": "body",
+                "bodyCharacters": 699,
+                "bodyBytes": 699
+              },
+              {
+                "nodeId": 98,
+                "key": "finish-current",
+                "delivery": "body",
+                "bodyCharacters": 920,
+                "bodyBytes": 920
+              }
+            ]
+          }
+        ],
+        "searchReasons": [],
+        "successfulSearches": 0
+      }
+    }
+  ],
+  "interpretation": [
+    "Each V2 completion has its own fresh native session and delivery state, so shared instructions are fetched again on the second completion",
+    "Within each V2 completion every delivered chunk was unique: no replay, explicit reread or duplicate metadata response",
+    "Reasons are agent-stated operational purposes, not hidden reasoning or proof of comprehension",
+    "The live pilot made no instruction searches"
+  ]
+}

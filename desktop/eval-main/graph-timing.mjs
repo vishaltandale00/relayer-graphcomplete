@@ -33,7 +33,7 @@ function iso(time) {
 /**
  * @param {{ sentAt: number | string, events: readonly object[], graphOperations: readonly object[] }} input
  */
-export function graphTimingFromTrace({ sentAt, events = [], graphOperations = [], ledgerComplete = false, eventsComplete = false }) {
+export function graphTimingFromTrace({ sentAt, events = [], graphOperations = [], ledgerComplete = false, eventsComplete = false, instructionMetrics }) {
   const sent = at(sentAt);
   let firstGraph = null;
   let accepted = null;
@@ -74,6 +74,7 @@ export function graphTimingFromTrace({ sentAt, events = [], graphOperations = []
   }
   return Object.freeze({
     schemaVersion: 1,
+    ...(instructionMetrics === undefined ? {} : { instructionMetrics }),
     sentAt: iso(sent),
     firstGraphAt: iso(ledgerComplete && !publicationUnknown ? firstGraph : null),
     acceptedAt: iso(ledgerComplete && !publicationUnknown ? accepted : null),

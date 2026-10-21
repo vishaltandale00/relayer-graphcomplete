@@ -10,7 +10,7 @@ import { applyAcceptedNodeResponse } from "./node-response.js";
 import { EdgeObject, LayerObject, NodeObject, actionId, edgeId, layerId, nodeId, type ActionObject, type ActionReference, type EdgeReference, type LayerReference, type NodeReference } from "./objects.js";
 import { GRAPH_QUERY_CONTRACT_VERSION } from "./query-errors.generated.js";
 import { GraphQueryError, isGraphQueryErrorBody, type GraphQueryErrorBody, type GraphSearchOptions, type GraphSearchRequest, type GraphSearchResult } from "./query.js";
-import { GraphApiError, type ArtifactDetails, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason } from "./types.js";
+import { GraphApiError, type ArtifactDetails, type CompletionInputGraph, type CompletionOutput, type CompletionState, type CurrentTransitionReceipt, type GraphAction, type GraphApiErrorBody, type GraphCapability, type GraphEdge, type GraphId, type GraphLayer, type GraphNode, type InteractionInput, type ResolvedLayer, type ResolvedPersonalPresentation, type StopReason, type InstructionGraphManifest, type InstructionRetrievalRequest, type InstructionRetrievalReceipt, type InstructionRetrievalReason } from "./types.js";
 import { GraphIcons } from "./icon-discovery.js";
 import { materializeGraphPreview, type GraphPreview } from "./preview.js";
 import { rememberGraphProgram } from "./program.js";
@@ -79,6 +79,40 @@ export class RelayerGraphClient {
       ...(programDirectory ? { programDirectory } : {}),
       ...(environment.RELAYER_GRAPH_AUTHORING_ERRORS === "1" ? { authoringErrors: true } : {}),
     });
+  }
+
+  /** Read metadata only; module bodies remain on demand. */
+  async getInstructionGraph(): Promise<InstructionGraphManifest> {
+    return this.request("/api/graph/instruction-graph");
+  }
+
+  /** Reasoned, epoch-scoped instruction delivery with explicit recovery reads. */
+  async retrieveInstructions(request: InstructionRetrievalRequest): Promise<InstructionRetrievalReceipt> {
+    return this.request("/api/graph/instruction-graph/retrieve", {
+      method: "POST", body: JSON.stringify(request),
+    });
+  }
+
+  async getInstructionNode(reference: NodeReference): Promise<GraphNode> {
+    const body = await this.request<{ node: GraphNode }>(`/api/graph/instruction-graph/nodes/${nodeId(reference)}`);
+    return body.node;
+  }
+
+  async getInstructionLayer(reference: LayerReference): Promise<ResolvedLayer> {
+    return this.request(`/api/graph/instruction-graph/layers/${layerId(reference)}`);
+  }
+
+  /** Same query-v1 engine, restricted to the exact pinned instruction publication. */
+  async searchInstructions(request: Omit<GraphSearchRequest, "target"> & { readonly reason?: InstructionRetrievalReason }, options: GraphSearchOptions = {}): Promise<GraphSearchResult> {
+    const result = await this.request<unknown>("/api/graph/instruction-graph/search", {
+      method: "POST",
+      body: JSON.stringify({ ...request, parameters: request.parameters ?? {}, budget: request.budget ?? {} }),
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+    }, "query");
+    if (!isVersionedGraphSearchResult(result)) {
+      throw new GraphApiError(200, "invalid_search_response", "queryContractVersion", `Instruction search response must use query contract version ${GRAPH_QUERY_CONTRACT_VERSION}`);
+    }
+    return result;
   }
 
   async getNode(reference: NodeReference): Promise<GraphNode> {

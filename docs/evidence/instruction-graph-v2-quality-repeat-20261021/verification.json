@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "implementationChanges": "None",
+  "requiredPlan": {
+    "configuration": "Match case and harness digests, model/provider/family, corpus, presentation, permissions and frozen screenshot judge with the prior pair.",
+    "live": "Four root turns across two harnesses, native/model-selected children, complete screenshot judgments for all accepted turns, exact artifact and usage audit.",
+    "failure": "Preserve provider failure and unknown grades; one unchanged paired retry after confirmed infrastructure failure."
+  },
+  "actuallyRun": {
+    "sourceHashes": {
+      "files": 44,
+      "changed": 0
+    },
+    "crossRunConfiguration": "repeat-pin-check.json",
+    "deterministicSuiteRerun": false,
+    "deterministicSuiteReason": "No implementation or configuration source changed. Reused prior exact-source build/browser/runtime evidence; this is a live repeat only.",
+    "priorVerification": "../instruction-graph-v2-quality/verification.json",
+    "initialAttemptRunId": "run-2026-10-21T13-47-16-083Z-ad7fb067",
+    "initialFailureReview": "failed-attempt-review.json",
+    "liveStatus": "completed",
+    "retryRunId": "run-2026-10-21T14-00-47-155Z-40538473",
+    "retryConfiguration": "retry-pin-check.json",
+    "acceptedRootTurns": 4,
+    "completedJudgments": 4,
+    "allJudgeCoverageComplete": true
+  },
+  "evidenceLimit": "Prior full npm run check exited1 on a stale social-preview receipt; real recapture and focused binding retest passed. That receipt does not claim a rerun of the full suite. New live results will be recorded separately.",
+  "finalEvidence": {
+    "qualityResult": "quality-result.json",
+    "candidateMetrics": "candidate-metrics.json",
+    "renderedSamples": "rendered-samples.json",
+    "independentReview": "quality-result-review.json"
+  }
+}

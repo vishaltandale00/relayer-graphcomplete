@@ -1,0 +1,110 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/adversarial_review",
+  "stage": "plan_and_admission_only",
+  "runId": "run-2026-10-20T18-52-34-749Z-d69001c7",
+  "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+  "sourceFilesHashVerified": 42,
+  "benchmarkPlanSha256": "63f539063bbf38605eb0d971acfb0a897f963388c443bf329c292ceed306e932",
+  "candidateConfigurationFileSha256": "3def9b5328edd23399c91cf1a204b9d017bdcdde7f96392d60617a70dcd4080a",
+  "candidateCorpusDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224",
+  "judgePin": {
+    "id": "setup-40cb65be-943d-448f-9867-3e953d564e44",
+    "digest": "sha256:d7d8d6185a7acb7a151d6c71bbf46218b6eeca621c5e106c6ad25492db659d59",
+    "promptVersion": "simulated-user-judge-prompt-v11",
+    "settings": {
+      "model": "gpt-5.6-sol",
+      "modelReasoningEffort": "high",
+      "shellAccess": false
+    },
+    "scoringRules": {
+      "contractId": "recursive-presentation-judge-v6",
+      "dimension": "graph-presentation",
+      "scale": "ordered-1-8"
+    }
+  },
+  "verdict": "no_reviewed_plan_or_admission_blocker",
+  "observations": [
+    "All 42 implementation/test/PRD snapshot hashes still match; no implementation edit is part of this quality pilot.",
+    "Both configured harnesses are currently available in the read-only product catalog with the same managed-runtime recipe.",
+    "Recorded run selection, four-root/child authorization and declared USD10 cap match the plan. The cap is explicitly declared rather than enforced.",
+    "Recorded preflight resolves the same candidate family1, codex provider and gpt-6.1-sol model for both configurations. Treatment remains revision1 and frozen corpus e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224.",
+    "Run judge setup ID, digest, prompt-v11, GPT-5.6 Sol/high settings and ordered1..8 graph-presentation scoring contract exactly match the plan.",
+    "Prior V2 live bundle hash1410af35c076c28366e5ab656d8262634e9daba8b12f756b3173be3fe3bc6170 still matches; previous evidence is preserved."
+  ],
+  "interpretationRequirements": [
+    "Review completed per-turn/per-criterion scores together with reasons, screenshot references and coverage, not an invented equivalence threshold.",
+    "Judge lifecycle completion, deterministic acceptance, task outcome and qualitative scores remain distinct.",
+    "One ordered two-turn pair cannot establish population-average quality, statistical equivalence or a universal harness quality score.",
+    "Candidate usage remains separate from judge inference; grading-inclusive cell latency cannot be interpreted as candidate execution latency.",
+    "A frozen setup pin in the run does not yet prove every judge session actually used it or produced complete grounded results; verify completed artifacts afterward.",
+    "Missing, incomplete or failed judgments remain unknown. No conclusion about numeric quality is made while the run is active."
+  ],
+  "observedRunStatus": "running",
+  "numericEvidenceReview": "pending_completed_run",
+  "status": "non_certifying_without_pr",
+  "invalidation": "Source, plan or judge-pin changes invalidate this plan-stage assertion; completed-run evidence needs a separate audit.",
+  "captureAnomalyAudit": {
+    "reviewer": "/root/adversarial_review",
+    "stage": "first_completed_judge_artifact_only",
+    "interactionId": 15,
+    "judgeArtifactDirectory": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T18-52-34-749Z-d69001c7/executions/3ecaa7b4-63b6-4271-8acb-bcfdcc651e3f/turns/15/simulated-user/8623dfc5-d622-471b-8503-f2305cca4949",
+    "verdict": "confirmed_mislabeled_full_detail_tiles_with_limited_quality_evidence_impact",
+    "screenshots": [
+      {
+        "screenshotId": "shot-06186e5e-c016-4cec-8d3e-ac1431c85c1a",
+        "captureTarget": {
+          "kind": "element",
+          "elementRef": "node-detail"
+        },
+        "mode": "full",
+        "tileHashes": [
+          "e7dfefda40f1df7e87d4d45e7e526b28f4f264ed470be3f09826b9dffba138ac",
+          "e7dfefda40f1df7e87d4d45e7e526b28f4f264ed470be3f09826b9dffba138ac"
+        ],
+        "metadataSha256": "3ee230b7cfa34e426c0badd0f6b4750e1d9f1041fbabc254578519eae87c30c8"
+      },
+      {
+        "screenshotId": "shot-b96afcb3-58b9-4d75-a60d-a5bfca217849",
+        "captureTarget": {
+          "kind": "element",
+          "elementRef": "layer-viewport"
+        },
+        "mode": "visible",
+        "tileHashes": [
+          "e7dfefda40f1df7e87d4d45e7e526b28f4f264ed470be3f09826b9dffba138ac"
+        ],
+        "metadataSha256": "dca7e611dd0a995ecb408a029ee1f620bd67ba4f61925de578b3f573be40f4e4"
+      },
+      {
+        "screenshotId": "shot-3ccec067-e748-4143-b61c-b6fdebeaa4d6",
+        "captureTarget": {
+          "kind": "viewport"
+        },
+        "mode": "visible",
+        "tileHashes": [
+          "4c6b2cb12e7069ab96b693dc845be606bbbd334ae9f7f96607c8bb24c461fbcf"
+        ],
+        "metadataSha256": "82ec1d83e844a257d5bd9b90131d62bea422986c2d8ef349e7727dff3db0b206"
+      }
+    ],
+    "observations": [
+      "Independently viewed the supposed node-detail full tile: it contains the graph canvas and selected-node chip, not the authored node detail. Both tiles are identical to the correctly labeled layer-viewport crop.",
+      "Independently viewed the full viewport screenshot: it includes the graph canvas and actual rich node detail.",
+      "The completed review cites the valid viewport and graph crop, not the invalid full-detail screenshot.",
+      "Two screenshot requests overlap in the interaction trace and share sequence2. Renderer capturePlan stores one mutable capture element, and prepareCaptureTile reads that shared element; ReviewSession screenshot operations are not serialized. This is a supported race hypothesis, not an independently reproduced repair."
+    ],
+    "qualityLimits": [
+      "Do not count this screenshot as full-detail evidence or certify complete correct-target capture coverage for baseline turn15.",
+      "The valid viewport supports several cited content/layout observations; this defect alone does not establish that every judgment is unsupported.",
+      "Retain the defect as an explicit quality-evidence caveat; no numeric-score correction or equivalence threshold is inferred.",
+      "Do not alter the original completed judge artifacts. Final run-wide numeric review remains pending."
+    ],
+    "sourceReviewHashes": {
+      "desktop/renderer/src/review-tools.js": "76c73a9e810d36b340990eb5937298eb848a96fa6d5e85bf02f3eb944d1fb86d",
+      "desktop/eval-main/review-session.mjs": "3efb42fceb3ae6f2a42fd6552ccfc775f42eedc59a96a6a689db8f78feed1712"
+    },
+    "sourceChanges": "None",
+    "inferenceReruns": 0
+  }
+}

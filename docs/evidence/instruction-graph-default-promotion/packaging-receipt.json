@@ -1,0 +1,36 @@
+{
+  "sourceSnapshotDigest": "4473cfab8d8813e2aeb2db8d49114f2492e59ccbc73630e0c0f203c0182911e1",
+  "artifactMode": "unsigned development",
+  "target": "macos-arm64",
+  "configurationName": "codex-basic",
+  "revision": 19,
+  "settings": {
+    "personalPresentationVersion": "personal-presentation-v6",
+    "modelReasoningEffort": "medium",
+    "promptProfile": "instruction-graph-v2",
+    "instructionGraphVersionKey": "codex-instruction-graph-v2",
+    "instructionGraphDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224",
+    "skipGitRepoCheck": true
+  },
+  "configurationSha256": "5502baeaaf7b54b4ca4172c60e5db8dc0ff6a34ee8fade27b0eec18351299cb1",
+  "corpusModuleSha256": "cdac912d7b35a102319747eff76c6e763260fcb7648ef2d352f1dcc0ccd93243",
+  "exactSourceConfiguration": true,
+  "exactCompiledCorpusModule": true,
+  "afterPack": "passed",
+  "localArtifactPath": ".relayer/instruction-graph-default-packaged-app/mac-arm64/Relayer Dev.app",
+  "sourceTraversal": "Moved completed unsigned bundle outside desktop/ because Node24.1 fs.glob scanner throws while traversing app framework symlinks; provider architecture scanner passes after move.",
+  "freshRuntimeManifest": {
+    "version": 1,
+    "identity": "2bdbae057e8996014da4256a40d9350769ce4f390838109c1c51cd0cbdeee77b",
+    "files": {
+      "relayer-app-server": {
+        "sha256": "ad176f37457399f55784c1479d859792de6f6c81cc4f8e5196e45326e23b6aed",
+        "executable": true
+      },
+      "relayer-graph-server": {
+        "sha256": "66d7331f6d83ab07ecc5ba35cde9c10bd1ec008e8ea6799a715a8b1cb54b5e0e",
+        "executable": true
+      }
+    }
+  }
+}

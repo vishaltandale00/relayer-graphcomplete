@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-21T13-47-16-083Z-ad7fb067",
+  "status": "error",
+  "bundle": {
+    "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T13-47-16-083Z-ad7fb067/bundle.json",
+    "sha256": "38c802154b1de0ff03858f52029bb7fb4e7dafac07f234f8821a9ab8cc6fec97",
+    "bytes": 647972
+  },
+  "comparisonStatus": "unavailable_missing_control",
+  "reason": "Baseline product turn22 failed with provider serverOverloaded before any accepted turn. V2 turns23/24 accepted and judged, but no paired quality comparison is possible.",
+  "arms": [
+    {
+      "harness": "codex-basic",
+      "status": "error",
+      "acceptedTurns": [],
+      "judgeStatuses": [],
+      "error": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable."
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "status": "failed",
+      "acceptedTurns": [
+        23,
+        24
+      ],
+      "judgeStatuses": [
+        "completed",
+        "completed"
+      ],
+      "error": null
+    }
+  ],
+  "failureReview": "failed-attempt-review.json",
+  "retryPolicy": "One unchanged full-pair retry after confirmed provider capacity failure. No change to model, corpus, judge or permissions."
+}

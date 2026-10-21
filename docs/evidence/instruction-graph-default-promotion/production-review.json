@@ -1,0 +1,144 @@
+{
+  "reviewer": "/root/adversarial_review",
+  "sourceSnapshotDigest": "4473cfab8d8813e2aeb2db8d49114f2492e59ccbc73630e0c0f203c0182911e1",
+  "sourceHashesVerified": 53,
+  "reviewedScope": {
+    "files": [
+      {
+        "path": "crates/relayer-app-server/src/runtime.rs",
+        "sha256": "5ec446e055bf787527cb9d773f7815525718097b806d2d86b9c4e706341df048"
+      },
+      {
+        "path": "crates/relayer-graph-core/src/graph/database.rs",
+        "sha256": "817f245813fca37d8a0c291788b4905aebf0b1b87315d4f337d59cf28a1fbed5"
+      },
+      {
+        "path": "crates/relayer-graph-core/src/graph/import.rs",
+        "sha256": "9e5abc3aa57785bd8e66faad6a66470a08e4177d2c4ca4eaa365dad389cff55a"
+      },
+      {
+        "path": "crates/relayer-graph-core/src/graph/instruction_graph.rs",
+        "sha256": "2aaf612f384f2e45fdd372ef4c9871ebf1844424bc690571d9c01d686e5fb76f"
+      },
+      {
+        "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0042_instruction_graphs.sql",
+        "sha256": "652f8e3e1fec54f8c647b1490e8340d259dde6e7708b792f0fc70f3c7e85add5"
+      },
+      {
+        "path": "crates/relayer-graph-server/src/instruction_retrieval.rs",
+        "sha256": "d110d4aa00435b696ef98c3906f1bf074d2abb36937c471880c6175a2f7cf03b"
+      },
+      {
+        "path": "crates/relayer-graph-server/src/lib.rs",
+        "sha256": "fa1d51a4151ad9726cb98d447dc63f944ab8308ecf2960055e17d593000757b7"
+      },
+      {
+        "path": "crates/relayer-graph-server/tests/graph_search_route.rs",
+        "sha256": "12148f68d71a52465d8716106b90c973b05c3ae61c00f1754092655437d0a074"
+      },
+      {
+        "path": "crates/relayer-graph-server/tests/instruction_graph_search_v2.rs",
+        "sha256": "7ba7ee54f57eb691997884bfd9210a79d776bc3378c954e720fcb25ef808f9af"
+      },
+      {
+        "path": "desktop/eval-main/configuration-paths.mjs",
+        "sha256": "453769e769d63fefe7abeac827792b1ed8e3f71e77009e1d5e2f0e12fdfb3c84"
+      },
+      {
+        "path": "desktop/eval-main/eval-service.mjs",
+        "sha256": "9b05ce028f17f0e8a5f714166338dec7af1545ee4a210d1a790821866ea65f7b"
+      },
+      {
+        "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+        "sha256": "2416eb0b3465c124e5916b5e7e77406e5da897486065bd7614d0595c9fea1df0"
+      },
+      {
+        "path": "desktop/eval-renderer/run-model.js",
+        "sha256": "2590527538289f6e0eb6781d6c9d03ed04bc66989e2d3b48257da1095d0ec024"
+      },
+      {
+        "path": "desktop/main/services/graphcomplete-runtime.mjs",
+        "sha256": "bac1c35a925d325edfb2421b75b026d201e3d7b371b369cc27774b9c9fe5214b"
+      },
+      {
+        "path": "desktop/packaging/electron-builder.mjs",
+        "sha256": "9d7716148c9c6b9a0d2b8d68db12322f856f8082aa0598672c5e7de00fadb83a"
+      },
+      {
+        "path": "desktop/packaging/verify-bundled-app-server.mjs",
+        "sha256": "dfe5ac939989392548ad0f0c23c8e7ec3b0b634da40c8d2825a12da6b0b2d9b7"
+      },
+      {
+        "path": "docs/architecture.md",
+        "sha256": "783b7dc2955dd72f60906d7f223ed9a80ed3723575ff1c68bde1ee0a519f2f5b"
+      },
+      {
+        "path": "docs/decisions/0006-harness-provider-agnostic-product-boundary.md",
+        "sha256": "b36a0bc2e3fd630ba4a5f5f71b6ab662177342bbd4d9406b3bb74d64b91d8c80"
+      },
+      {
+        "path": "docs/prd/index.html",
+        "sha256": "b42d6b37f056859a14b65e2617427e7dab8f9d92ce3eac99ca9656d8e27f6039"
+      },
+      {
+        "path": "harnesses/codex-basic.yaml",
+        "sha256": "5502baeaaf7b54b4ca4172c60e5db8dc0ff6a34ee8fade27b0eec18351299cb1"
+      },
+      {
+        "path": "harnesses/codex-full-prompt-control.yaml",
+        "sha256": "a91f65cb6977881c2346eed841cc2a121d3b2d9e143c58d0cc8b1b6cab544d6d"
+      },
+      {
+        "path": "packages/graph-client/src/client.ts",
+        "sha256": "6cf8bc81a42a1c4ca3e818b8753c503671845e3d522210d918d8544421d3da95"
+      },
+      {
+        "path": "packages/harness-host/src/configuration.ts",
+        "sha256": "cf79b9e3e797040c1dc1fed0da380e9c2b58051e569727d9558c880185eb6049"
+      },
+      {
+        "path": "packages/harness-host/src/host.ts",
+        "sha256": "17bbdecf3222b0ad4ff3fd0aba4a07789074a871de91c683e56fb4eb6920a8d8"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/codex-basic.ts",
+        "sha256": "a5fe2d81faf1afb5ff0304763ac10bc045d93783e07b84b900a35394a379e613"
+      },
+      {
+        "path": "packages/harness-host/src/implementations/instruction-graph-v2.ts",
+        "sha256": "decd354c4e29c61463d541feab62f7cd2cdf7ba0a9ae20c81e49eafc0cdbd7fb"
+      },
+      {
+        "path": "packages/harness-host/test/codex-basic.test.ts",
+        "sha256": "625e87644524474399b0fc4f34df8c50992eb3f6b64c519e9f54423f7a113e27"
+      },
+      {
+        "path": "packages/harness-host/test/host.test.ts",
+        "sha256": "ca95147856425547cf9bb25dcf7c7f6a6fbc6926fcceb1b30f6ae37f15eb0799"
+      },
+      {
+        "path": "test/desktop-shell.test.mjs",
+        "sha256": "43991234161ca36b7ba182816a21bca5c190d2cb86f8bb1ecbeef1b11e387ceb"
+      },
+      {
+        "path": "test/eval-configuration-paths.test.mjs",
+        "sha256": "99c3b5da59ffc3326e58010700b7863dee65943e5b93037f670f487f342fda34"
+      },
+      {
+        "path": "test/eval-instruction-graph.test.mjs",
+        "sha256": "e26098f45fe349e29fb28c22ce2b5614c2ec8a778d1f6268c088ef0143d9aef5"
+      },
+      {
+        "path": "test/instruction-graph-e2e.test.mjs",
+        "sha256": "6bd46737def0e37cf4a1b8e6e7e95fc8e2c64b6801b2617b876d1c7b62bb6deb"
+      }
+    ],
+    "digest": "48f11b1bf63dfd8ea177703bc1aedf7a0a716e5d48fb7fb1392b48e52a35d1f1"
+  },
+  "verdict": "No blocking finding in corpus authority, exact pins, epoch-scoped retrieval, fallback refusal, default selection, saved-session promotion, packaging requirements or historical Eval identity preservation.",
+  "unresolvedFindings": [],
+  "limits": [
+    "Source/design review; heavy checks, packaging outcomes and quality claims are outside this assertion.",
+    "Record in PR against exact source state. Changed scope hashes invalidate this assertion."
+  ]
+}

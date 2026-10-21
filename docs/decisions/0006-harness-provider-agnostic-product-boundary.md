@@ -34,6 +34,23 @@ An unavailable or incompatible orchestrator refuses execution with Settings reco
 
 Version-2 plans bind roles into admission integrity and digests, while role-free version-1 historical receipts and portable exports retain their original digest rules. The producer contract and fixtures are in [model-family-roles](../contracts/model-family-roles.md). This enablement introduces no scheduler, delegation/review/synthesis policy, quality certification, or savings claim. Native recursion and explicit GraphComplete acceptance retain their existing owners.
 
+## Instruction delivery promotion (2026-10-21)
+
+The human promotion decision changes `codex-basic` revision 19 to the exact
+reviewed instruction-graph V2 corpus. This supersedes the layered-navigation
+prompt choice above while preserving the stable product identity, provider
+ownership, permission bindings, model-family and V6 presentation policies.
+Saved full-prompt sessions take only the narrow reviewed upgrade at reopen;
+live harness objects cannot swap profiles. Known retired Codex migrations compose
+with this upgrade. Prior accepted graphs and execution receipts remain unchanged.
+
+Directory selection and reasoned body retrieval work without search authority.
+Search-disabled configurations omit search guidance and continue to refuse search.
+Corpus publication or identity failure stops execution without a full-prompt
+fallback. The full prompt remains an Eval-only named control for future trials;
+historical comparisons keep their original configurations. PRD 12.4B owns the
+promotion checkpoints. The human choice is not a claim of quality equivalence.
+
 ## Consequences
 
 - Product requirements and acceptance criteria describe capabilities through the selected harness and provider rather than naming one implementation.

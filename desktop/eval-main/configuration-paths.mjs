@@ -46,9 +46,12 @@ export function evalHarnessConfigurationPaths({
     ...(graphSearchQualified ? [join(harnessDirectory, "fixture-graph-memory.yaml")] : []),
     join(harnessDirectory, "codex-basic.yaml"),
     join(harnessDirectory, "codex-basic-high.yaml"),
+    join(harnessDirectory, "codex-full-prompt-control.yaml"),
     join(harnessDirectory, "codex-eval-visual-node-details-control.yaml"),
     join(harnessDirectory, "codex-eval-visual-node-details-treatment.yaml"),
     ...(graphSearchQualified ? [
+      join(harnessDirectory, "codex-instruction-graph-v1.yaml"),
+      join(harnessDirectory, "codex-instruction-graph-v2.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-disabled.yaml"),
       join(harnessDirectory, "codex-eval-lantern-search-query-v1-recursion-enabled.yaml"),
     ] : []),

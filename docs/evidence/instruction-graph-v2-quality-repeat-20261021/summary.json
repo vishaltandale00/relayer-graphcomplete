@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-21T14-00-47-155Z-40538473",
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "status": "completed",
+  "caseCount": 1,
+  "acceptedRootTurns": 4,
+  "completedJudgments": 4,
+  "allJudgeCoverageComplete": true,
+  "orderedScaleMaximum": 8,
+  "perTurnScores": [
+    {
+      "criterion": "answer_quality",
+      "control": [
+        6,
+        4
+      ],
+      "treatment": [
+        6,
+        7
+      ]
+    },
+    {
+      "criterion": "recursive_coherence",
+      "control": [
+        8,
+        4
+      ],
+      "treatment": [
+        8,
+        7
+      ]
+    },
+    {
+      "criterion": "navigation_value",
+      "control": [
+        5,
+        2
+      ],
+      "treatment": [
+        5,
+        6
+      ]
+    },
+    {
+      "criterion": "presentation_quality",
+      "control": [
+        5,
+        3
+      ],
+      "treatment": [
+        5,
+        7
+      ]
+    },
+    {
+      "criterion": "follow_up_progress",
+      "control": [
+        null,
+        7
+      ],
+      "treatment": [
+        null,
+        8
+      ]
+    }
+  ],
+  "successfulPairedTrials": [
+    {
+      "runId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+      "arms": [
+        {
+          "harness": "codex-basic",
+          "presentation": 4.5,
+          "comprehension": 5,
+          "observedCandidateInputTokens": 415138
+        },
+        {
+          "harness": "codex-instruction-graph-v2",
+          "presentation": 3.5,
+          "comprehension": 4.5,
+          "observedCandidateInputTokens": 275254
+        }
+      ]
+    },
+    {
+      "runId": "run-2026-10-21T14-00-47-155Z-40538473",
+      "arms": [
+        {
+          "harness": "codex-basic",
+          "presentation": 4,
+          "comprehension": 5,
+          "observedCandidateInputTokens": 438313
+        },
+        {
+          "harness": "codex-instruction-graph-v2",
+          "presentation": 6,
+          "comprehension": 6.5,
+          "observedCandidateInputTokens": 283548
+        }
+      ]
+    }
+  ],
+  "observedCandidateInputReductionPercent": 35.30924248197065,
+  "interpretation": "Quality direction reversed across the two unchanged-source paired trials: first presentation4.5 control vs3.5 V2; repeat4 control vs6 V2. This repeat shows lower observed candidate input and higher presentation/comprehension for V2; two trials on one case do not establish general quality equivalence or causality.",
+  "judgeFinding": "In this repeat V2 authored a three-state follow-up graph with distinct details and prior-context reference; its follow-up presentation scored7 vs3 for control. Both initial turns scored5. Undirected edges remain a stated weakness.",
+  "scopeLimits": [
+    "Same single two-turn case, same frozen candidate/judge pins, non-blind subjective screenshot judge.",
+    "Candidate token figures exclude judge inference; complete native-child usage and actual dollar spend remain unknown.",
+    "Capacity-failed initial repeat attempt excluded from the matched comparison and preserved separately.",
+    "One permitted unchanged infrastructure retry completed; no implementation changes or default promotion."
+  ],
+  "failedAttempt": "failed-attempt.json",
+  "verification": "verification.json",
+  "rawEvidence": "quality-result.json",
+  "candidateMetrics": "candidate-metrics.json",
+  "renderedSamples": "rendered-samples.json",
+  "independentReview": "quality-result-review.json"
+}

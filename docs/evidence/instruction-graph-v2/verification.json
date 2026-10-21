@@ -1,0 +1,180 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+  "requiredVerificationPlan": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-web",
+    "Inference-free v2 chunk/delivery/epoch/query/prompt/runtime/metrics checkpoints IG001..013; separately authorized paired live comparison"
+  ],
+  "actualVerification": {
+    "initialCheck": {
+      "exitCode": 1,
+      "failure": "Test-only ApiError unwrap lacked Debug; repaired and scoped Rust rerun passed"
+    },
+    "fullCheck": {
+      "exitCode": 1,
+      "sourceSnapshot": "source-snapshot-before-test-repair.json",
+      "passedChapters": [
+        "Rust format/clippy/workspace tests",
+        "Crash-support and real Ladybug tests",
+        "Native binaries and workspace builds",
+        "TypeScript checks"
+      ],
+      "vitest": {
+        "passedFiles": 341,
+        "failedFiles": 2,
+        "skippedFiles": 1,
+        "passedTests": 4592,
+        "failedTests": 2,
+        "skippedTests": 3
+      },
+      "failures": [
+        "V2 actual-recipe fixture had Current disabled",
+        "Exact module inventory omitted new corpus and server modules"
+      ],
+      "status": "failed; do not report full command green"
+    },
+    "scopedRepairs": {
+      "sourceDelta": [
+        "test/instruction-graph-e2e.test.mjs",
+        "desktop/shared/telemetry-module-inventory.mjs",
+        "docs/prd/index.html"
+      ],
+      "runtimeJourney": {
+        "passed": 4,
+        "failed": 0,
+        "details": "V1/V2 startup, pinning, retrieval and reopen; V2 executes shipped publish/detail/finish text with Current enabled"
+      },
+      "telemetryPortfolio": {
+        "filesPassed": 5,
+        "testsPassed": 19,
+        "failed": 0
+      },
+      "reuse": "Unchanged Rust/corpus/harness/client/Eval bytes reuse passed exact-source chapters; independent review.json records scope and limitations"
+    },
+    "remainingCheckChapters": {
+      "secretBoundary": {
+        "passed": 2
+      },
+      "python": {
+        "passed": 100
+      },
+      "ladybugReceipts": "passed",
+      "prdReadability": "passed"
+    },
+    "build": {
+      "command": "npm run build",
+      "exitCode": 0
+    },
+    "evalWeb": {
+      "command": "npm run test:eval-web",
+      "exitCode": 0,
+      "passedChapters": [
+        "interrupted startup: pending native child terminated and profile lock released",
+        "artifact judge: accepted navigation, truthful viewer identity, strict evidence, covered-control rejection and Graph/Esc source restoration; compiled input prompt/control captured under exact occurrence while read-only",
+        "real index human lifecycle: initial graph, finish/export RPCs, process restart, persisted task/read-only review; disconnected actor rejected before candidate creation",
+        "host: real fixture, tab independence, review authority, judge/trace pages, shutdown and restart",
+        "Eval Settings: production Providers, login/cancel/reconnect, model refresh, persisted families/defaults and Harnesses (fake provider; no inference)",
+        "human task: live composer, recorded graph, two completions, finish, read-only review, annotation and export",
+        "Decisions actor revision: dashboard publication/selection without promotion, real graph navigation, constrained text stopping, reopen/export and original revision preserved (fixture inference)",
+        "input revision UI: explicit v10/v7/v4/v2 staging, feedback publication, picker selection, predecessor preserved, no promotion",
+        "endpoint benchmark UI: explicit v11/v8 staging, feedback publication, picker selection, previous revisions preserved and no promotion",
+        "Decisions completion judge UI: exact YAML publication/selection, API and Codex disclosure, production judge stages and reconstruction, reopen/export, native defaults/history preserved, independent/release subscription-only guard (fixture inference)",
+        "actor fill capability: observed DOM type, checkbox/radio/readonly exclusion, text/textarea/range Playwright fill and click retained",
+        "actor input v4: visible rows, additive selection/deselection, normal events, stale state/scope/replacement rejection, legacy isolation, authored minimum-two refusal/refresh/correction, named Send and accepted second response",
+        "settled actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "actor diagnostic capture: actual Playwright archive, errors, recovery decisions, action correlation and failure screenshots; no raw capability",
+        "setup revisions: actual dashboard publication, predecessor/human lineage, selection, explicit promotion, reopen and original run/export unchanged",
+        "judge config file: selected repository YAML, file-only configuration, exact file snapshot and motivating feedback publication",
+        "settled actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "settled actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "independent completion selector: actual form, exact revision/export pin, release locking and unchanged defaults",
+        "evaluator release: file-only completion publication, explicit three-revision release, real form submission with frozen run/export pins and exact stopping evidence; unchanged defaults (fixture inference)",
+        "settled actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch",
+        "actor dispatch race: real renderer redraw requires fresh observation; trusted activation, scroll and document rewrite failures stay terminal",
+        "actor native select: opened-only explicit accessibility, exact enabled unique labels, normal input/change, closed/unowned/stale/presentation/oversized rejection",
+        "actor redraw action: production refresh detached the original and exact replacement activation succeeded",
+        "actor redraw breadcrumb: production refresh detached the original and exact replacement activation succeeded",
+        "calibration: frozen native human label/evidence, tuning membership, pinned actor comparison, real second selected-revision run, independent human scores, export/reopen",
+        "task actor: dashboard configuration, production screenshots/node selection/composer/Send/invoke, three-completion admission, active read-only human grading isolated from actor, export (fixture inference)",
+        "actor input: visible authored input, draft commit and composer Send through real product routes with preserved answer evidence",
+        "working actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch",
+        "current-pointer actor (native input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, same-revision approval/resume screenshots, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+        "working actor scroll: hidden/short availability, real overflow movement, directional boundaries and closed-panel nondispatch",
+        "current-pointer actor (authored input): two real Advances with a live UI answer consumed through the candidate SDK, sealed input unchanged, response-loss reconciliation, one inference/one admission, ordered screenshot/reaction export, fresh settled decision, hidden/zero-width exclusion, capture cancellation/race, same-revision approval/resume screenshots, historical Delivered after navigation/reload, composer exclusion and ordinary navigation pin exclusion (fixture inference)",
+        "judge: isolated context, exact execution/turn readiness, viewport/full capture and restoration",
+        "human persistence: native product restart, task-service reopen, accepted turns and verified route preserved"
+      ]
+    }
+  },
+  "resultingEvidence": {
+    "searchBenchmark": "search-benchmark.json",
+    "sourceReview": "review.json",
+    "liveComparison": "live-comparison.json",
+    "qualityEquivalence": "unproven",
+    "wholeTaskContextSavings": "unproven"
+  },
+  "logs": [
+    {
+      "path": ".relayer/instruction-graph-v2-check.log",
+      "sha256": "5485435721d398fb11ece60cd095e96cd5dc8e1c313fc8268221fe05069ba0fb",
+      "bytes": 2029
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-check-final.log",
+      "sha256": "dcd28891411204016a1a209dcd26ef538ca10a04de1aa842f624ded618410225",
+      "bytes": 154138
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-recipe-journey.log",
+      "sha256": "d03e5d802fed079d1534a5086fd019253d61909a5da30ac37f4c6a9f05eedbf5",
+      "bytes": 1227
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-recipe-diagnosis.log",
+      "sha256": "0bc3d9a4476b17edbdbf88c3e4eb5ebfad7fc9fedef2d68dec13d6b011e16256",
+      "bytes": 2086
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-recipe-final.log",
+      "sha256": "b99565f3ab42d9e77b4083b5872aa400943d241f00bf9225c1b883e6625ae772",
+      "bytes": 237
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-telemetry-repair.log",
+      "sha256": "3198a019381cd8ec1df5d5cadcdc68104b738d86283eefa9c082eb25c6c287bb",
+      "bytes": 237
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-build.log",
+      "sha256": "5bd98fdbad913327b001a3317509a65f71f17d80ef0db3e775ad8ccc94c4a9a0",
+      "bytes": 2040
+    },
+    {
+      "path": ".relayer/instruction-graph-v2-eval-web.log",
+      "sha256": "719a58d189f3439682a77b0b4dcf4056118a97da07893c58245b524397473ae6",
+      "bytes": 8579
+    }
+  ],
+  "live": {
+    "runId": "run-2026-10-20T17-15-46-850Z-7c3b327d",
+    "status": "passed",
+    "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+    "declaredCostCapUsd": 10,
+    "qualityEquivalence": "unproven",
+    "wholeTaskContextSavings": "unproven"
+  }
+}

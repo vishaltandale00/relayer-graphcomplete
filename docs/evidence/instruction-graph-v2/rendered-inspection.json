@@ -1,0 +1,25 @@
+{
+  "method": "Manual read-only product workspace inspection at the same browser viewport",
+  "observations": [
+    "Both inspected follow-ups explain queued tasks while both workers are busy and independent next-task pickup after a worker finishes",
+    "Baseline presents one long visual detail; V2 presents linked sequence nodes",
+    "No formal semantic or presentation score was assigned"
+  ],
+  "screenshots": [
+    {
+      "path": "comparison-result.png",
+      "sha256": "850f771ff45570d39026d1536f62e389e3f386f27d64d684a4fb12d904cb25b7",
+      "bytes": 100858
+    },
+    {
+      "path": "rendered-v2-followup.png",
+      "sha256": "3f880303e8f08953a420f14a65c947d6553549cae4ca4918b4c52b2328088312",
+      "bytes": 71931
+    },
+    {
+      "path": "rendered-control-followup.png",
+      "sha256": "1a188a3ee6735dbe9858a8e01d7ac1b93c3897ef785a2598da9bdc04245f6441",
+      "bytes": 66507
+    }
+  ]
+}

@@ -5,11 +5,15 @@ import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { Server } from "node:http";
 import { connect } from "node:net";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { RelayerGraphClient, type InteractionInput, type ResolvedPersonalPresentation } from "@relayer/graph-client";
 import { HarnessExecutionFailure, HarnessHost, startHarnessHost, type HarnessInvokedCompletion } from "../src/host.js";
 import { nativeExecutionHandle } from "../src/completion-execution.js";
+import { loadHarnessConfiguration } from "../src/configuration.js";
+import { CodexBasicHarness } from "../src/implementations/codex-basic.js";
+import { instructionGraphV2Corpus } from "../src/implementations/instruction-graph-v2.js";
 import type {
   Harness,
   HarnessConfiguration,
@@ -98,6 +102,20 @@ const legacyConfiguration = (configuration: HarnessConfiguration) => {
   const { permissionBindings: _permissionBindings, ...legacy } = configuration;
   return legacy;
 };
+
+function codexInstructionPromotionConfigurations(base: HarnessConfiguration) {
+  const corpus = instructionGraphV2Corpus();
+  const {
+    promptProfile: _profile, instructionGraphVersionKey: _key,
+    instructionGraphDigest: _digest, ...settings
+  } = base.settings;
+  const common = { ...base, name: "codex-basic", implementation: "codex.basic", implementationVersion: 1 };
+  return {
+    prior: { ...common, revision: 18, settings: { ...settings, promptProfile: "layered-navigation-multi-agent-v1" } },
+    current: { ...common, revision: 19, settings: { ...settings, promptProfile: "instruction-graph-v2",
+      instructionGraphVersionKey: corpus.versionKey, instructionGraphDigest: corpus.digest } },
+  } satisfies { prior: HarnessConfiguration; current: HarnessConfiguration };
+}
 
 describe("HarnessHost", () => {
   it.each(["accepted", "failed", "cancelled"])("drains child diagnostics before cleanup on %s completion without changing the outcome", async (outcome) => {
@@ -3836,6 +3854,122 @@ describe("HarnessHost", () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it.each([3, 17, 18])("promotes a saved revision-%i product Codex registration to exact V2 and reopens without native session state", async (revision) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-codex-instruction-promotion-"));
+    const stateFile = join(directory, "sessions.json");
+    const base = await loadHarnessConfiguration(fileURLToPath(new URL("../../../harnesses/codex-basic.yaml", import.meta.url)));
+    const configurations = codexInstructionPromotionConfigurations(base);
+    const prior = { ...configurations.prior, revision };
+    const current = configurations.current;
+    const factory = vi.fn((context: HarnessFactoryContext) => new CodexBasicHarness(context));
+    const makeHost = () => new HarnessHost({ stateFile, controlToken: "control", implementations: { "codex.basic": factory } });
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    let host = makeHost();
+    try {
+      await writeFile(stateFile, JSON.stringify({ schemaVersion: 6, sessions: [{ threadId: 1,
+        configuration: prior, permissionProfileId: "auto", workingDirectory: directory,
+        state: { providerSessionId: "old-native-session" } }] }), { mode: 0o600 });
+      await host.initialize();
+      await host.createSession({ threadId: 1, configuration: current, permissionProfileId: "auto", workingDirectory: directory });
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(factory.mock.calls[0]?.[0].savedState).toEqual({ providerSessionId: "old-native-session" });
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({ schemaVersion: 6, sessions: [{ threadId: 1,
+        configuration: current, permissionProfileId: "auto", workingDirectory: directory, state: {} }] });
+      await host.close();
+      host = makeHost();
+      await host.initialize();
+      await host.createSession({ threadId: 1, configuration: current, permissionProfileId: "auto", workingDirectory: directory });
+      expect(factory).toHaveBeenCalledTimes(2);
+      expect(factory.mock.calls[1]?.[0].savedState).toEqual({});
+      expect(await readFile(stateFile, "utf8")).not.toContain("old-native-session");
+    } finally {
+      warning.mockRestore();
+      await host.close();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unrelated execution, pin, revision and scope changes at the saved instruction-promotion boundary", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-codex-instruction-promotion-reject-"));
+    const stateFile = join(directory, "sessions.json");
+    const base = await loadHarnessConfiguration(fileURLToPath(new URL("../../../harnesses/codex-basic.yaml", import.meta.url)));
+    const { prior, current } = codexInstructionPromotionConfigurations(base);
+    const changed: readonly [string, HarnessConfiguration, HarnessConfiguration, string, string][] = [
+      ["permission binding", prior, { ...current, permissionBindings: { ...current.permissionBindings, auto: { sandboxMode: "danger-full-access" } } }, "auto", directory],
+      ["permission profile", prior, current, "full", directory],
+      ["working directory", prior, current, "auto", join(directory, "elsewhere")],
+      ["reasoning effort", prior, { ...current, settings: { ...current.settings, modelReasoningEffort: "high" } }, "auto", directory],
+      ["native model", prior, { ...current, settings: { ...current.settings, model: "different-native-model" } }, "auto", directory],
+      ["implementation version", prior, { ...current, implementationVersion: 2 }, "auto", directory],
+      ["search authority", prior, { ...current, graphCapabilityProfile: { ...current.graphCapabilityProfile, search: "disabled" } }, "auto", directory],
+      ["recursive Complete grant", prior, { ...current, complete: { agentAuthored: false } }, "auto", directory],
+      ["wrong corpus digest", prior, { ...current, settings: { ...current.settings, instructionGraphDigest: "0".repeat(64) } }, "auto", directory],
+      ["wrong corpus key", prior, { ...current, settings: { ...current.settings, instructionGraphVersionKey: "codex-instruction-graph-v1" } }, "auto", directory],
+      ["experimental identity", prior, { ...current, name: "codex-instruction-graph-v2" }, "auto", directory],
+      ["unknown previous revision", { ...prior, revision: 19 }, current, "auto", directory],
+      ["unknown next revision", prior, { ...current, revision: 20 }, "auto", directory],
+      ["reverse promotion", current, prior, "auto", directory],
+    ];
+    try {
+      for (const [boundary, previous, next, profile, workingDirectory] of changed) {
+        const factory = vi.fn(() => ({ async complete() {}, state: emptyState }));
+        const host = new HarnessHost({ stateFile, controlToken: "control", implementations: { "codex.basic": factory } });
+        try {
+          await writeFile(stateFile, JSON.stringify({ schemaVersion: 6, sessions: [{ threadId: 1,
+            configuration: previous, permissionProfileId: "auto", workingDirectory: directory, state: {} }] }), { mode: 0o600 });
+          await host.initialize();
+          await expect(host.createSession({ threadId: 1, configuration: next,
+            permissionProfileId: profile, workingDirectory }), boundary).rejects.toThrow("already pinned");
+          expect(factory, boundary).not.toHaveBeenCalled();
+          expect(JSON.parse(await readFile(stateFile, "utf8")).sessions[0].configuration, boundary).toEqual(previous);
+        } finally { await host.close(); }
+      }
+    } finally { await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it("keeps an already-live full-prompt Codex session pinned during default promotion", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-codex-live-promotion-reject-"));
+    const stateFile = join(directory, "sessions.json");
+    const { prior, current } = codexInstructionPromotionConfigurations(testConfiguration);
+    const factory = vi.fn(() => ({ async complete() {}, state: emptyState }));
+    const host = new HarnessHost({ stateFile, controlToken: "control", implementations: { "codex.basic": factory } });
+    try {
+      await host.initialize();
+      await host.createSession({ threadId: 1, configuration: prior, permissionProfileId: "auto", workingDirectory: directory });
+      await expect(host.createSession({ threadId: 1, configuration: current,
+        permissionProfileId: "auto", workingDirectory: directory })).rejects.toThrow("already pinned");
+      expect(factory).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(await readFile(stateFile, "utf8")).sessions[0].configuration).toEqual(prior);
+    } finally { await host.close(); await rm(directory, { recursive: true, force: true }); }
+  });
+
+  it.each(["saved", "deferred"])("composes the known schema-v5 high migration with instruction-default promotion (%s)", async (kind) => {
+    const directory = await mkdtemp(join(tmpdir(), "relayer-codex-legacy-instruction-promotion-"));
+    const stateFile = join(directory, "sessions.json");
+    const base: HarnessConfiguration = { ...testConfiguration, name: "codex-basic", implementation: "codex.basic",
+      executionAccessContracts: ["managed-runtime@1", "secret@1"], settings: { modelReasoningEffort: "medium", skipGitRepoCheck: true } };
+    const { current } = codexInstructionPromotionConfigurations(base);
+    const legacy = { ...base, name: "codex-basic-high", revision: 2,
+      settings: { modelReasoningEffort: "high", skipGitRepoCheck: true } };
+    const descriptor = { threadId: 1, configuration: kind === "saved" ? legacy : legacyConfiguration(legacy),
+      ...(kind === "saved" ? { permissionProfileId: "auto" } : {}), workingDirectory: directory,
+      state: { providerSessionId: "existing-legacy-session" } };
+    const serialized = JSON.stringify({ schemaVersion: 5, sessions: kind === "saved" ? [descriptor] : [],
+      ...(kind === "deferred" ? { legacySessions: [descriptor] } : {}) });
+    const factory = vi.fn((_context: HarnessFactoryContext) => ({ async complete() {}, state: emptyState }));
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const host = new HarnessHost({ stateFile, controlToken: "control", implementations: { "codex.basic": factory } });
+    try {
+      await writeFile(stateFile, serialized, { mode: 0o600 });
+      await host.initialize();
+      await host.createSession({ threadId: 1, configuration: current, permissionProfileId: "auto", workingDirectory: directory });
+      expect(factory.mock.calls[0]?.[0].savedState).toEqual({ providerSessionId: "existing-legacy-session" });
+      expect(await readFile(`${stateFile}.v5.backup`, "utf8")).toBe(serialized);
+      expect(JSON.parse(await readFile(stateFile, "utf8"))).toEqual({ schemaVersion: 6, sessions: [{ threadId: 1,
+        configuration: current, permissionProfileId: "auto", workingDirectory: directory, state: {} }] });
+    } finally { warning.mockRestore(); await host.close(); await rm(directory, { recursive: true, force: true }); }
   });
 
   it.each([

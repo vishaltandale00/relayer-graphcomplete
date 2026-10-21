@@ -1,0 +1,218 @@
+{
+  "baseCommit": "5263bf9fc6fc595092be480c174652cb3114693c",
+  "files": [
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "5ec446e055bf787527cb9d773f7815525718097b806d2d86b9c4e706341df048"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "c0069afc198268432ebfa63e172acadce5d6b84968ea6928e3cea460506bef01"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "817f245813fca37d8a0c291788b4905aebf0b1b87315d4f337d59cf28a1fbed5"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "9e5abc3aa57785bd8e66faad6a66470a08e4177d2c4ca4eaa365dad389cff55a"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/instruction_graph.rs",
+      "sha256": "2aaf612f384f2e45fdd372ef4c9871ebf1844424bc690571d9c01d686e5fb76f"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "827c2ab4210d81d1d44f67adfeaafaba1668299a9976e1d58c6df97c2dd693b1"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+      "sha256": "c121a08949e8860528bd738f0db5dacf953367982b98bf019bcca827041c05e0"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0042_instruction_graphs.sql",
+      "sha256": "652f8e3e1fec54f8c647b1490e8340d259dde6e7708b792f0fc70f3c7e85add5"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/instruction_retrieval.rs",
+      "sha256": "d110d4aa00435b696ef98c3906f1bf074d2abb36937c471880c6175a2f7cf03b"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "fa1d51a4151ad9726cb98d447dc63f944ab8308ecf2960055e17d593000757b7"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/graph_search_route.rs",
+      "sha256": "12148f68d71a52465d8716106b90c973b05c3ae61c00f1754092655437d0a074"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/instruction_graph_search_v2.rs",
+      "sha256": "7ba7ee54f57eb691997884bfd9210a79d776bc3378c954e720fcb25ef808f9af"
+    },
+    {
+      "path": "desktop/eval-main/configuration-paths.mjs",
+      "sha256": "453769e769d63fefe7abeac827792b1ed8e3f71e77009e1d5e2f0e12fdfb3c84"
+    },
+    {
+      "path": "desktop/eval-main/eval-service.mjs",
+      "sha256": "9b05ce028f17f0e8a5f714166338dec7af1545ee4a210d1a790821866ea65f7b"
+    },
+    {
+      "path": "desktop/eval-main/graph-timing.mjs",
+      "sha256": "4a87a5ebf22700c55ca23b133695d4364c941dcf52f61cbb626e9d942c433252"
+    },
+    {
+      "path": "desktop/eval-main/index.mjs",
+      "sha256": "85cd58c907df956a877ee2e19de50dbb379de5b95e134387230a6124ac99459a"
+    },
+    {
+      "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+      "sha256": "2416eb0b3465c124e5916b5e7e77406e5da897486065bd7614d0595c9fea1df0"
+    },
+    {
+      "path": "desktop/eval-main/instruction-graph-metrics.mjs",
+      "sha256": "9593154c3c388e44fee234d209a07fe3feec1ace522bd0e7888e94702363353d"
+    },
+    {
+      "path": "desktop/eval-main/review-session.mjs",
+      "sha256": "84534d2939921beb7d9d29e7d7adaa9bdda09ff32d89005f45c116bec5b5b8e4"
+    },
+    {
+      "path": "desktop/eval-renderer/main.js",
+      "sha256": "f4c5b0f75d604587f57c6c3e5a9acf8de19bc6d09ae14a888f65f2a9ca8802d4"
+    },
+    {
+      "path": "desktop/eval-renderer/run-model.js",
+      "sha256": "2590527538289f6e0eb6781d6c9d03ed04bc66989e2d3b48257da1095d0ec024"
+    },
+    {
+      "path": "desktop/main/services/graph-operation-recorder.mjs",
+      "sha256": "bad6bf1ceee3374b859d6987f31107482b5d4aff3712aea4c8c6a5dcceca7be0"
+    },
+    {
+      "path": "desktop/main/services/graphcomplete-runtime.mjs",
+      "sha256": "bac1c35a925d325edfb2421b75b026d201e3d7b371b369cc27774b9c9fe5214b"
+    },
+    {
+      "path": "desktop/packaging/verify-bundled-app-server.mjs",
+      "sha256": "dfe5ac939989392548ad0f0c23c8e7ec3b0b634da40c8d2825a12da6b0b2d9b7"
+    },
+    {
+      "path": "desktop/shared/telemetry-module-inventory.mjs",
+      "sha256": "9e399fc98854377d976753ab3a3402f6e84ad7618e0ba8b10fce861f2f8956cc"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "783b7dc2955dd72f60906d7f223ed9a80ed3723575ff1c68bde1ee0a519f2f5b"
+    },
+    {
+      "path": "docs/decisions/0006-harness-provider-agnostic-product-boundary.md",
+      "sha256": "b36a0bc2e3fd630ba4a5f5f71b6ab662177342bbd4d9406b3bb74d64b91d8c80"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "b42d6b37f056859a14b65e2617427e7dab8f9d92ce3eac99ca9656d8e27f6039"
+    },
+    {
+      "path": "docs/research/task-prompt-size-2026-10-18.md",
+      "sha256": "1d7f094f76283276d752cdafb074277cf6f41e84adea40a1d6fc61d614b39877"
+    },
+    {
+      "path": "fixtures/instruction-graph-v2-search-cases.json",
+      "sha256": "4482a793bc4df99d0ee8346ef7dd40b65387ef0f5cf2d2c10cd5815944187d7b"
+    },
+    {
+      "path": "fixtures/instruction-graph-v2.json",
+      "sha256": "b55b45998ff65f948ac56e4c083d67a1434b5a9a9fd1054d551206edab6286d3"
+    },
+    {
+      "path": "harnesses/codex-basic.yaml",
+      "sha256": "5502baeaaf7b54b4ca4172c60e5db8dc0ff6a34ee8fade27b0eec18351299cb1"
+    },
+    {
+      "path": "harnesses/codex-full-prompt-control.yaml",
+      "sha256": "a91f65cb6977881c2346eed841cc2a121d3b2d9e143c58d0cc8b1b6cab544d6d"
+    },
+    {
+      "path": "harnesses/codex-instruction-graph-v1.yaml",
+      "sha256": "f2acdd2e552c8785ac39c78df642202c9fa97874f28e2f79fe434bae2ce08b98"
+    },
+    {
+      "path": "harnesses/codex-instruction-graph-v2.yaml",
+      "sha256": "3def9b5328edd23399c91cf1a204b9d017bdcdde7f96392d60617a70dcd4080a"
+    },
+    {
+      "path": "packages/graph-client/src/client.ts",
+      "sha256": "6cf8bc81a42a1c4ca3e818b8753c503671845e3d522210d918d8544421d3da95"
+    },
+    {
+      "path": "packages/graph-client/src/types.ts",
+      "sha256": "88bca9ae8b84cd6841d3841ffed7661a9c747f5fefe4cbe6744771342683e343"
+    },
+    {
+      "path": "packages/graph-client/test/instruction-graph.test.ts",
+      "sha256": "9cc4e4b960d1d6dc4fd71d81623cfd887fd52ee2046ae399eced64256b0ff4de"
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "17bbdecf3222b0ad4ff3fd0aba4a07789074a871de91c683e56fb4eb6920a8d8"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "a5fe2d81faf1afb5ff0304763ac10bc045d93783e07b84b900a35394a379e613"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/instruction-graph-v2.ts",
+      "sha256": "decd354c4e29c61463d541feab62f7cd2cdf7ba0a9ae20c81e49eafc0cdbd7fb"
+    },
+    {
+      "path": "packages/harness-host/src/types.ts",
+      "sha256": "4065382318f890df81a5d799da9222ed39ae2720946055c8336f0d2e079481e4"
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "625e87644524474399b0fc4f34df8c50992eb3f6b64c519e9f54423f7a113e27"
+    },
+    {
+      "path": "packages/harness-host/test/configuration.test.ts",
+      "sha256": "b5177fd74b10106b217295079cbfebda6fa7f4343396d3a105875aebdb3d3898"
+    },
+    {
+      "path": "packages/harness-host/test/host-legacy-continuity.test.ts",
+      "sha256": "a21c22266ddcd4fb545ac5c9706184c95449d8febbf91c7e4c33c009e8d06158"
+    },
+    {
+      "path": "packages/harness-host/test/host.test.ts",
+      "sha256": "ca95147856425547cf9bb25dcf7c7f6a6fbc6926fcceb1b30f6ae37f15eb0799"
+    },
+    {
+      "path": "test/desktop-shell.test.mjs",
+      "sha256": "43991234161ca36b7ba182816a21bca5c190d2cb86f8bb1ecbeef1b11e387ceb"
+    },
+    {
+      "path": "test/eval-configuration-paths.test.mjs",
+      "sha256": "99c3b5da59ffc3326e58010700b7863dee65943e5b93037f670f487f342fda34"
+    },
+    {
+      "path": "test/eval-graph-timing-directory.test.mjs",
+      "sha256": "3ced92d877db02c565429556ce0ce87005f4040b323702fdbe713fbc88f87f07"
+    },
+    {
+      "path": "test/eval-instruction-graph.test.mjs",
+      "sha256": "e26098f45fe349e29fb28c22ce2b5614c2ec8a778d1f6268c088ef0143d9aef5"
+    },
+    {
+      "path": "test/graph-operation-recorder.test.mjs",
+      "sha256": "0b4a795ee06b84cefd011cfe1f80a8a1811a7dec36f410c93ca88e566b320f61"
+    },
+    {
+      "path": "test/instruction-graph-e2e.test.mjs",
+      "sha256": "6bd46737def0e37cf4a1b8e6e7e95fc8e2c64b6801b2617b876d1c7b62bb6deb"
+    },
+    {
+      "path": "test/review-session.test.mjs",
+      "sha256": "6d52ae344db53fbcc0f601c5324f3129bc9d78b8a2cab1147b587556a03ae808"
+    }
+  ],
+  "digest": "4473cfab8d8813e2aeb2db8d49114f2492e59ccbc73630e0c0f203c0182911e1"
+}

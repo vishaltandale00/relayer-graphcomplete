@@ -260,12 +260,12 @@ async function start() {
     selectModel: (harnessId) => providerSetup.select(harnessId),
     selectPrimeModel: (harnessId) => providerSetup.select(harnessId),
     primeModelAvailability: (harnessId) => providerSetup.availability(harnessId),
-    validateLiveCredential: async (configuration, credentialReference) => {
+    validateLiveCredential: async (configuration, credentialReference, selection = {}) => {
       let selectedRoute;
       let lease;
       const validate = createLiveCredentialValidator({
-        resolveModelRoute: async (candidate) => {
-          selectedRoute = await resolveLiveModelRoute(candidate);
+        resolveModelRoute: async (candidate, routeSelection) => {
+          selectedRoute = await resolveLiveModelRoute(candidate, routeSelection);
           return selectedRoute;
         },
         resolveCodexRuntime: async () => {
@@ -276,7 +276,7 @@ async function start() {
           return { ...await providerSetup.resolveCodexRuntime(), environment: access.environment };
         },
       });
-      try { return await validate(configuration, credentialReference); }
+      try { return await validate(configuration, credentialReference, selection); }
       finally { await lease?.release(); }
     },
     conversationImportEnabled: true,

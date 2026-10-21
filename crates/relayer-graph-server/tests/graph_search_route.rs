@@ -1330,3 +1330,91 @@ async fn dropping_an_in_flight_http_request_cancels_its_job_and_reuses_the_store
     .expect("the cancelled Ladybug job did not release the shared store");
     assert_eq!(reused.status(), StatusCode::OK);
 }
+
+#[tokio::test]
+async fn instruction_graph_search_uses_real_engine_and_only_the_exact_pinned_corpus() {
+    use sha2::{Digest, Sha256};
+    let fixture = fixture().await;
+    let make_definition = |detail: &str| {
+        let modules = vec![relayer_graph_core::InstructionModuleDefinition {
+            key: "authoring".into(),
+            title: "Authoring".into(),
+            detail: detail.into(),
+            prerequisites: vec![],
+        }];
+        relayer_graph_core::InstructionGraphDefinition {
+            retrieval_contract_version: 1,
+            digest: format!(
+                "{:x}",
+                Sha256::digest(serde_json::to_vec(&modules).unwrap())
+            ),
+            modules,
+        }
+    };
+    let pinned = fixture
+        .graph
+        .ensure_instruction_graph("instructions-v1", make_definition("Pinned instructions"))
+        .await
+        .unwrap();
+    let other = fixture
+        .graph
+        .ensure_instruction_graph("instructions-v2", make_definition("Other instructions"))
+        .await
+        .unwrap();
+    let task = interaction(&fixture.app, 21).await;
+    let disabled = interaction_with_profile(&fixture.app, 22, Some("disabled")).await;
+    fixture
+        .graph
+        .attach_instruction_graph(task.node.id, "instructions-v1", &pinned.digest)
+        .await
+        .unwrap();
+    fixture
+        .graph
+        .attach_instruction_graph(disabled.node.id, "instructions-v1", &pinned.digest)
+        .await
+        .unwrap();
+    let query = json!({"queryContractVersion":1,"query":"MATCH (n:Content) WHERE n.title = $title RETURN n.title AS title, n.detail AS detail","parameters":{"title":{"type":"string","value":"Authoring"}},"budget":{"resultRows":8}});
+    let response = post(
+        &fixture.app,
+        "/api/graph/instruction-graph/search",
+        Some(&task.graph_token),
+        Body::from(query.to_string()),
+    )
+    .await;
+    let (status, body) = json_response(response).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["rows"],
+        json!([[{"type":"string","value":"Authoring"},{"type":"string","value":"Pinned instructions"}]])
+    );
+    assert_eq!(body["truncated"], false);
+    assert_ne!(pinned.modules[0].node_id, other.modules[0].node_id);
+    let denied = post(
+        &fixture.app,
+        "/api/graph/instruction-graph/search",
+        Some(&disabled.graph_token),
+        Body::from(query.to_string()),
+    )
+    .await;
+    let (status, body) = json_response(denied).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert_eq!(body["error"]["code"], "capability_not_granted");
+    for target in [
+        json!({"scope":"thread","id":pinned.thread_id}),
+        json!({"scope":"thread","id":other.thread_id}),
+        json!({"scope":"thread","id":21}),
+    ] {
+        let mut request = query.clone();
+        request["target"] = target;
+        let denied = post(
+            &fixture.app,
+            "/api/graph/instruction-graph/search",
+            Some(&task.graph_token),
+            Body::from(request.to_string()),
+        )
+        .await;
+        let (status, body) = json_response(denied).await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "{body}");
+        assert_eq!(body["error"]["code"], "invalid_request");
+    }
+}

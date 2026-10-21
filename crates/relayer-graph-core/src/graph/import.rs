@@ -393,6 +393,13 @@ impl crate::GraphDatabase {
                 "The personal-presentation profile thread cannot be used for conversation import.",
             ));
         }
+        if (crate::INSTRUCTION_GRAPH_THREAD_MIN..=crate::INSTRUCTION_GRAPH_THREAD_MAX)
+            .contains(&input.thread_id.value())
+        {
+            return Err(GraphError::Forbidden(
+                "Instruction graph threads cannot be imported.".into(),
+            ));
+        }
         if input.import_id.trim().is_empty() || input.source_sha256.trim().is_empty() {
             return Err(GraphError::Internal(
                 "graph import identity is empty".into(),

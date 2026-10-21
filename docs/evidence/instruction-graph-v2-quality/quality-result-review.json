@@ -1,0 +1,1624 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/eval_comparison",
+  "scope": "Independent read-only audit of matched quality retry pins, artifact bytes, nested rendered evidence, coverage, ordered ratings and observed inference receipts. No inference or UI mutation.",
+  "runId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "qualityResultSha256": "8bb0758f2ec87123702e0781321e913fc77d200381f8f1935e2bee309903f4da",
+  "sourceSnapshotSha256": "92facce8ae4e588199bb47cb26e848917c36acd649c6214185ccecda297e241f",
+  "benchmarkPlanSha256": "795540980cf7494c88916ed4084a4382d9b6ac28ab961dd40b7b8d671106f098",
+  "bundle": {
+    "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/bundle.json",
+    "sha256": "991ddbf6ea164b24a43e8f7d689c78d600394f2f8acc680e511d3c8c35b5b877",
+    "bytes": 884563
+  },
+  "checks": [
+    {
+      "check": "Exact retry and final source digest",
+      "passed": true
+    },
+    {
+      "check": "All 44 source snapshot hashes current",
+      "passed": true
+    },
+    {
+      "check": "Bundle bytes bound",
+      "passed": true
+    },
+    {
+      "check": "Final run status",
+      "passed": true
+    },
+    {
+      "check": "Two arms and four accepted roots",
+      "passed": true
+    },
+    {
+      "check": "Authorization and judge setup equal saved run",
+      "passed": true
+    },
+    {
+      "check": "Four roots/children and declared ten dollar authorization",
+      "passed": true
+    },
+    {
+      "check": "Frozen judge digest",
+      "passed": true
+    },
+    {
+      "check": "Candidate config bytes frozen",
+      "passed": true
+    },
+    {
+      "check": "Bundle retry and saved comparison identity",
+      "passed": true
+    },
+    {
+      "check": "Identical controls including medium reasoning effort",
+      "passed": true
+    },
+    {
+      "check": "codex-basic configuration/model pin",
+      "passed": true
+    },
+    {
+      "check": "codex-basic model resolution",
+      "passed": true
+    },
+    {
+      "check": "turn 18 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 18 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 18 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 18 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 18 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 18 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 18 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 18 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 18 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 18 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 18 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 18 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 18 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 18 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 18 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 18 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 18 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 18 screenshot shot-13c8e896-3a73-4207-be10-71a090710743 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 18 screenshot shot-7e03942a-7b28-4cc9-a7f2-0b054761530a canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 18 screenshot shot-abb8ded4-550c-4673-9a09-a620de9d9d0c canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 18 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 18 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "turn 19 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 19 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 19 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 19 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 19 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 19 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 19 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 19 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 19 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 19 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 19 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 19 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 19 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 19 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 19 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 19 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 19 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 19 screenshot shot-12cfc39d-b9e5-4f05-bcbf-2ff0a63e1929 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 19 screenshot shot-16c19bb8-85e3-4bee-946e-1c01252594e4 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 19 screenshot shot-b66ec49e-4d90-4343-a149-d6660c00d136 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 19 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 19 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "codex-basic production ordered rating means",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 configuration/model pin",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 model resolution",
+      "passed": true
+    },
+    {
+      "check": "turn 20 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 20 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 20 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 20 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 20 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 20 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 20 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 20 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 20 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 20 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 20 exact corpus delivery",
+      "passed": true
+    },
+    {
+      "check": "turn 20 reasoned read/replay/duplicate metrics recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 20 retrieval reason receipts retained",
+      "passed": true
+    },
+    {
+      "check": "turn 20 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 20 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 20 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 20 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 20 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 20 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 20 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-15a569e8-68d8-4b47-979c-2fa97a89c475 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-160fbc83-252a-4c5c-867e-24fbc00b2aa0 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-2d707e45-20ff-4fe2-bd52-fdaedc7d072a canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-38f61dee-7f14-427a-9e92-b7a11060159e canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-72f9504f-3aed-4910-b08b-29d9062e796f canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-ac76b888-2925-48f7-a9c7-a47ce4bde9e2 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-f20207b5-b356-433e-9be8-0ff9bff5613a canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 screenshot shot-fff91443-6c43-4d08-a2d2-e38ac66162b1 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 20 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 20 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "turn 21 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 21 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 21 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 21 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 21 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 21 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 21 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 21 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 21 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 21 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 21 exact corpus delivery",
+      "passed": true
+    },
+    {
+      "check": "turn 21 reasoned read/replay/duplicate metrics recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 21 retrieval reason receipts retained",
+      "passed": true
+    },
+    {
+      "check": "turn 21 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 21 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 21 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 21 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 21 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 21 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 21 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-1085e61e-2bdc-4aba-9a13-7986166531ba canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-1f7336a8-0e98-4ed5-a506-f414533034cc canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-3b4ab7a4-588d-4271-bddd-003dcb983e91 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-5b11f483-2d1d-480f-bd16-69b22d6bea0d canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-64bf3683-2a73-4743-ab54-e11dd4c358a1 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-91613037-ed59-4f62-b2d0-dc04801c28ac canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-b9327496-caab-4902-a24c-5498aafc4620 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-c2d07458-ec71-4d9f-8e44-01fc9183024d canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-f238bbc2-c2c0-4e35-bf39-402d335f6249 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 screenshot shot-fdb9e7d2-6103-45ba-b1ff-22e61faa3fa5 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 21 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 21 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 production ordered rating means",
+      "passed": true
+    },
+    {
+      "check": "Four native usage receipts have distinct native thread IDs",
+      "passed": true
+    },
+    {
+      "check": "All manually viewed sample files remain hash bound",
+      "passed": true
+    },
+    {
+      "check": "codex-basic candidate-metrics projection",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 candidate-metrics projection",
+      "passed": true
+    },
+    {
+      "check": "Aggregate V2 retrieval body/metadata accounting",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample baseline-first-turn.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample baseline-followup.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample v2-first-turn.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample v2-followup.png exact root screenshot",
+      "passed": true
+    }
+  ],
+  "verdict": "pass",
+  "totals": {
+    "checks": 132,
+    "passed": 132,
+    "screenshots": 24,
+    "tiles": 29,
+    "judgeArtifactFiles": 77,
+    "nestedScreenshotCitations": 805,
+    "manuallyViewedTiles": 14
+  },
+  "pixelSamples": [
+    {
+      "interactionId": 18,
+      "screenshotId": "shot-7e03942a-7b28-4cc9-a7f2-0b054761530a",
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/18/simulated-user/d670304c-f616-42aa-b389-2f87b0b8b775/screenshots/shot-7e03942a-7b28-4cc9-a7f2-0b054761530a/metadata.json",
+      "metadataSha256": "e4be0d821380ae8b693060fdf1f815b424e89e22772482dbe4482aba3077dd15",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/18/simulated-user/d670304c-f616-42aa-b389-2f87b0b8b775/screenshots/shot-7e03942a-7b28-4cc9-a7f2-0b054761530a/shot-7e03942a-7b28-4cc9-a7f2-0b054761530a-001.png",
+      "tileSha256": "5c07be0c8154cdab7d5315c15ebe671743c034c28b493474ce6f2e7dd0d18e48",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "141",
+      "layerId": "71",
+      "visualObservation": "Full node-detail pixels show the authored task-flow article, worker/queue/store diagram, busy-worker scenario and scope text; no graph canvas is substituted.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 18,
+      "screenshotId": "shot-abb8ded4-550c-4673-9a09-a620de9d9d0c",
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/18/simulated-user/d670304c-f616-42aa-b389-2f87b0b8b775/screenshots/shot-abb8ded4-550c-4673-9a09-a620de9d9d0c/metadata.json",
+      "metadataSha256": "69287df4e04bab8f073593610e289d25c6ab15530b61a1558d789a84fb90136d",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/18/simulated-user/d670304c-f616-42aa-b389-2f87b0b8b775/screenshots/shot-abb8ded4-550c-4673-9a09-a620de9d9d0c/shot-abb8ded4-550c-4673-9a09-a620de9d9d0c-001.png",
+      "tileSha256": "6c5523b32d49bd1eb842228c57d7c3976605e091ca96ce918812ab93ed004a27",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "layer-viewport"
+      },
+      "mode": "full",
+      "selectedNodeId": "141",
+      "layerId": "71",
+      "visualObservation": "Full layer-viewport pixels show the graph canvas with one selected task-flow node, zoom/Fit controls and no node-detail article.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 19,
+      "screenshotId": "shot-16c19bb8-85e3-4bee-946e-1c01252594e4",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/19/simulated-user/ef7160ae-4d87-41b1-b469-b1df1342fc4d/screenshots/shot-16c19bb8-85e3-4bee-946e-1c01252594e4/metadata.json",
+      "metadataSha256": "853007010085171432e5affece66c0ad1cd30bd5db3aa2a8a59dca2f7e125fec",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/19/simulated-user/ef7160ae-4d87-41b1-b469-b1df1342fc4d/screenshots/shot-16c19bb8-85e3-4bee-946e-1c01252594e4/shot-16c19bb8-85e3-4bee-946e-1c01252594e4-001.png",
+      "tileSha256": "0c95f86d9f01ca8d2dad7cbf6ba86854115619b7947f9b8497e585809f0340f0",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "143",
+      "layerId": "72",
+      "visualObservation": "Tile contains the authored follow-up worker-availability article, scenario table and Earlier explanation control. Both overlapping tiles remain node-detail pixels rather than graph-canvas substitutes.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 19,
+      "screenshotId": "shot-16c19bb8-85e3-4bee-946e-1c01252594e4",
+      "tileIndex": 1,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/19/simulated-user/ef7160ae-4d87-41b1-b469-b1df1342fc4d/screenshots/shot-16c19bb8-85e3-4bee-946e-1c01252594e4/metadata.json",
+      "metadataSha256": "853007010085171432e5affece66c0ad1cd30bd5db3aa2a8a59dca2f7e125fec",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/8b29009f-fe7f-43bd-bdcb-832e4228bf0a/turns/19/simulated-user/ef7160ae-4d87-41b1-b469-b1df1342fc4d/screenshots/shot-16c19bb8-85e3-4bee-946e-1c01252594e4/shot-16c19bb8-85e3-4bee-946e-1c01252594e4-002.png",
+      "tileSha256": "3b38b5eb00d77d092f7c7dd70c9bfdffbfb8f0f464e05fb8dabc7700aa79b30b",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "143",
+      "layerId": "72",
+      "visualObservation": "Tile contains the authored follow-up worker-availability article, scenario table and Earlier explanation control. Both overlapping tiles remain node-detail pixels rather than graph-canvas substitutes.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 20,
+      "screenshotId": "shot-160fbc83-252a-4c5c-867e-24fbc00b2aa0",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-160fbc83-252a-4c5c-867e-24fbc00b2aa0/metadata.json",
+      "metadataSha256": "e272b3eabbdc8849791f471dbee0a083fe148481b4e7d387b38eb35641c3a6d3",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-160fbc83-252a-4c5c-867e-24fbc00b2aa0/shot-160fbc83-252a-4c5c-867e-24fbc00b2aa0-001.png",
+      "tileSha256": "18d641062e8af2badbfa2a5e6a717b767b2c3d8aa5a39c21bd5369e9fd3e65fc",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "145",
+      "layerId": "73",
+      "visualObservation": "The full node-detail image contains only the selected Incoming queue authored detail, with task-flow and busy-worker text; it is not the graph canvas.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 20,
+      "screenshotId": "shot-ac76b888-2925-48f7-a9c7-a47ce4bde9e2",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-ac76b888-2925-48f7-a9c7-a47ce4bde9e2/metadata.json",
+      "metadataSha256": "4693e40cddb7fd411bbbd50be5c39734eb7bfb144104dfd9300ac7f841fd3205",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-ac76b888-2925-48f7-a9c7-a47ce4bde9e2/shot-ac76b888-2925-48f7-a9c7-a47ce4bde9e2-001.png",
+      "tileSha256": "27f8a2a9ce4485a229b10ad69a7ee5fe183e79f89430f7b636d97ddc0d85067a",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "mode": "visible",
+      "selectedNodeId": "145",
+      "layerId": "73",
+      "visualObservation": "The viewport image contains the read-only Eval workspace, four-node task graph and the same selected Incoming queue detail. Selection title agrees with node-detail sample.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 20,
+      "screenshotId": "shot-72f9504f-3aed-4910-b08b-29d9062e796f",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-72f9504f-3aed-4910-b08b-29d9062e796f/metadata.json",
+      "metadataSha256": "bae2b12b82b9ea4564fd2b7eb2e08da523a8f7b81ae2c0dab0d21c630ea4bdef",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-72f9504f-3aed-4910-b08b-29d9062e796f/shot-72f9504f-3aed-4910-b08b-29d9062e796f-001.png",
+      "tileSha256": "638e9c24e2cfffd4ad979193480030e13f198571cb42438c7296305993981228",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "146",
+      "layerId": "73",
+      "visualObservation": "Full detail is Worker 1: queued task processing, saving a result, and independent busy-worker behavior. No graph canvas replaces the detail.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 20,
+      "screenshotId": "shot-fff91443-6c43-4d08-a2d2-e38ac66162b1",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-fff91443-6c43-4d08-a2d2-e38ac66162b1/metadata.json",
+      "metadataSha256": "ce50975868da9f40e55f73f3738cad4241b0f5679d489965fd38b37289f6bcae",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-fff91443-6c43-4d08-a2d2-e38ac66162b1/shot-fff91443-6c43-4d08-a2d2-e38ac66162b1-001.png",
+      "tileSha256": "124bb390211bd667e326bddd9d1ee525c228d2507758aae4efffdc209da6bf21",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "147",
+      "layerId": "73",
+      "visualObservation": "Full detail is Worker 2: independent processing, maximum two running tasks and queue backlog. No graph canvas replaces the detail.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 20,
+      "screenshotId": "shot-2d707e45-20ff-4fe2-bd52-fdaedc7d072a",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-2d707e45-20ff-4fe2-bd52-fdaedc7d072a/metadata.json",
+      "metadataSha256": "17753f1363afb64881785751a93ed4293a79804c25e219ae6ecc6342b82eddb9",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/20/simulated-user/1c3ccda4-74de-47a3-b57f-e9965021953a/screenshots/shot-2d707e45-20ff-4fe2-bd52-fdaedc7d072a/shot-2d707e45-20ff-4fe2-bd52-fdaedc7d072a-001.png",
+      "tileSha256": "01a94c249a79ad4b4e4cf9087489ce5df2bb60da402f4f7b9ab28739dc6bfdcf",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "148",
+      "layerId": "73",
+      "visualObservation": "Full detail is Results store: completed outcomes and shared task-flow context. No graph canvas replaces the detail.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 21,
+      "screenshotId": "shot-3b4ab7a4-588d-4271-bddd-003dcb983e91",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-3b4ab7a4-588d-4271-bddd-003dcb983e91/metadata.json",
+      "metadataSha256": "0146911b12c929847fffd69bdc7f783edcd59fa2db086e3c571bf63c916062ad",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-3b4ab7a4-588d-4271-bddd-003dcb983e91/shot-3b4ab7a4-588d-4271-bddd-003dcb983e91-001.png",
+      "tileSha256": "ae53df43c0f042be493b92e1c349fd8816df065a02aaaec33be8d2c15a87ef60",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "150",
+      "layerId": "74",
+      "visualObservation": "Two overlapping full-detail tiles preserve the follow-up article: busy workers, immediately freed worker, worked example, assumptions and Earlier system diagram control.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 21,
+      "screenshotId": "shot-3b4ab7a4-588d-4271-bddd-003dcb983e91",
+      "tileIndex": 1,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-3b4ab7a4-588d-4271-bddd-003dcb983e91/metadata.json",
+      "metadataSha256": "0146911b12c929847fffd69bdc7f783edcd59fa2db086e3c571bf63c916062ad",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-3b4ab7a4-588d-4271-bddd-003dcb983e91/shot-3b4ab7a4-588d-4271-bddd-003dcb983e91-002.png",
+      "tileSha256": "4505f00a88a99452201de5363209e16860997e10d9d7103de9cc094a10505c0a",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "150",
+      "layerId": "74",
+      "visualObservation": "Two overlapping full-detail tiles preserve the follow-up article: busy workers, immediately freed worker, worked example, assumptions and Earlier system diagram control.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 21,
+      "screenshotId": "shot-5b11f483-2d1d-480f-bd16-69b22d6bea0d",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-5b11f483-2d1d-480f-bd16-69b22d6bea0d/metadata.json",
+      "metadataSha256": "faff73aa0166f28af1f1a656286e4cdf321e71298125a49e317a45f44fcccf9f",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-5b11f483-2d1d-480f-bd16-69b22d6bea0d/shot-5b11f483-2d1d-480f-bd16-69b22d6bea0d-001.png",
+      "tileSha256": "6b4dbf1f38dfa00ac208acc9ed291e66bf32bae471e90a8111e2e8f80c380a77",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "mode": "visible",
+      "selectedNodeId": "150",
+      "layerId": "74",
+      "visualObservation": "Viewport shows the selected follow-up node and matching worker-release article; graph and detail targets remain distinct.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 21,
+      "screenshotId": "shot-64bf3683-2a73-4743-ab54-e11dd4c358a1",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-64bf3683-2a73-4743-ab54-e11dd4c358a1/metadata.json",
+      "metadataSha256": "d758b7e5ef6e023870d7682b286a9400318fb7b4534aa3244d501d3f877a5091",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-64bf3683-2a73-4743-ab54-e11dd4c358a1/shot-64bf3683-2a73-4743-ab54-e11dd4c358a1-001.png",
+      "tileSha256": "00b399240d01e4761e7436f30490fe00d6a331c75e3b57394ed98ca8b396f5a6",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "mode": "visible",
+      "selectedNodeId": "145",
+      "layerId": "73",
+      "visualObservation": "Traversed earlier-diagram viewport shows the original four-node queue/workers/results layer73 and matching selected queue node145.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 21,
+      "screenshotId": "shot-1f7336a8-0e98-4ed5-a506-f414533034cc",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-1f7336a8-0e98-4ed5-a506-f414533034cc/metadata.json",
+      "metadataSha256": "876c85cca65ebf286a76696318c0326b0bedaf48d6bc3bcddc756d1d7c7d0fd5",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T19-15-56-658Z-4b80c41a/executions/255d51f4-5312-4a39-90b3-2fcc23f25684/turns/21/simulated-user/5ede6a5d-8e41-436c-8758-39b79326ce8a/screenshots/shot-1f7336a8-0e98-4ed5-a506-f414533034cc/shot-1f7336a8-0e98-4ed5-a506-f414533034cc-001.png",
+      "tileSha256": "ae53df43c0f042be493b92e1c349fd8816df065a02aaaec33be8d2c15a87ef60",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "150",
+      "layerId": "74",
+      "visualObservation": "Repeated full-detail capture after other inspections retains the correct follow-up worker-release article, rather than earlier-diagram canvas pixels.",
+      "targetPixelMatch": true
+    }
+  ],
+  "arms": [
+    {
+      "harness": "codex-basic",
+      "executionId": "8b29009f-fe7f-43bd-bdcb-832e4228bf0a",
+      "semanticChildCount": 0,
+      "turns": [
+        {
+          "interactionId": 18,
+          "scores": {
+            "answer_quality": 5,
+            "recursive_coherence": 7,
+            "navigation_value": 3,
+            "presentation_quality": 4,
+            "follow_up_progress": null
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "actions": {
+              "required": 0,
+              "reviewed": 0,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0,
+              "authoredActions": 0,
+              "missingOpportunities": 0,
+              "correctStops": 1
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 3,
+          "tiles": 3,
+          "nativeThreadId": "01a15abd-eb1a-7b60-b940-c5ada5731576",
+          "nativeUsageUpdateCount": 5,
+          "observedNativeSessionCounters": {
+            "inputTokens": 187050,
+            "cachedInputTokens": 157312,
+            "outputTokens": 2255,
+            "reasoningOutputTokens": 111,
+            "totalTokens": 189305
+          },
+          "judgeUsage": {
+            "input_tokens": 184521,
+            "cached_input_tokens": 155776,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 6232,
+            "reasoning_output_tokens": 1283
+          },
+          "initialPromptCharacters": 79563,
+          "initialPromptUtf8Bytes": 79567,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 0,
+            "reasonCoverage": "unknown",
+            "readProtocol": null,
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79563,
+              "actualPromptUtf8Bytes": 79567,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "reasonCoverage": "unknown",
+                "readProtocol": null,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 187050,
+                  "cachedInputTokens": 157312,
+                  "outputTokens": 2255,
+                  "reasoningOutputTokens": 111,
+                  "totalTokens": 189305
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T19:15:58.045Z",
+            "firstGraphAt": "2026-10-20T19:16:41.373Z",
+            "acceptedAt": "2026-10-20T19:16:49.943Z",
+            "firstGraphSeconds": 43.3,
+            "acceptedSeconds": 51.9,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 19,
+          "scores": {
+            "answer_quality": 5,
+            "recursive_coherence": 7,
+            "navigation_value": 5,
+            "presentation_quality": 5,
+            "follow_up_progress": 8
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "actions": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 2,
+              "reviewed": 2,
+              "missing": 0,
+              "authoredActions": 1,
+              "missingOpportunities": 0,
+              "correctStops": 1
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 3,
+          "tiles": 4,
+          "nativeThreadId": "01a15abe-d445-7270-a1b8-dc5296bb9eed",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 228088,
+            "cachedInputTokens": 196992,
+            "outputTokens": 2562,
+            "reasoningOutputTokens": 89,
+            "totalTokens": 230650
+          },
+          "judgeUsage": {
+            "input_tokens": 340879,
+            "cached_input_tokens": 310144,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 12167,
+            "reasoning_output_tokens": 1031
+          },
+          "initialPromptCharacters": 79820,
+          "initialPromptUtf8Bytes": 79824,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 0,
+            "reasonCoverage": "unknown",
+            "readProtocol": null,
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79820,
+              "actualPromptUtf8Bytes": 79824,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "reasonCoverage": "unknown",
+                "readProtocol": null,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 228088,
+                  "cachedInputTokens": 196992,
+                  "outputTokens": 2562,
+                  "reasoningOutputTokens": 89,
+                  "totalTokens": 230650
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T19:16:57.860Z",
+            "firstGraphAt": "2026-10-20T19:17:45.226Z",
+            "acceptedAt": "2026-10-20T19:17:53.044Z",
+            "firstGraphSeconds": 47.4,
+            "acceptedSeconds": 55.2,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 1,
+              "failed": 1
+            }
+          }
+        }
+      ],
+      "observedCandidateSessionInputTokens": 415138,
+      "observedCandidateSessionOutputTokens": 4817,
+      "initialPromptCharacters": 159383,
+      "presentationScore": 4.5,
+      "comprehensionScore": 5
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "executionId": "255d51f4-5312-4a39-90b3-2fcc23f25684",
+      "semanticChildCount": 0,
+      "turns": [
+        {
+          "interactionId": 20,
+          "scores": {
+            "answer_quality": 5,
+            "recursive_coherence": 5,
+            "navigation_value": 4,
+            "presentation_quality": 4,
+            "follow_up_progress": null
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 4,
+              "reviewed": 4,
+              "missing": 0
+            },
+            "actions": {
+              "required": 0,
+              "reviewed": 0,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 4,
+              "reviewed": 4,
+              "missing": 0,
+              "authoredActions": 0,
+              "missingOpportunities": 1,
+              "correctStops": 3
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 8,
+          "tiles": 8,
+          "nativeThreadId": "01a15ac3-9f9f-7143-9752-02fc9bde6dd4",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 135106,
+            "cachedInputTokens": 120192,
+            "outputTokens": 1799,
+            "reasoningOutputTokens": 27,
+            "totalTokens": 136905
+          },
+          "judgeUsage": {
+            "input_tokens": 480091,
+            "cached_input_tokens": 426112,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 17874,
+            "reasoning_output_tokens": 3628
+          },
+          "initialPromptCharacters": 15953,
+          "initialPromptUtf8Bytes": 15953,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 7,
+            "reasonCoverage": "complete",
+            "readProtocol": 2,
+            "uniqueModulesRead": 7,
+            "uniqueReadRequests": 2,
+            "firstBodyResponses": 7,
+            "replayBodyResponses": 0,
+            "rereadBodyResponses": 0,
+            "duplicateMetadataResponses": 0,
+            "returnedBodyCharacters": 7528,
+            "returnedBodyBytes": 7530,
+            "readReasons": [
+              {
+                "requestKey": "initial-authoring",
+                "replayed": false,
+                "sequence": 48,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Explain the task flow with visual node details and meaningful relationships"
+                },
+                "entries": [
+                  {
+                    "nodeId": 95,
+                    "key": "completion-authority",
+                    "delivery": "body",
+                    "bodyCharacters": 889,
+                    "bodyBytes": 889
+                  },
+                  {
+                    "nodeId": 97,
+                    "key": "publish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 2025,
+                    "bodyBytes": 2025
+                  },
+                  {
+                    "nodeId": 99,
+                    "key": "detail-basic",
+                    "delivery": "body",
+                    "bodyCharacters": 1048,
+                    "bodyBytes": 1048
+                  },
+                  {
+                    "nodeId": 101,
+                    "key": "detail-theme",
+                    "delivery": "body",
+                    "bodyCharacters": 716,
+                    "bodyBytes": 716
+                  },
+                  {
+                    "nodeId": 103,
+                    "key": "layout",
+                    "delivery": "body",
+                    "bodyCharacters": 1231,
+                    "bodyBytes": 1233
+                  }
+                ]
+              },
+              {
+                "requestKey": "finish-preview",
+                "replayed": false,
+                "sequence": 49,
+                "reason": {
+                  "purpose": "verification",
+                  "detail": "Inspect the authored task-flow response and finish the accepted Current"
+                },
+                "entries": [
+                  {
+                    "nodeId": 98,
+                    "key": "finish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 920,
+                    "bodyBytes": 920
+                  },
+                  {
+                    "nodeId": 115,
+                    "key": "preview",
+                    "delivery": "body",
+                    "bodyCharacters": 699,
+                    "bodyBytes": 699
+                  }
+                ]
+              }
+            ],
+            "searchReasons": [],
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 15953,
+              "actualPromptUtf8Bytes": 15953,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v2",
+                "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 7,
+                "reasonCoverage": "complete",
+                "readProtocol": 2,
+                "uniqueModulesRead": 7,
+                "uniqueReadRequests": 2,
+                "firstBodyResponses": 7,
+                "replayBodyResponses": 0,
+                "rereadBodyResponses": 0,
+                "duplicateMetadataResponses": 0,
+                "returnedBodyCharacters": 7528,
+                "returnedBodyBytes": 7530,
+                "readReasons": [
+                  {
+                    "requestKey": "initial-authoring",
+                    "replayed": false,
+                    "sequence": 48,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Explain the task flow with visual node details and meaningful relationships"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 95,
+                        "key": "completion-authority",
+                        "delivery": "body",
+                        "bodyCharacters": 889,
+                        "bodyBytes": 889
+                      },
+                      {
+                        "nodeId": 97,
+                        "key": "publish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 2025,
+                        "bodyBytes": 2025
+                      },
+                      {
+                        "nodeId": 99,
+                        "key": "detail-basic",
+                        "delivery": "body",
+                        "bodyCharacters": 1048,
+                        "bodyBytes": 1048
+                      },
+                      {
+                        "nodeId": 101,
+                        "key": "detail-theme",
+                        "delivery": "body",
+                        "bodyCharacters": 716,
+                        "bodyBytes": 716
+                      },
+                      {
+                        "nodeId": 103,
+                        "key": "layout",
+                        "delivery": "body",
+                        "bodyCharacters": 1231,
+                        "bodyBytes": 1233
+                      }
+                    ]
+                  },
+                  {
+                    "requestKey": "finish-preview",
+                    "replayed": false,
+                    "sequence": 49,
+                    "reason": {
+                      "purpose": "verification",
+                      "detail": "Inspect the authored task-flow response and finish the accepted Current"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 98,
+                        "key": "finish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 920,
+                        "bodyBytes": 920
+                      },
+                      {
+                        "nodeId": 115,
+                        "key": "preview",
+                        "delivery": "body",
+                        "bodyCharacters": 699,
+                        "bodyBytes": 699
+                      }
+                    ]
+                  }
+                ],
+                "searchReasons": [],
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 135106,
+                  "cachedInputTokens": 120192,
+                  "outputTokens": 1799,
+                  "reasoningOutputTokens": 27,
+                  "totalTokens": 136905
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T19:22:12.060Z",
+            "firstGraphAt": "2026-10-20T19:22:53.006Z",
+            "acceptedAt": "2026-10-20T19:22:53.075Z",
+            "firstGraphSeconds": 40.9,
+            "acceptedSeconds": 41,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 21,
+          "scores": {
+            "answer_quality": 4,
+            "recursive_coherence": 6,
+            "navigation_value": 5,
+            "presentation_quality": 3,
+            "follow_up_progress": 7
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "actions": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 2,
+              "reviewed": 2,
+              "missing": 0,
+              "authoredActions": 1,
+              "missingOpportunities": 0,
+              "correctStops": 1
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 10,
+          "tiles": 14,
+          "nativeThreadId": "01a15ac4-5d6d-7ff3-8d38-4a9229095d5d",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 140148,
+            "cachedInputTokens": 115840,
+            "outputTokens": 1578,
+            "reasoningOutputTokens": 43,
+            "totalTokens": 141726
+          },
+          "judgeUsage": {
+            "input_tokens": 1227149,
+            "cached_input_tokens": 1164928,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 20451,
+            "reasoning_output_tokens": 5790
+          },
+          "initialPromptCharacters": 16210,
+          "initialPromptUtf8Bytes": 16210,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 8,
+            "reasonCoverage": "complete",
+            "readProtocol": 2,
+            "uniqueModulesRead": 8,
+            "uniqueReadRequests": 2,
+            "firstBodyResponses": 8,
+            "replayBodyResponses": 0,
+            "rereadBodyResponses": 0,
+            "duplicateMetadataResponses": 0,
+            "returnedBodyCharacters": 8076,
+            "returnedBodyBytes": 8076,
+            "readReasons": [
+              {
+                "requestKey": "initial-authoring",
+                "replayed": false,
+                "sequence": 71,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Read completion and visual publication requirements"
+                },
+                "entries": [
+                  {
+                    "nodeId": 95,
+                    "key": "completion-authority",
+                    "delivery": "body",
+                    "bodyCharacters": 889,
+                    "bodyBytes": 889
+                  },
+                  {
+                    "nodeId": 97,
+                    "key": "publish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 2025,
+                    "bodyBytes": 2025
+                  },
+                  {
+                    "nodeId": 99,
+                    "key": "detail-basic",
+                    "delivery": "body",
+                    "bodyCharacters": 1048,
+                    "bodyBytes": 1048
+                  },
+                  {
+                    "nodeId": 101,
+                    "key": "detail-theme",
+                    "delivery": "body",
+                    "bodyCharacters": 716,
+                    "bodyBytes": 716
+                  }
+                ]
+              },
+              {
+                "requestKey": "finish-navigation",
+                "replayed": false,
+                "sequence": 74,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Prepare a visual follow-up with prior-view navigation and final acceptance"
+                },
+                "entries": [
+                  {
+                    "nodeId": 98,
+                    "key": "finish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 920,
+                    "bodyBytes": 920
+                  },
+                  {
+                    "nodeId": 104,
+                    "key": "navigation-reference",
+                    "delivery": "body",
+                    "bodyCharacters": 808,
+                    "bodyBytes": 808
+                  },
+                  {
+                    "nodeId": 102,
+                    "key": "detail-controls",
+                    "delivery": "body",
+                    "bodyCharacters": 971,
+                    "bodyBytes": 971
+                  },
+                  {
+                    "nodeId": 115,
+                    "key": "preview",
+                    "delivery": "body",
+                    "bodyCharacters": 699,
+                    "bodyBytes": 699
+                  }
+                ]
+              }
+            ],
+            "searchReasons": [],
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 16210,
+              "actualPromptUtf8Bytes": 16210,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v2",
+                "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 8,
+                "reasonCoverage": "complete",
+                "readProtocol": 2,
+                "uniqueModulesRead": 8,
+                "uniqueReadRequests": 2,
+                "firstBodyResponses": 8,
+                "replayBodyResponses": 0,
+                "rereadBodyResponses": 0,
+                "duplicateMetadataResponses": 0,
+                "returnedBodyCharacters": 8076,
+                "returnedBodyBytes": 8076,
+                "readReasons": [
+                  {
+                    "requestKey": "initial-authoring",
+                    "replayed": false,
+                    "sequence": 71,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Read completion and visual publication requirements"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 95,
+                        "key": "completion-authority",
+                        "delivery": "body",
+                        "bodyCharacters": 889,
+                        "bodyBytes": 889
+                      },
+                      {
+                        "nodeId": 97,
+                        "key": "publish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 2025,
+                        "bodyBytes": 2025
+                      },
+                      {
+                        "nodeId": 99,
+                        "key": "detail-basic",
+                        "delivery": "body",
+                        "bodyCharacters": 1048,
+                        "bodyBytes": 1048
+                      },
+                      {
+                        "nodeId": 101,
+                        "key": "detail-theme",
+                        "delivery": "body",
+                        "bodyCharacters": 716,
+                        "bodyBytes": 716
+                      }
+                    ]
+                  },
+                  {
+                    "requestKey": "finish-navigation",
+                    "replayed": false,
+                    "sequence": 74,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Prepare a visual follow-up with prior-view navigation and final acceptance"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 98,
+                        "key": "finish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 920,
+                        "bodyBytes": 920
+                      },
+                      {
+                        "nodeId": 104,
+                        "key": "navigation-reference",
+                        "delivery": "body",
+                        "bodyCharacters": 808,
+                        "bodyBytes": 808
+                      },
+                      {
+                        "nodeId": 102,
+                        "key": "detail-controls",
+                        "delivery": "body",
+                        "bodyCharacters": 971,
+                        "bodyBytes": 971
+                      },
+                      {
+                        "nodeId": 115,
+                        "key": "preview",
+                        "delivery": "body",
+                        "bodyCharacters": 699,
+                        "bodyBytes": 699
+                      }
+                    ]
+                  }
+                ],
+                "searchReasons": [],
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 140148,
+                  "cachedInputTokens": 115840,
+                  "outputTokens": 1578,
+                  "reasoningOutputTokens": 43,
+                  "totalTokens": 141726
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T19:23:00.785Z",
+            "firstGraphAt": "2026-10-20T19:23:31.863Z",
+            "acceptedAt": "2026-10-20T19:23:31.943Z",
+            "firstGraphSeconds": 31.1,
+            "acceptedSeconds": 31.2,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "observedCandidateSessionInputTokens": 275254,
+      "observedCandidateSessionOutputTokens": 3377,
+      "initialPromptCharacters": 32163,
+      "presentationScore": 3.5,
+      "comprehensionScore": 4.5
+    }
+  ],
+  "limits": [
+    "One matched two-turn case, one frozen screenshot judge per accepted turn; non-blind pilot, no statistical equivalence claim.",
+    "Ordered 1\u20138 ratings; missing ratings remain unknown, first-turn follow-up progress is not applicable.",
+    "Candidate observed native-session counters are separate from judge inference; complete native-child usage and dollar spend are unknown.",
+    "Initial capacity-failed run remains excluded from this matched retry comparison.",
+    "Manual pixel audit is a sample, not an independent quality rejudgment.",
+    "No pull request is attached; this workspace review is non-certifying until copied to the PR against this exact source digest."
+  ],
+  "candidateMetricsSha256": "d3a6b0b88984121fc03a821902c9eba61d92b501a24760a2a563ec3a99edc0ab",
+  "renderedSamplesSha256": "4c44e8befa2984cbc391f6612a9022db389b67708867f30becdb844e029c4b96"
+}

@@ -552,7 +552,7 @@ impl GraphDatabase {
         Ok(node)
     }
 
-    async fn create_identified_interaction_with_context_inner(
+    pub(super) async fn create_identified_interaction_with_context_inner(
         &self,
         project_id: Option<ProjectId>,
         thread_id: ThreadId,
@@ -1225,6 +1225,15 @@ fn reject_reserved_profile_thread(thread_id: ThreadId) -> Result<(), GraphError>
             "reserved_personal_presentation_thread",
             "threadId",
             "The personal-presentation profile thread is reserved for its dedicated control boundary.",
+        ));
+    }
+    if (crate::INSTRUCTION_GRAPH_THREAD_MIN..=crate::INSTRUCTION_GRAPH_THREAD_MAX)
+        .contains(&thread_id.value())
+    {
+        return Err(GraphError::validation(
+            "reserved_instruction_graph_thread",
+            "threadId",
+            "Instruction graph threads are reserved for trusted publication.",
         ));
     }
     Ok(())

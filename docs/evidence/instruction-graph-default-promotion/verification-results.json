@@ -1,0 +1,84 @@
+{
+  "sourceSnapshotDigest": "4473cfab8d8813e2aeb2db8d49114f2492e59ccbc73630e0c0f203c0182911e1",
+  "baseCommit": "5263bf9fc6fc595092be480c174652cb3114693c",
+  "scope": "Exact source-snapshot.json files; evidence files excluded from source hash to avoid self-reference.",
+  "requiredPlan": "verification-plan.json",
+  "actualRuns": [
+    {
+      "command": "npm run check",
+      "exitCode": 0,
+      "result": "Default/crash Rust portfolios, TypeScript and workspace checks passed; Vitest344files passed/1skipped,4639tests passed/3skipped; secret boundary2passed; Python100passed; native receipts and PRD readability passed."
+    },
+    {
+      "command": "npm run build",
+      "exitCode": 0,
+      "result": "Native debug servers, root TypeScript and all workspace packages built."
+    },
+    {
+      "command": "npm run test:eval-web",
+      "exitCode": 0,
+      "result": "50 PASS chapters, fixture inference only."
+    },
+    {
+      "command": "npm run test:eval-compiled-runtime",
+      "exitCode": 0,
+      "result": "1file/12tests passed."
+    },
+    {
+      "command": "npm run desktop:pack",
+      "exitCode": 0,
+      "result": "Fresh pinned native release build; unsigned macos-arm64 assembly and afterPack passed. Packaged default YAML and corpus module exactly match source. See packaging-receipt.json."
+    }
+  ],
+  "focusedVerification": {
+    "host": "138tests passed",
+    "codexAndConfiguration": "106tests passed",
+    "desktopAndLegacy": "50tests passed",
+    "evalControl": "48tests passed",
+    "realRuntimeJourney": "5tests passed; includes actual search-disabled default retrieval, acceptance and reopen"
+  },
+  "earlierFailures": [
+    {
+      "run": "Initial focused promotion suite",
+      "result": "6fixture failures: missing V2 manifests and startup publication responses; repaired in final source and passing focused/full suites."
+    },
+    {
+      "run": "Initial eval-web invocation",
+      "result": "Failed import while a simultaneous package prebuild cleaned dist; reran after package build and all50chapters passed."
+    },
+    {
+      "run": "Initial unsigned packaging invocation",
+      "result": "Stopped during native preparation to clear ambient RELAYER_CARGO_TARGET_DIR, which would select the wrong assembly inputs. Correct retry used repository target and passed."
+    },
+    {
+      "run": "First full npm run check",
+      "exitCode": 1,
+      "result": "4638tests passed,3skipped,1provider-architecture scanner failure: Node24.1 fs.glob crashed while traversing new app framework symlinks inside desktop/dist. No source violation was reported. Moved completed app outside desktop/; scanner4/4 and complete rerun passed."
+    }
+  ],
+  "cache": "Debug Ladybug bundle verified against platform, rustc, Cargo.lock and hashes. Packaging cache identity verified; compatible entries absent, so reviewed pinned source/static OpenSSL and release Rust built fresh and sealed.",
+  "quality": "No new paid inference. Two retained matched trials inform the explicit human decision but do not establish general quality equivalence or general savings.",
+  "adversarialReview": "production-review.json and eval-control-review.json; source-only assertions recorded in PR; no unresolved reviewed source findings.",
+  "logs": [
+    {
+      "localPath": ".relayer/instruction-graph-default-check-final.log",
+      "sha256": "2f955b885e33125e4d90a5b12532a4a41f7c1cd5b9a3a68ab5a48c0cbe3873fd"
+    },
+    {
+      "localPath": ".relayer/instruction-graph-default-build-final.log",
+      "sha256": "7dcc9893a4bd150347232f966eb86ae54b61176f87db0a40a825cfa348c91c68"
+    },
+    {
+      "localPath": ".relayer/instruction-graph-default-eval-web-final.log",
+      "sha256": "ceae7cf3b73c8ff5a1c51213e0f6ad23e1929ec447c8e28037f44999c7f5c94b"
+    },
+    {
+      "localPath": ".relayer/instruction-graph-default-compiled.log",
+      "sha256": "ed05d9a944cebbe7697758d52b27de82cc9f2f40710dc59e83138d01bbab0aa0"
+    },
+    {
+      "localPath": ".relayer/instruction-graph-default-pack-final.log",
+      "sha256": "bc4d55e9a6d96d5d54a56723c88403ec5df0ae101ff8a79c697e30d0fe2843a0"
+    }
+  ]
+}

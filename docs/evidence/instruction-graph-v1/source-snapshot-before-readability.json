@@ -1,0 +1,143 @@
+{
+  "baseCommit": "2ef4f7a4f14bb444a955a180a2f90cec34873e93",
+  "scope": "All changed implementation, test, PRD and architecture files; excludes prior prompt research and self-referential evidence notes",
+  "files": [
+    {
+      "path": "crates/relayer-app-server/src/runtime.rs",
+      "sha256": "5ec446e055bf787527cb9d773f7815525718097b806d2d86b9c4e706341df048"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph.rs",
+      "sha256": "c0069afc198268432ebfa63e172acadce5d6b84968ea6928e3cea460506bef01"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/database.rs",
+      "sha256": "817f245813fca37d8a0c291788b4905aebf0b1b87315d4f337d59cf28a1fbed5"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/import.rs",
+      "sha256": "9e5abc3aa57785bd8e66faad6a66470a08e4177d2c4ca4eaa365dad389cff55a"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/graph/instruction_graph.rs",
+      "sha256": "110ddbe5c143bab57afcfd02c80c38904923a321f4a5700b9aec89f843eabd5d"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/lib.rs",
+      "sha256": "827c2ab4210d81d1d44f67adfeaafaba1668299a9976e1d58c6df97c2dd693b1"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations.rs",
+      "sha256": "c121a08949e8860528bd738f0db5dacf953367982b98bf019bcca827041c05e0"
+    },
+    {
+      "path": "crates/relayer-graph-core/src/storage/sqlite/migrations/0042_instruction_graphs.sql",
+      "sha256": "652f8e3e1fec54f8c647b1490e8340d259dde6e7708b792f0fc70f3c7e85add5"
+    },
+    {
+      "path": "crates/relayer-graph-server/src/lib.rs",
+      "sha256": "a0e0ad20f897805a2bde5769b01bcecadc61d7573dce121d3dbbebb835c07812"
+    },
+    {
+      "path": "crates/relayer-graph-server/tests/graph_search_route.rs",
+      "sha256": "f319bbe69f10e6320d7db711061fafd9da86e9c425e520c21abd9e3a6898731c"
+    },
+    {
+      "path": "desktop/eval-main/configuration-paths.mjs",
+      "sha256": "b69afbdbc1e3f1d5fe1f91cca40a362f4abf63a9b699d91cb7ffacde39b8612c"
+    },
+    {
+      "path": "desktop/eval-main/eval-service.mjs",
+      "sha256": "880e9e936b3f7d1879ac4436b8f2fdc0ae7871178cc2f0b4a6b131cbe18f8678"
+    },
+    {
+      "path": "desktop/eval-main/graph-timing.mjs",
+      "sha256": "4a87a5ebf22700c55ca23b133695d4364c941dcf52f61cbb626e9d942c433252"
+    },
+    {
+      "path": "desktop/eval-main/instruction-graph-comparison.mjs",
+      "sha256": "9bce1b6b464fe8563ad7a2b2819cc2f901bc22acfd52294235ef9801f9136d80"
+    },
+    {
+      "path": "desktop/eval-main/instruction-graph-metrics.mjs",
+      "sha256": "66978f83745ba227b450eefa4105db7e9db1c0bdb249a2200d4492ff01f09932"
+    },
+    {
+      "path": "desktop/eval-renderer/main.js",
+      "sha256": "4f3ef7a45579a4f2617c43eff338a61610555fc7ddd90b5a9e315a46419d3dd5"
+    },
+    {
+      "path": "desktop/eval-renderer/run-model.js",
+      "sha256": "7cb6b850be6988915f40eb50bcabb76ab5a01a43a75925a035c66cdccb53ff81"
+    },
+    {
+      "path": "desktop/main/services/graph-operation-recorder.mjs",
+      "sha256": "59a2278b90a6604b3e58b9c1494de3add96f19dced0bafe967a052e3aecb245f"
+    },
+    {
+      "path": "desktop/main/services/graphcomplete-runtime.mjs",
+      "sha256": "276b9519975eb0ef82ca674e01df0baaa0268ecb490b4917f89cd9f3a5ae146b"
+    },
+    {
+      "path": "docs/architecture.md",
+      "sha256": "789d5db5ead4a4d42c628f461063dcf1b69fda40af2f55e9c3435dfc6b26c0dd"
+    },
+    {
+      "path": "docs/prd/index.html",
+      "sha256": "a9783ae4e089b44a8fed0d5012d04d0b5ac90d6ef3ae2417e6d5edde54530490"
+    },
+    {
+      "path": "harnesses/codex-instruction-graph-v1.yaml",
+      "sha256": "f2acdd2e552c8785ac39c78df642202c9fa97874f28e2f79fe434bae2ce08b98"
+    },
+    {
+      "path": "packages/graph-client/src/client.ts",
+      "sha256": "630b8873c35646191d7fbccf02884a05b38c7473bdedc2b45325c6161808a39a"
+    },
+    {
+      "path": "packages/graph-client/src/types.ts",
+      "sha256": "44f485f9299267f6177a97042d492fc0726d13187ded24238b3d9e485bf62943"
+    },
+    {
+      "path": "packages/graph-client/test/instruction-graph.test.ts",
+      "sha256": "bc298fc35f0ebd5404457fa2eced9b3e87eeaf17cea567d76e33445eae853d17"
+    },
+    {
+      "path": "packages/harness-host/src/host.ts",
+      "sha256": "1567cc9ab1b5b7c2f8b0098c11a03432331e0b8a21ce2a503500649da3b691da"
+    },
+    {
+      "path": "packages/harness-host/src/implementations/codex-basic.ts",
+      "sha256": "e4804889e6a7256f9bc4c7de84028e04179360f7e51726abb0f9115b6c0dcb30"
+    },
+    {
+      "path": "packages/harness-host/src/types.ts",
+      "sha256": "4065382318f890df81a5d799da9222ed39ae2720946055c8336f0d2e079481e4"
+    },
+    {
+      "path": "packages/harness-host/test/codex-basic.test.ts",
+      "sha256": "cd17e6e41da37706a0f1a732843e7e2cf4b2ce87685815c77eb990d956c4d078"
+    },
+    {
+      "path": "test/eval-configuration-paths.test.mjs",
+      "sha256": "21075a0481a094fde45b3d58c70e35f32f775092c3e4ca9b2eb53baa45de388f"
+    },
+    {
+      "path": "test/eval-graph-timing-directory.test.mjs",
+      "sha256": "3ced92d877db02c565429556ce0ce87005f4040b323702fdbe713fbc88f87f07"
+    },
+    {
+      "path": "test/eval-instruction-graph.test.mjs",
+      "sha256": "6bf7c888bf1794d5c61a6cff1e2874a9befbb464703e2f8d1b458739d1e291e0"
+    },
+    {
+      "path": "test/graph-operation-recorder.test.mjs",
+      "sha256": "3271cdba78e236737a549b7054e81623eaf5799ae4a13a713148a5b194ac0960"
+    },
+    {
+      "path": "test/instruction-graph-e2e.test.mjs",
+      "sha256": "1305c6311b8d0e0f67b69a61f39dcd46e0afc356a67a3bd53b090c88398bd92a"
+    }
+  ],
+  "digest": "714f45520005eb84cadc390db9bb0dfee23e1fae62b6659a5ee0e640e8cc8664"
+}

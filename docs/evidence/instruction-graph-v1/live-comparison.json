@@ -1,0 +1,617 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "714f45520005eb84cadc390db9bb0dfee23e1fae62b6659a5ee0e640e8cc8664",
+  "runId": "run-2026-10-20T13-21-23-927Z-2b959113",
+  "status": "passed",
+  "createdAt": "2026-10-20T13:21:23.928Z",
+  "completedAt": "2026-10-20T13:26:04.137Z",
+  "priorFailedRun": "run-2026-10-20T13-12-15-499Z-ef6f3d89",
+  "caseIds": [
+    "empty-project.task-system.two-turn"
+  ],
+  "declaredCostCapUsd": 10,
+  "comparison": {
+    "kind": "instruction-graph-pair",
+    "controlledFields": [
+      "task",
+      "implementation",
+      "settings except instruction delivery profile and exact corpus pin",
+      "graphCapabilityProfile",
+      "permissionBindings",
+      "providerModelSelection",
+      "complete.agentAuthored"
+    ],
+    "variedField": "settings.promptProfile",
+    "instructionPinFields": [
+      "settings.instructionGraphVersionKey",
+      "settings.instructionGraphDigest"
+    ],
+    "rootProviderExecutions": 4,
+    "expectedTurnsByCase": {
+      "empty-project.task-system.two-turn": 2
+    },
+    "qualityEquivalence": "unproven",
+    "tokenUsage": {
+      "status": "unknown",
+      "totalInputTokens": null,
+      "reason": "No validated aggregate of provider usage across root and native child executions is available. Consult Candidate Trace for recorded provider usage."
+    },
+    "passed": true,
+    "checks": [
+      {
+        "name": "instruction-graph:controlled-pair:empty-project.task-system.two-turn",
+        "passed": true,
+        "detail": "Both instruction-delivery cells recorded matching task, provider/model, permissions and V6 presentation pins. Quality equivalence requires separate review."
+      },
+      {
+        "name": "instruction-graph:retrieval:empty-project.task-system.two-turn",
+        "passed": true,
+        "detail": "Each captured treatment graph session recorded the exact configured instruction pin and a successful instruction-node or instruction-layer read. Incorporation remains a quality-review question."
+      }
+    ],
+    "metrics": [
+      {
+        "caseId": "empty-project.task-system.two-turn",
+        "harnessConfigurationName": "codex-basic",
+        "actualPromptCharacters": 159355,
+        "observedInputTokens": 434563,
+        "observedOutputTokens": 4393,
+        "recordedSessions": 2,
+        "expectedGraphSessions": 2,
+        "totalInputTokens": null,
+        "coverage": "unknown",
+        "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+        "latencyScope": "evaluation-cell-including-grading",
+        "latencyMs": 124450,
+        "graphWriteRejections": 0
+      },
+      {
+        "caseId": "empty-project.task-system.two-turn",
+        "harnessConfigurationName": "codex-instruction-graph-v1",
+        "actualPromptCharacters": 28711,
+        "observedInputTokens": 661894,
+        "observedOutputTokens": 5402,
+        "recordedSessions": 2,
+        "expectedGraphSessions": 2,
+        "totalInputTokens": null,
+        "coverage": "unknown",
+        "reason": "Provider-native child usage coverage is not established; observed session counters are not a whole-task total.",
+        "latencyScope": "evaluation-cell-including-grading",
+        "latencyMs": 155747,
+        "graphWriteRejections": 0
+      }
+    ]
+  },
+  "executions": [
+    {
+      "harness": "codex-basic",
+      "status": "passed",
+      "modelResolution": {
+        "selectedModel": {
+          "harnessId": "codex-basic",
+          "familyId": 1,
+          "providerId": "codex",
+          "modelId": "gpt-6.1-sol"
+        },
+        "productModelSelection": true
+      },
+      "checks": [
+        {
+          "name": "turn-1:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-1:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-1:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-1:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-1:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-1:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-1:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-1:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "turn-2:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-2:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-2:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-2:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-2:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-2:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-2:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-2:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "instruction-graph:controlled-pair:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Both instruction-delivery cells recorded matching task, provider/model, permissions and V6 presentation pins. Quality equivalence requires separate review."
+        },
+        {
+          "name": "instruction-graph:retrieval:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Each captured treatment graph session recorded the exact configured instruction pin and a successful instruction-node or instruction-layer read. Incorporation remains a quality-review question."
+        }
+      ],
+      "semanticChildren": 0,
+      "turns": [
+        {
+          "interactionId": 7,
+          "status": "accepted",
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 79550,
+            "actualPromptUtf8Bytes": 79554,
+            "instructionDelivery": null,
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 0,
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 180861,
+                "cachedInputTokens": 152832,
+                "outputTokens": 2081,
+                "reasoningOutputTokens": 110,
+                "totalTokens": 182942
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79550,
+              "actualPromptUtf8Bytes": 79554,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 180861,
+                  "cachedInputTokens": 152832,
+                  "outputTokens": 2081,
+                  "reasoningOutputTokens": 110,
+                  "totalTokens": 182942
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T13:21:24.174Z",
+            "firstGraphAt": "2026-10-20T13:22:07.591Z",
+            "acceptedAt": "2026-10-20T13:22:16.435Z",
+            "firstGraphSeconds": 43.4,
+            "acceptedSeconds": 52.3,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 8,
+          "status": "accepted",
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 79805,
+            "actualPromptUtf8Bytes": 79809,
+            "instructionDelivery": null,
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 0,
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 253702,
+                "cachedInputTokens": 224768,
+                "outputTokens": 2312,
+                "reasoningOutputTokens": 59,
+                "totalTokens": 256014
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79805,
+              "actualPromptUtf8Bytes": 79809,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 253702,
+                  "cachedInputTokens": 224768,
+                  "outputTokens": 2312,
+                  "reasoningOutputTokens": 59,
+                  "totalTokens": 256014
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T13:22:23.697Z",
+            "firstGraphAt": "2026-10-20T13:23:09.110Z",
+            "acceptedAt": "2026-10-20T13:23:17.252Z",
+            "firstGraphSeconds": 45.4,
+            "acceptedSeconds": 53.6,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 1,
+              "failed": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "harness": "codex-instruction-graph-v1",
+      "status": "passed",
+      "modelResolution": {
+        "selectedModel": {
+          "harnessId": "codex-basic",
+          "familyId": 1,
+          "providerId": "codex",
+          "modelId": "gpt-6.1-sol"
+        },
+        "productModelSelection": true
+      },
+      "checks": [
+        {
+          "name": "turn-1:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-1:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-1:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-1:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-1:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-1:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-1:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-1:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "turn-2:interaction-output",
+          "passed": true,
+          "detail": "Completion output and response action belong to the requested interaction."
+        },
+        {
+          "name": "turn-2:accepted-closure",
+          "passed": true,
+          "detail": "The response action and complete visible closure are accepted."
+        },
+        {
+          "name": "turn-2:resolved-membership",
+          "passed": true,
+          "detail": "Resolved records exactly match the accepted layer references."
+        },
+        {
+          "name": "turn-2:authored-layout",
+          "passed": true,
+          "detail": "The accepted layer has one finite normalized v1 placement per visible node."
+        },
+        {
+          "name": "turn-2:response-action",
+          "passed": true,
+          "detail": "Interaction has one accepted root expansion action."
+        },
+        {
+          "name": "turn-2:visible-layer",
+          "passed": true,
+          "detail": "1 complete visible nodes."
+        },
+        {
+          "name": "turn-2:exact-edges",
+          "passed": true,
+          "detail": "0 visible undirected edges stay inside the layer."
+        },
+        {
+          "name": "turn-2:connected",
+          "passed": true,
+          "detail": "1/1 nodes connected."
+        },
+        {
+          "name": "instruction-graph:controlled-pair:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Both instruction-delivery cells recorded matching task, provider/model, permissions and V6 presentation pins. Quality equivalence requires separate review."
+        },
+        {
+          "name": "instruction-graph:retrieval:empty-project.task-system.two-turn",
+          "passed": true,
+          "detail": "Each captured treatment graph session recorded the exact configured instruction pin and a successful instruction-node or instruction-layer read. Incorporation remains a quality-review question."
+        }
+      ],
+      "semanticChildren": 0,
+      "turns": [
+        {
+          "interactionId": 9,
+          "status": "accepted",
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 14228,
+            "actualPromptUtf8Bytes": 14228,
+            "instructionDelivery": {
+              "versionKey": "codex-instruction-graph-v1",
+              "digest": "3eec08053baf020b6492f0be1212e1aa9875973212bf6dc03a245f880dcae1ce"
+            },
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 10,
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 261267,
+                "cachedInputTokens": 228864,
+                "outputTokens": 2455,
+                "reasoningOutputTokens": 149,
+                "totalTokens": 263722
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 14228,
+              "actualPromptUtf8Bytes": 14228,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v1",
+                "digest": "3eec08053baf020b6492f0be1212e1aa9875973212bf6dc03a245f880dcae1ce"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 10,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 261267,
+                  "cachedInputTokens": 228864,
+                  "outputTokens": 2455,
+                  "reasoningOutputTokens": 149,
+                  "totalTokens": 263722
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T13:23:28.393Z",
+            "firstGraphAt": "2026-10-20T13:24:25.474Z",
+            "acceptedAt": "2026-10-20T13:24:33.884Z",
+            "firstGraphSeconds": 57.1,
+            "acceptedSeconds": 65.5,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 7,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 10,
+          "status": "accepted",
+          "personalPresentationVersionKey": "personal-presentation-v6",
+          "instructionMetrics": {
+            "schemaVersion": 1,
+            "actualPromptCharacters": 14483,
+            "actualPromptUtf8Bytes": 14483,
+            "instructionDelivery": {
+              "versionKey": "codex-instruction-graph-v1",
+              "digest": "3eec08053baf020b6492f0be1212e1aa9875973212bf6dc03a245f880dcae1ce"
+            },
+            "instructionRetrieval": {
+              "status": "recorded",
+              "successfulReads": 11,
+              "successfulSearches": 0
+            },
+            "providerSessionUsage": {
+              "status": "recorded",
+              "scope": "native-session-cumulative-receipt",
+              "counters": {
+                "inputTokens": 400627,
+                "cachedInputTokens": 355840,
+                "outputTokens": 2947,
+                "reasoningOutputTokens": 130,
+                "totalTokens": 403574
+              },
+              "nativeChildCoverage": "unknown",
+              "reason": null
+            }
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 14483,
+              "actualPromptUtf8Bytes": 14483,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v1",
+                "digest": "3eec08053baf020b6492f0be1212e1aa9875973212bf6dc03a245f880dcae1ce"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 11,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 400627,
+                  "cachedInputTokens": 355840,
+                  "outputTokens": 2947,
+                  "reasoningOutputTokens": 130,
+                  "totalTokens": 403574
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-20T13:24:43.495Z",
+            "firstGraphAt": "2026-10-20T13:25:47.878Z",
+            "acceptedAt": "2026-10-20T13:25:55.460Z",
+            "firstGraphSeconds": 64.4,
+            "acceptedSeconds": 72,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 8,
+              "patches": 1,
+              "failed": 1
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "interpretation": {
+    "qualityEquivalence": "unproven",
+    "wholeTaskContextSavings": "unproven",
+    "instructionSearches": 0,
+    "successfulInstructionBodyReads": 21,
+    "promptCharacterReductionFraction": 0.8198299394433811,
+    "observedInputIncreaseFraction": 0.5231255307055593,
+    "latencyIncreaseFraction": 0.2514825231016473,
+    "limitations": [
+      "One ordinary two-turn case; no statistical estimate of quality or average savings.",
+      "Native helper usage coverage is unknown; observed counters are not a whole-task total.",
+      "Initial prompt character counts cover the harness-authored prompt, excluding provider-native base instructions.",
+      "Elapsed time includes grading; execution order is control then treatment.",
+      "Declared budget is not an enforced spend meter; no actual dollar cost receipt is available."
+    ]
+  },
+  "evidenceReceipt": {
+    "runBundleSha256": "c8778cb31916b420a690cf3ca8a6c37bea3b518e3e60917a4df07524d875ea6e",
+    "distinctNativeUsageSessionCount": 4,
+    "instructionReads": [
+      {
+        "interactionId": 9,
+        "reads": 10,
+        "uniquePaths": 6,
+        "repeatedReads": 4
+      },
+      {
+        "interactionId": 10,
+        "reads": 11,
+        "uniquePaths": 9,
+        "repeatedReads": 2
+      }
+    ]
+  }
+}

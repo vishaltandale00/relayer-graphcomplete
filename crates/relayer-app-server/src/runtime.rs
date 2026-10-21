@@ -1011,6 +1011,41 @@ impl RuntimeClient {
                 ));
             }
         }
+        match (
+            selected
+                .configuration
+                .settings
+                .get("instructionGraphVersionKey"),
+            selected
+                .configuration
+                .settings
+                .get("instructionGraphDigest"),
+        ) {
+            (None, None) => {}
+            (Some(Value::String(version_key)), Some(Value::String(digest))) => {
+                let attached: relayer_graph_core::InstructionGraphManifest = self
+                    .post_idempotent(
+                        self.graph_url.join(&format!(
+                            "api/control/interactions/{}/instruction-graph",
+                            interaction.node.id
+                        ))?,
+                        &serde_json::json!({"versionKey":version_key,"digest":digest}),
+                        &self.graph_control_token,
+                        StatusCode::OK,
+                        "instruction graph attachment",
+                    )
+                    .await?;
+                if attached.version_key != *version_key || attached.digest != *digest {
+                    return Err(RuntimeError::Protocol(
+                        "graph server attached a different instruction graph".into(),
+                    ));
+                }
+            }
+            _ => return Err(RuntimeError::Configuration(
+                "instructionGraphVersionKey and instructionGraphDigest must be configured together"
+                    .into(),
+            )),
+        }
         let effective_execution_digest = effective_execution_digest(
             harness_configuration_digest,
             &command.permission_profile.id,
@@ -4394,12 +4429,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn prepare_carries_submitted_input_children_and_a_personal_presentation_together() {
+    async fn prepare_carries_submitted_input_and_presentation_and_instruction_pins_together() {
         // Submitted inputs and a personal-presentation attachment are prepared on the
         // same interaction, in the same call. Each has its own coverage; this proves
         // they still both land when they arrive together.
         let attachments = Arc::new(AtomicUsize::new(0));
         let observed_attachments = attachments.clone();
+        let instruction_attachments = Arc::new(AtomicUsize::new(0));
+        let observed_instruction_attachments = instruction_attachments.clone();
         let graph = Router::new()
             .route(
                 "/api/control/interactions",
@@ -4443,6 +4480,15 @@ mod tests {
                     }
                 }),
             )
+            .route("/api/control/interactions/42/instruction-graph",routing::post(move |Json(body):Json<serde_json::Value>| {
+                let observed=observed_instruction_attachments.clone();
+                async move {
+                    assert_eq!(body["versionKey"],"instructions-test-v1");
+                    assert_eq!(body["digest"],"a".repeat(64));
+                    observed.fetch_add(1,Ordering::SeqCst);
+                    Json(json!({"versionKey":"instructions-test-v1","digest":"a".repeat(64),"threadId":8000000000000000_i64,"interactionNodeId":101,"rootLayerId":102,"modules":[]}))
+                }
+            }))
             .route(
                 "/api/control/capabilities",
                 routing::delete(|| async { Json(json!({ "revoked": true })) }),
@@ -4461,7 +4507,7 @@ mod tests {
                 "schemaVersion":1,
                 "configurations":[{"configuration":{
                     "schemaVersion":1,"name":"test","implementation":"test",
-                    "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{}
+                    "implementationVersion":1,"permissionBindings":{"auto":{}},"settings":{"instructionGraphVersionKey":"instructions-test-v1","instructionGraphDigest":"a".repeat(64)}
                 },"digest":"sha256:test"}]
             })
             .to_string(),
@@ -4533,6 +4579,7 @@ mod tests {
         assert_eq!(prepared.input_children.len(), 1);
         assert_eq!(prepared.personal_presentation_version_id, Some(31));
         assert_eq!(attachments.load(Ordering::SeqCst), 1);
+        assert_eq!(instruction_attachments.load(Ordering::SeqCst), 1);
         // The pinned presentation still reaches the execution digest when submitted
         // inputs share the same prepare.
         assert_ne!(

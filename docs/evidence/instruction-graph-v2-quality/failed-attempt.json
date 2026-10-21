@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "runId": "run-2026-10-20T18-52-34-749Z-d69001c7",
+  "status": "error",
+  "authorization": {
+    "confirmed": true,
+    "credentialReference": "connected-product-provider",
+    "rootProviderExecutions": 4,
+    "agentAuthoredChildren": true,
+    "declaredCostCapUsd": 10
+  },
+  "sourcePhase": "before screenshot serialization repair",
+  "bundle": {
+    "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T18-52-34-749Z-d69001c7/bundle.json",
+    "sha256": "cfde7a131097810d97b1e8fffa28018fbd59b4c0a1485ef66a0e44621b01c182",
+    "bytes": 477276
+  },
+  "candidateFailure": {
+    "harness": "codex-instruction-graph-v2",
+    "productInteractionId": 17,
+    "traceStatus": "failed",
+    "terminalReason": "Selected model is at capacity. Please try a different model.",
+    "providerErrors": [
+      {
+        "provider": "codex",
+        "method": "error",
+        "params": {
+          "error": {
+            "message": "Selected model is at capacity. Please try a different model.",
+            "codexErrorInfo": "serverOverloaded",
+            "additionalDetails": null,
+            "misalignment": null
+          },
+          "willRetry": false,
+          "threadId": "01a15aad-2f5e-74f0-881a-2566a4d97cb3",
+          "turnId": "01a15aad-2f91-7731-8d25-d94d39ddd459"
+        }
+      }
+    ],
+    "displayedExecutionError": "This conversation's original execution route cannot be verified. Its history is preserved, but continuing it is unavailable.",
+    "interpretation": "Confirmed provider capacity failure; do not treat missing treatment grades as zero or compare quality"
+  },
+  "baselineJudgments": [
+    {
+      "interactionId": 15,
+      "status": "completed",
+      "criterionJudgments": {
+        "answer_quality": {
+          "score": 4,
+          "reason": "The selected detail gives the requested explanation, but the single-node canvas offers little additional understanding or continuation beyond the static handoff shown in the detail panel.",
+          "evidence": [
+            "shot-3ccec067-e748-4143-b61c-b6fdebeaa4d6",
+            "shot-b96afcb3-58b9-4d75-a60d-a5bfca217849"
+          ]
+        },
+        "recursive_coherence": {
+          "score": 4,
+          "reason": "The only allocation stops after a complete summary, yet a state-timeline expansion is clearly better because it would make the two-worker contention inspectable; no invoke or input is needed.",
+          "evidence": [
+            "shot-3ccec067-e748-4143-b61c-b6fdebeaa4d6",
+            "shot-b96afcb3-58b9-4d75-a60d-a5bfca217849"
+          ]
+        },
+        "navigation_value": {
+          "score": 2,
+          "reason": "The screenshots show no authored expand, reference, invoke, or input path from the only node, leaving no distinct inspection or action choice at the point where the concurrency sequence is introduced.",
+          "evidence": [
+            "shot-3ccec067-e748-4143-b61c-b6fdebeaa4d6",
+            "shot-b96afcb3-58b9-4d75-a60d-a5bfca217849"
+          ]
+        },
+        "presentation_quality": {
+          "score": 3,
+          "reason": "The graph canvas is a single isolated node with no edges, hierarchy, branching, or progressive disclosure, while the meaningful process structure remains embedded in a conventional detail card.",
+          "evidence": [
+            "shot-b96afcb3-58b9-4d75-a60d-a5bfca217849",
+            "shot-3ccec067-e748-4143-b61c-b6fdebeaa4d6"
+          ]
+        },
+        "follow_up_progress": {
+          "score": null,
+          "reason": "This reviewed turn directly answers the original request rather than advancing a prior follow-up, so follow-up progress is not applicable.",
+          "evidence": [
+            "shot-3ccec067-e748-4143-b61c-b6fdebeaa4d6"
+          ]
+        }
+      },
+      "coverage": {
+        "complete": true,
+        "layers": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0
+        },
+        "nodes": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0
+        },
+        "actions": {
+          "required": 0,
+          "reviewed": 0,
+          "missing": 0
+        },
+        "allocations": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0,
+          "authoredActions": 0,
+          "missingOpportunities": 1,
+          "correctStops": 0
+        },
+        "turn": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0
+        },
+        "missingSubjects": []
+      },
+      "artifactDirectory": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T18-52-34-749Z-d69001c7/executions/3ecaa7b4-63b6-4271-8acb-bcfdcc651e3f/turns/15/simulated-user/8623dfc5-d622-471b-8503-f2305cca4949"
+    },
+    {
+      "interactionId": 16,
+      "status": "completed",
+      "criterionJudgments": {
+        "answer_quality": {
+          "score": 3,
+          "reason": "The interface adds little beyond a clean textual handoff: selecting the sole node reveals a strong restatement and example, but there are no relationships or inspect-or-act paths that help the user understand or explore the flow graphically.",
+          "evidence": [
+            "shot-367e657b-63f5-458d-b416-bca43f0f6fcf",
+            "shot-d7c942d3-f0e1-46f2-a590-49af1c24af1c"
+          ]
+        },
+        "recursive_coherence": {
+          "score": 7,
+          "reason": "The root node's implicit stop is a sound semantic allocation because the full detail already answers both emphasized moments and no user decision is needed. Optional scheduler-policy exploration does not rise to a clearly-better missing action.",
+          "evidence": [
+            "shot-367e657b-63f5-458d-b416-bca43f0f6fcf",
+            "shot-d7c942d3-f0e1-46f2-a590-49af1c24af1c"
+          ]
+        },
+        "navigation_value": {
+          "score": 1,
+          "reason": "The screenshot exposes no authored expand, reference, invoke, or input path from the only node. Although no continuation is necessary, the graph provides effectively no navigation or interaction value beyond opening that node's detail.",
+          "evidence": [
+            "shot-367e657b-63f5-458d-b416-bca43f0f6fcf"
+          ]
+        },
+        "presentation_quality": {
+          "score": 2,
+          "reason": "As a graph experience, the response is a single prose-bearing card with no edges, stages, branches, or progressive disclosure representing the inherently sequential flow. The sequence is communicated only inside static detail.",
+          "evidence": [
+            "shot-367e657b-63f5-458d-b416-bca43f0f6fcf",
+            "shot-d7c942d3-f0e1-46f2-a590-49af1c24af1c"
+          ]
+        },
+        "follow_up_progress": {
+          "score": 7,
+          "reason": "The follow-up meaningfully advances the conversation by explicitly revisiting the requested two moments and illustrating the transition with Worker 1, Worker 2, and waiting task C.",
+          "evidence": [
+            "shot-d7c942d3-f0e1-46f2-a590-49af1c24af1c"
+          ]
+        }
+      },
+      "coverage": {
+        "complete": true,
+        "layers": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0
+        },
+        "nodes": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0
+        },
+        "actions": {
+          "required": 0,
+          "reviewed": 0,
+          "missing": 0
+        },
+        "allocations": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0,
+          "authoredActions": 0,
+          "missingOpportunities": 0,
+          "correctStops": 1
+        },
+        "turn": {
+          "required": 1,
+          "reviewed": 1,
+          "missing": 0
+        },
+        "missingSubjects": []
+      },
+      "artifactDirectory": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-20T18-52-34-749Z-d69001c7/executions/3ecaa7b4-63b6-4271-8acb-bcfdcc651e3f/turns/16/simulated-user/4d24fcbd-657d-48c9-81db-6610f7a8ca8f"
+    }
+  ],
+  "captureAnomaly": {
+    "turnId": 15,
+    "invalidCaptureId": "shot-06186e5e-c016-4cec-8d3e-ac1431c85c1a",
+    "effect": "Full node-detail tiles contain graph canvas. Judge cites separate valid viewport and graph images, but full-detail coverage is unproven.",
+    "review": "review.json"
+  },
+  "retryPolicy": "One retry after capture fix, using unchanged candidate model, corpus and judge setup, within the same authorized declared benchmark budget"
+}

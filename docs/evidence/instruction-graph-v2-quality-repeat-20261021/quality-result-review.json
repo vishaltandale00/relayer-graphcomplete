@@ -1,0 +1,1814 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/eval_comparison",
+  "scope": "Independent read-only audit of matched quality repeat pins, artifact bytes, nested rendered evidence, coverage, ordered ratings and observed inference receipts. No inference or UI mutation.",
+  "runId": "run-2026-10-21T14-00-47-155Z-40538473",
+  "sourceDigest": "749fb54edee0563926ae0d8b1362c4f8d81a7ff903f81ae9ffe245c762ac4bc7",
+  "qualityResultSha256": "87895b914403785195afe1bf39d7142e19c8d758bbbd42467d161a8036965689",
+  "sourceSnapshotSha256": "92facce8ae4e588199bb47cb26e848917c36acd649c6214185ccecda297e241f",
+  "benchmarkPlanSha256": "2aabe7f8553fa8b5e3258225a7387244f68f936b3f66b3325272cde889b3071b",
+  "bundle": {
+    "path": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/bundle.json",
+    "sha256": "67c2b9649f710211afeae0f37736eb8052e8d6f34dca81a318a73b262f011442",
+    "bytes": 888732
+  },
+  "checks": [
+    {
+      "check": "Exact repeat and unchanged source digest",
+      "passed": true
+    },
+    {
+      "check": "All 44 source snapshot hashes current",
+      "passed": true
+    },
+    {
+      "check": "Bundle bytes bound",
+      "passed": true
+    },
+    {
+      "check": "Final run status",
+      "passed": true
+    },
+    {
+      "check": "Two arms and four accepted roots",
+      "passed": true
+    },
+    {
+      "check": "Authorization and judge setup equal saved run",
+      "passed": true
+    },
+    {
+      "check": "Four roots/children and declared ten dollar authorization",
+      "passed": true
+    },
+    {
+      "check": "Frozen judge digest",
+      "passed": true
+    },
+    {
+      "check": "Candidate config bytes frozen",
+      "passed": true
+    },
+    {
+      "check": "Bundle repeat and saved comparison identity",
+      "passed": true
+    },
+    {
+      "check": "Identical controls including medium reasoning effort",
+      "passed": true
+    },
+    {
+      "check": "Identical frozen two-turn case across arms",
+      "passed": true
+    },
+    {
+      "check": "Prior pilot and quality evidence unchanged",
+      "passed": true
+    },
+    {
+      "check": "Cross-run case/harness/model/judge pins unchanged",
+      "passed": true
+    },
+    {
+      "check": "Initial repeat attempt preserved and excluded",
+      "passed": true
+    },
+    {
+      "check": "Prior quality bundle and saved judge artifacts unchanged",
+      "passed": true
+    },
+    {
+      "check": "Prior candidate trace event/ledger bytes unchanged",
+      "passed": true
+    },
+    {
+      "check": "codex-basic configuration/model pin",
+      "passed": true
+    },
+    {
+      "check": "codex-basic model resolution",
+      "passed": true
+    },
+    {
+      "check": "turn 25 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 25 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 25 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 25 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 25 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 25 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 25 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 25 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 25 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 25 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 25 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 25 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 25 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 25 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 25 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 25 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 25 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 25 screenshot shot-038bfcbf-0bca-4fe7-a4b6-ebd3ab5b646c canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 25 screenshot shot-647562cc-d936-4591-9833-6151bae10483 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 25 screenshot shot-abc491fe-eaef-466f-b3de-762de067d29f canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 25 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 25 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "turn 25 content judgments cite detail or matching viewport, not label-only crops",
+      "passed": true
+    },
+    {
+      "check": "turn 26 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 26 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 26 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 26 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 26 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 26 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 26 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 26 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 26 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 26 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 26 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 26 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 26 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 26 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 26 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 26 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 26 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 26 screenshot shot-106f73d9-0bcd-40ae-b607-3d47e616cd12 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 26 screenshot shot-57a3d4ec-e968-4035-9188-5994046eb447 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 26 screenshot shot-7b490465-314b-45ad-8034-0d13872dc224 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 26 screenshot shot-a41b0279-9074-47ba-8108-d0120e95b821 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 26 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 26 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "turn 26 content judgments cite detail or matching viewport, not label-only crops",
+      "passed": true
+    },
+    {
+      "check": "codex-basic production ordered rating means",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 configuration/model pin",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 model resolution",
+      "passed": true
+    },
+    {
+      "check": "turn 27 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 27 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 27 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 27 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 27 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 27 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 27 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 27 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 27 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 27 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 27 exact corpus delivery",
+      "passed": true
+    },
+    {
+      "check": "turn 27 graph authority returned exact corpus identity",
+      "passed": true
+    },
+    {
+      "check": "turn 27 body receipt counts match exact pinned corpus modules",
+      "passed": true
+    },
+    {
+      "check": "turn 27 reasoned read/replay/duplicate metrics recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 27 retrieval reason receipts retained",
+      "passed": true
+    },
+    {
+      "check": "turn 27 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 27 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 27 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 27 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 27 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 27 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 27 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 27 screenshot shot-14443e04-c709-4cef-985b-30bc93e01105 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 27 screenshot shot-2a5ee25d-cd06-4882-94ac-8fba66a684a2 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 27 screenshot shot-6dbcc47c-2f01-4006-a73f-d9f5f60a48d1 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 27 screenshot shot-96de9b92-a22c-4b57-a75d-04569b35a9b1 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 27 screenshot shot-9eb14dc6-6312-446f-a207-ba081b8eccd5 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 27 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 27 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "turn 27 content judgments cite detail or matching viewport, not label-only crops",
+      "passed": true
+    },
+    {
+      "check": "turn 28 copied metrics and trace identity",
+      "passed": true
+    },
+    {
+      "check": "turn 28 permission and V6 pin",
+      "passed": true
+    },
+    {
+      "check": "turn 28 model selection",
+      "passed": true
+    },
+    {
+      "check": "turn 28 trace correlation",
+      "passed": true
+    },
+    {
+      "check": "turn 28 events hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 28 graphOperations hash/bytes/count",
+      "passed": true
+    },
+    {
+      "check": "turn 28 published trace descriptor",
+      "passed": true
+    },
+    {
+      "check": "turn 28 initial delivery character/byte receipt",
+      "passed": true
+    },
+    {
+      "check": "turn 28 native usage receipt independently recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 28 native child coverage remains unknown",
+      "passed": true
+    },
+    {
+      "check": "turn 28 exact corpus delivery",
+      "passed": true
+    },
+    {
+      "check": "turn 28 graph authority returned exact corpus identity",
+      "passed": true
+    },
+    {
+      "check": "turn 28 body receipt counts match exact pinned corpus modules",
+      "passed": true
+    },
+    {
+      "check": "turn 28 reasoned read/replay/duplicate metrics recomputed",
+      "passed": true
+    },
+    {
+      "check": "turn 28 retrieval reason receipts retained",
+      "passed": true
+    },
+    {
+      "check": "turn 28 recorded judge equals saved run",
+      "passed": true
+    },
+    {
+      "check": "turn 28 completed judge with frozen setup",
+      "passed": true
+    },
+    {
+      "check": "turn 28 actual judge and usage copied",
+      "passed": true
+    },
+    {
+      "check": "turn 28 completed review matches saved files",
+      "passed": true
+    },
+    {
+      "check": "turn 28 full coverage",
+      "passed": true
+    },
+    {
+      "check": "turn 28 ordered ratings preserved",
+      "passed": true
+    },
+    {
+      "check": "turn 28 all judge artifact bytes bound",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-22cf9e3b-33aa-45fe-bb77-fc6116b36f17 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-45117101-78cd-442b-9847-b5d80518e15c canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-51bbc97c-106b-41ef-b47d-cd80b31e8e8f canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-82864e5c-ce0c-4c62-b1f9-d7ef03212ff1 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-96498383-e9f6-4acd-bb73-ddb08d29d2b0 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-e746498b-e1e4-4a72-87ac-ce327720faae canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 screenshot shot-ec6a4038-3d18-422a-922f-d030c32e3fd0 canonical state and exact tile identities",
+      "passed": true
+    },
+    {
+      "check": "turn 28 every nested screenshot citation bound",
+      "passed": true
+    },
+    {
+      "check": "turn 28 every node has matching full-detail evidence",
+      "passed": true
+    },
+    {
+      "check": "turn 28 content judgments cite detail or matching viewport, not label-only crops",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 production ordered rating means",
+      "passed": true
+    },
+    {
+      "check": "Four native usage receipts have distinct native thread IDs",
+      "passed": true
+    },
+    {
+      "check": "All manually viewed sample files remain hash bound",
+      "passed": true
+    },
+    {
+      "check": "codex-basic candidate-metrics projection",
+      "passed": true
+    },
+    {
+      "check": "codex-instruction-graph-v2 candidate-metrics projection",
+      "passed": true
+    },
+    {
+      "check": "Aggregate V2 retrieval body/metadata accounting",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample baseline-first-turn.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample baseline-followup.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample v2-first-turn.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Rendered sample v2-followup.png exact root screenshot",
+      "passed": true
+    },
+    {
+      "check": "Summary per-turn scores independently reproduced",
+      "passed": true
+    },
+    {
+      "check": "Summary cross-trial scores and observed input independently reproduced",
+      "passed": true
+    },
+    {
+      "check": "Summary repeat observed input reduction reproduced",
+      "passed": true
+    },
+    {
+      "check": "Redundant node-label tiling precisely identified",
+      "passed": true
+    }
+  ],
+  "verdict": "pass",
+  "totals": {
+    "checks": 145,
+    "passed": 145,
+    "screenshots": 19,
+    "tiles": 23,
+    "judgeArtifactFiles": 66,
+    "nestedScreenshotCitations": 748,
+    "manuallyViewedTiles": 16
+  },
+  "pixelSamples": [
+    {
+      "interactionId": 25,
+      "screenshotId": "shot-647562cc-d936-4591-9833-6151bae10483",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/25/simulated-user/83b6b81f-4668-42fd-a752-1d1435b53c86/screenshots/shot-647562cc-d936-4591-9833-6151bae10483/metadata.json",
+      "metadataSha256": "7d08d919352972d52864770be05d1e457b71bfd130170172d0df1679e25c44ae",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/25/simulated-user/83b6b81f-4668-42fd-a752-1d1435b53c86/screenshots/shot-647562cc-d936-4591-9833-6151bae10483/shot-647562cc-d936-4591-9833-6151bae10483-001.png",
+      "tileSha256": "a2d6c7611efd9d1ba14bf2cfee63306734037c96492427fb54ce84fbe114a989",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "166",
+      "layerId": "78",
+      "visualObservation": "Full node-detail shows the authored How tasks move article, queue/two-workers/results diagram, busy-worker behavior, example and scope.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 25,
+      "screenshotId": "shot-abc491fe-eaef-466f-b3de-762de067d29f",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/25/simulated-user/83b6b81f-4668-42fd-a752-1d1435b53c86/screenshots/shot-abc491fe-eaef-466f-b3de-762de067d29f/metadata.json",
+      "metadataSha256": "21639260f65021f939b4eba430cdb1f35252912524b5f62f35273b67995c59ba",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/25/simulated-user/83b6b81f-4668-42fd-a752-1d1435b53c86/screenshots/shot-abc491fe-eaef-466f-b3de-762de067d29f/shot-abc491fe-eaef-466f-b3de-762de067d29f-001.png",
+      "tileSha256": "db70ef37145c59be3f0dfde0369eeb3c17dcd88336344a8899f51ae20fb9765a",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "layer-viewport"
+      },
+      "mode": "full",
+      "selectedNodeId": "166",
+      "layerId": "78",
+      "visualObservation": "Layer-viewport crop shows a selected How tasks move graph pill with graph controls, without substituting article pixels.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 26,
+      "screenshotId": "shot-57a3d4ec-e968-4035-9188-5994046eb447",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-57a3d4ec-e968-4035-9188-5994046eb447/metadata.json",
+      "metadataSha256": "4c3dafd02547499c8f51e0a1fd21b9ff46fc230cf97c5fcb802246576f7ef49f",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-57a3d4ec-e968-4035-9188-5994046eb447/shot-57a3d4ec-e968-4035-9188-5994046eb447-001.png",
+      "tileSha256": "4ceadeead2e48b131a4b32256faee341aa0af26b5e513ab9e5f43f7623f87c1d",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "168",
+      "layerId": "79",
+      "visualObservation": "Full follow-up detail tile shows busy/finish explanatory cards and the task-state table.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 26,
+      "screenshotId": "shot-57a3d4ec-e968-4035-9188-5994046eb447",
+      "tileIndex": 1,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-57a3d4ec-e968-4035-9188-5994046eb447/metadata.json",
+      "metadataSha256": "4c3dafd02547499c8f51e0a1fd21b9ff46fc230cf97c5fcb802246576f7ef49f",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-57a3d4ec-e968-4035-9188-5994046eb447/shot-57a3d4ec-e968-4035-9188-5994046eb447-002.png",
+      "tileSha256": "56e876a7c09c689c90a2e8c9831d5e9ca4111599f2dced6d6952fa610ab13bf9",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "168",
+      "layerId": "79",
+      "visualObservation": "Second full follow-up tile preserves overlapping cards/table content and the scope note; no graph canvas substitution.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 26,
+      "screenshotId": "shot-106f73d9-0bcd-40ae-b607-3d47e616cd12",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-106f73d9-0bcd-40ae-b607-3d47e616cd12/metadata.json",
+      "metadataSha256": "15249e5bbe77b08ab7e0fcc49a1615abe71d48bb12c9fd3613cdf5d9462956bd",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-106f73d9-0bcd-40ae-b607-3d47e616cd12/shot-106f73d9-0bcd-40ae-b607-3d47e616cd12-001.png",
+      "tileSha256": "f3daa97eda2cb72c8512c068058ffd1ecedcd730da685f179b69b652ef3275f5",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-168"
+      },
+      "mode": "full",
+      "selectedNodeId": "168",
+      "layerId": "79",
+      "visualObservation": "Node-element crop shows the correct Busy workers: wait, then refill node label. Four recorded tiny tiles are byte-identical; redundant tiling observed, not a wrong target.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 26,
+      "screenshotId": "shot-106f73d9-0bcd-40ae-b607-3d47e616cd12",
+      "tileIndex": 3,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-106f73d9-0bcd-40ae-b607-3d47e616cd12/metadata.json",
+      "metadataSha256": "15249e5bbe77b08ab7e0fcc49a1615abe71d48bb12c9fd3613cdf5d9462956bd",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/a3246f67-bed4-4485-8338-f436d15a2917/turns/26/simulated-user/14735bfb-ac0c-4c26-97dc-1e3ed909ae61/screenshots/shot-106f73d9-0bcd-40ae-b607-3d47e616cd12/shot-106f73d9-0bcd-40ae-b607-3d47e616cd12-004.png",
+      "tileSha256": "f3daa97eda2cb72c8512c068058ffd1ecedcd730da685f179b69b652ef3275f5",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-168"
+      },
+      "mode": "full",
+      "selectedNodeId": "168",
+      "layerId": "79",
+      "visualObservation": "Last repeated node-element tile is the same correct node-label crop; redundant tiling observed.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 27,
+      "screenshotId": "shot-14443e04-c709-4cef-985b-30bc93e01105",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-14443e04-c709-4cef-985b-30bc93e01105/metadata.json",
+      "metadataSha256": "68ca3f10d2bebc0609cdd45c06b4423cb3b9caa6b795a4fa23fa66fb043d39bd",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-14443e04-c709-4cef-985b-30bc93e01105/shot-14443e04-c709-4cef-985b-30bc93e01105-001.png",
+      "tileSha256": "7ce05c22620e7e70a16e8aa7ff79ae3eef794b6d6588d0076f45a02b3b02c64f",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "170",
+      "layerId": "80",
+      "visualObservation": "Full detail shows incoming queue170, busy workers, A/B/C example and queue-policy assumptions.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 27,
+      "screenshotId": "shot-2a5ee25d-cd06-4882-94ac-8fba66a684a2",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-2a5ee25d-cd06-4882-94ac-8fba66a684a2/metadata.json",
+      "metadataSha256": "05f0941d6b768d54fa7a23b11bb1eaee197242042ec96678cb426e7c2d4dfd55",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-2a5ee25d-cd06-4882-94ac-8fba66a684a2/shot-2a5ee25d-cd06-4882-94ac-8fba66a684a2-001.png",
+      "tileSha256": "23e1da21f3b4ee4e412c624369b6abf258d725ef8e149fc08a59a7b029f102ce",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "mode": "visible",
+      "selectedNodeId": "170",
+      "layerId": "80",
+      "visualObservation": "Viewport shows the four-node queue/workers/results graph and matching selected queue detail170/layer80.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 27,
+      "screenshotId": "shot-6dbcc47c-2f01-4006-a73f-d9f5f60a48d1",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-6dbcc47c-2f01-4006-a73f-d9f5f60a48d1/metadata.json",
+      "metadataSha256": "57ec4b1b525c25f14fc8bc37078f8703534c7789992417a8accb98735c697c52",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-6dbcc47c-2f01-4006-a73f-d9f5f60a48d1/shot-6dbcc47c-2f01-4006-a73f-d9f5f60a48d1-001.png",
+      "tileSha256": "c1908783e00f97450881c7b9a3c6c1b320f79e0c2a5877aadc5557af2940d4f4",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "171",
+      "layerId": "80",
+      "visualObservation": "Full detail shows Worker1 node171 and its take/process/store/become-available cycle, not graph canvas pixels.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 27,
+      "screenshotId": "shot-96de9b92-a22c-4b57-a75d-04569b35a9b1",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-96de9b92-a22c-4b57-a75d-04569b35a9b1/metadata.json",
+      "metadataSha256": "cd529bf2d62b69f969086288ad42d65d4d6155823ce0fad2f82423e7c0a82792",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-96de9b92-a22c-4b57-a75d-04569b35a9b1/shot-96de9b92-a22c-4b57-a75d-04569b35a9b1-001.png",
+      "tileSha256": "be18c57caeb3527f1214b0e0c5e0e4b0e52156fd0ce92aa2b6083d817403ceff",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "172",
+      "layerId": "80",
+      "visualObservation": "Full detail shows Worker2 node172, independent processing and queue waiting when both workers are occupied.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 27,
+      "screenshotId": "shot-9eb14dc6-6312-446f-a207-ba081b8eccd5",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-9eb14dc6-6312-446f-a207-ba081b8eccd5/metadata.json",
+      "metadataSha256": "46996a6fbdf72ef4b66671c68cd553027a6056caa62086609637ab5ece7da903",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/27/simulated-user/42a0ed1d-ca1a-493d-b36c-ba2004d0e199/screenshots/shot-9eb14dc6-6312-446f-a207-ba081b8eccd5/shot-9eb14dc6-6312-446f-a207-ba081b8eccd5-001.png",
+      "tileSha256": "147ce09fa2d67f776cf2d66c94c94551b223ea1d5d68b11b987356cdae17164d",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "173",
+      "layerId": "80",
+      "visualObservation": "Full detail shows results-store node173, completed output retrieval, ordering and unspecified failure policies.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 28,
+      "screenshotId": "shot-e746498b-e1e4-4a72-87ac-ce327720faae",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-e746498b-e1e4-4a72-87ac-ce327720faae/metadata.json",
+      "metadataSha256": "ab8e932d2ae9b0880762c93706dfeefc8da3fdd4f59535ce1cb13adae4b3f965",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-e746498b-e1e4-4a72-87ac-ce327720faae/shot-e746498b-e1e4-4a72-87ac-ce327720faae-001.png",
+      "tileSha256": "3af27475daa4aed332b82cdde7afade66977edba0d3dc6a76d95ab7b9b8f7f7b",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "175",
+      "layerId": "81",
+      "visualObservation": "Full detail correctly shows normal task flow node175 with Earlier explanation reference control.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 28,
+      "screenshotId": "shot-ec6a4038-3d18-422a-922f-d030c32e3fd0",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-ec6a4038-3d18-422a-922f-d030c32e3fd0/metadata.json",
+      "metadataSha256": "27e15466c6845aca66628f4799a7a5ec1422a51067bd6f943dc86341f9c543e5",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-ec6a4038-3d18-422a-922f-d030c32e3fd0/shot-ec6a4038-3d18-422a-922f-d030c32e3fd0-001.png",
+      "tileSha256": "36dab665a6ee4749494cb18838a43df2eeaecdee8d70465d9faa35fab3b4e8d5",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "176",
+      "layerId": "81",
+      "visualObservation": "Full detail correctly shows both-busy node176 with A/B/C queue state and queue-policy assumptions.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 28,
+      "screenshotId": "shot-22cf9e3b-33aa-45fe-bb77-fc6116b36f17",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-22cf9e3b-33aa-45fe-bb77-fc6116b36f17/metadata.json",
+      "metadataSha256": "e5735f8030769c8b0890f030afa6e132010bb591979cb205cc8c7bdf30672fcc",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-22cf9e3b-33aa-45fe-bb77-fc6116b36f17/shot-22cf9e3b-33aa-45fe-bb77-fc6116b36f17-001.png",
+      "tileSha256": "e2e48eaf1e7fefda8d32fc63adcb6b6f494fcae6fa64d97079f58d75336e2c8b",
+      "captureTarget": {
+        "kind": "element",
+        "elementRef": "node-detail"
+      },
+      "mode": "full",
+      "selectedNodeId": "177",
+      "layerId": "81",
+      "visualObservation": "Full detail correctly shows one-worker-finishes node177, result storage, next-task pickup and independently running other worker.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 28,
+      "screenshotId": "shot-45117101-78cd-442b-9847-b5d80518e15c",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-45117101-78cd-442b-9847-b5d80518e15c/metadata.json",
+      "metadataSha256": "853b9547d39ca6fe463d113309911fbd5b93b5c551353ae0388ac110ebcd1e58",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-45117101-78cd-442b-9847-b5d80518e15c/shot-45117101-78cd-442b-9847-b5d80518e15c-001.png",
+      "tileSha256": "8786e8b2d36c2cf1f8dade0cafa1c6982b6b99e26f6bcab163062443221b5fc8",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "mode": "visible",
+      "selectedNodeId": "175",
+      "layerId": "81",
+      "visualObservation": "Viewport shows three ordered follow-up graph nodes and matching selected normal-flow node175 detail with Earlier explanation control.",
+      "targetPixelMatch": true
+    },
+    {
+      "interactionId": 28,
+      "screenshotId": "shot-96498383-e9f6-4acd-bb73-ddb08d29d2b0",
+      "tileIndex": 0,
+      "metadataPath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-96498383-e9f6-4acd-bb73-ddb08d29d2b0/metadata.json",
+      "metadataSha256": "f3ab204e5e1eceedc41b3920bffa6af05164d30a32b2d48324ea3018d82adcca",
+      "tilePath": "/Users/vishal/.relayer/eval-web/eval-data/runs/run-2026-10-21T14-00-47-155Z-40538473/executions/38774ddb-cd9b-46f7-86ee-5157b299ff74/turns/28/simulated-user/43014029-eb6d-4dcd-9b4d-53086e0df0fb/screenshots/shot-96498383-e9f6-4acd-bb73-ddb08d29d2b0/shot-96498383-e9f6-4acd-bb73-ddb08d29d2b0-001.png",
+      "tileSha256": "b8f8ef3246b9202a992b2b9a0689b56fed795f61602d976fd6063fe2a477c898",
+      "captureTarget": {
+        "kind": "viewport"
+      },
+      "mode": "visible",
+      "selectedNodeId": "170",
+      "layerId": "80",
+      "visualObservation": "Traversed reference destination correctly shows earlier four-node layer80 and selected queue170 detail, with reference breadcrumb context.",
+      "targetPixelMatch": true
+    }
+  ],
+  "arms": [
+    {
+      "harness": "codex-basic",
+      "executionId": "a3246f67-bed4-4485-8338-f436d15a2917",
+      "semanticChildCount": 0,
+      "turns": [
+        {
+          "interactionId": 25,
+          "scores": {
+            "answer_quality": 6,
+            "recursive_coherence": 8,
+            "navigation_value": 5,
+            "presentation_quality": 5,
+            "follow_up_progress": null
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "actions": {
+              "required": 0,
+              "reviewed": 0,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0,
+              "authoredActions": 0,
+              "missingOpportunities": 0,
+              "correctStops": 1
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 3,
+          "tiles": 3,
+          "nativeThreadId": "01a15ec3-be3c-71f2-ac4c-00e4dd13666b",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 213236,
+            "cachedInputTokens": 186240,
+            "outputTokens": 1954,
+            "reasoningOutputTokens": 51,
+            "totalTokens": 215190
+          },
+          "judgeUsage": {
+            "input_tokens": 210153,
+            "cached_input_tokens": 180352,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 7281,
+            "reasoning_output_tokens": 1518
+          },
+          "initialPromptCharacters": 79563,
+          "initialPromptUtf8Bytes": 79567,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 0,
+            "reasonCoverage": "unknown",
+            "readProtocol": null,
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79563,
+              "actualPromptUtf8Bytes": 79567,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "reasonCoverage": "unknown",
+                "readProtocol": null,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 213236,
+                  "cachedInputTokens": 186240,
+                  "outputTokens": 1954,
+                  "reasoningOutputTokens": 51,
+                  "totalTokens": 215190
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-21T14:00:48.609Z",
+            "firstGraphAt": "2026-10-21T14:01:32.942Z",
+            "acceptedAt": "2026-10-21T14:01:45.406Z",
+            "firstGraphSeconds": 44.3,
+            "acceptedSeconds": 56.8,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 26,
+          "scores": {
+            "answer_quality": 4,
+            "recursive_coherence": 4,
+            "navigation_value": 2,
+            "presentation_quality": 3,
+            "follow_up_progress": 7
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "actions": {
+              "required": 0,
+              "reviewed": 0,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0,
+              "authoredActions": 0,
+              "missingOpportunities": 1,
+              "correctStops": 0
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 4,
+          "tiles": 8,
+          "nativeThreadId": "01a15ec4-c701-7df2-bd4e-b0a2aaa19863",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 225077,
+            "cachedInputTokens": 194816,
+            "outputTokens": 2352,
+            "reasoningOutputTokens": 65,
+            "totalTokens": 227429
+          },
+          "judgeUsage": {
+            "input_tokens": 226459,
+            "cached_input_tokens": 193792,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 8838,
+            "reasoning_output_tokens": 906
+          },
+          "initialPromptCharacters": 79820,
+          "initialPromptUtf8Bytes": 79824,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 0,
+            "reasonCoverage": "unknown",
+            "readProtocol": null,
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 79820,
+              "actualPromptUtf8Bytes": 79824,
+              "instructionDelivery": null,
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 0,
+                "reasonCoverage": "unknown",
+                "readProtocol": null,
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 225077,
+                  "cachedInputTokens": 194816,
+                  "outputTokens": 2352,
+                  "reasoningOutputTokens": 65,
+                  "totalTokens": 227429
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-21T14:01:56.527Z",
+            "firstGraphAt": "2026-10-21T14:02:53.569Z",
+            "acceptedAt": "2026-10-21T14:03:03.208Z",
+            "firstGraphSeconds": 57,
+            "acceptedSeconds": 66.7,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 3,
+              "patches": 1,
+              "failed": 1
+            }
+          }
+        }
+      ],
+      "observedCandidateSessionInputTokens": 438313,
+      "observedCandidateSessionOutputTokens": 4306,
+      "initialPromptCharacters": 159383,
+      "presentationScore": 4,
+      "comprehensionScore": 5
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "executionId": "38774ddb-cd9b-46f7-86ee-5157b299ff74",
+      "semanticChildCount": 0,
+      "turns": [
+        {
+          "interactionId": 27,
+          "scores": {
+            "answer_quality": 6,
+            "recursive_coherence": 8,
+            "navigation_value": 5,
+            "presentation_quality": 5,
+            "follow_up_progress": null
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 4,
+              "reviewed": 4,
+              "missing": 0
+            },
+            "actions": {
+              "required": 0,
+              "reviewed": 0,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 4,
+              "reviewed": 4,
+              "missing": 0,
+              "authoredActions": 0,
+              "missingOpportunities": 0,
+              "correctStops": 4
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 5,
+          "tiles": 5,
+          "nativeThreadId": "01a15ec9-d2cd-7831-b2b0-523510cc900e",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 134659,
+            "cachedInputTokens": 121728,
+            "outputTokens": 1908,
+            "reasoningOutputTokens": 54,
+            "totalTokens": 136567
+          },
+          "judgeUsage": {
+            "input_tokens": 382031,
+            "cached_input_tokens": 341120,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 13115,
+            "reasoning_output_tokens": 1719
+          },
+          "initialPromptCharacters": 15953,
+          "initialPromptUtf8Bytes": 15953,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 7,
+            "reasonCoverage": "complete",
+            "readProtocol": 2,
+            "uniqueModulesRead": 7,
+            "uniqueReadRequests": 2,
+            "firstBodyResponses": 7,
+            "replayBodyResponses": 0,
+            "rereadBodyResponses": 0,
+            "duplicateMetadataResponses": 0,
+            "returnedBodyCharacters": 7528,
+            "returnedBodyBytes": 7530,
+            "readReasons": [
+              {
+                "requestKey": "initial-authoring",
+                "replayed": false,
+                "sequence": 119,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Read authority and visual graph publication recipes"
+                },
+                "entries": [
+                  {
+                    "nodeId": 95,
+                    "key": "completion-authority",
+                    "delivery": "body",
+                    "bodyCharacters": 889,
+                    "bodyBytes": 889
+                  },
+                  {
+                    "nodeId": 97,
+                    "key": "publish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 2025,
+                    "bodyBytes": 2025
+                  },
+                  {
+                    "nodeId": 99,
+                    "key": "detail-basic",
+                    "delivery": "body",
+                    "bodyCharacters": 1048,
+                    "bodyBytes": 1048
+                  },
+                  {
+                    "nodeId": 101,
+                    "key": "detail-theme",
+                    "delivery": "body",
+                    "bodyCharacters": 716,
+                    "bodyBytes": 716
+                  },
+                  {
+                    "nodeId": 103,
+                    "key": "layout",
+                    "delivery": "body",
+                    "bodyCharacters": 1231,
+                    "bodyBytes": 1233
+                  }
+                ]
+              },
+              {
+                "requestKey": "finish-and-preview",
+                "replayed": false,
+                "sequence": 120,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Check preview and terminal publication requirements"
+                },
+                "entries": [
+                  {
+                    "nodeId": 98,
+                    "key": "finish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 920,
+                    "bodyBytes": 920
+                  },
+                  {
+                    "nodeId": 115,
+                    "key": "preview",
+                    "delivery": "body",
+                    "bodyCharacters": 699,
+                    "bodyBytes": 699
+                  }
+                ]
+              }
+            ],
+            "searchReasons": [],
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 15953,
+              "actualPromptUtf8Bytes": 15953,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v2",
+                "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 7,
+                "reasonCoverage": "complete",
+                "readProtocol": 2,
+                "uniqueModulesRead": 7,
+                "uniqueReadRequests": 2,
+                "firstBodyResponses": 7,
+                "replayBodyResponses": 0,
+                "rereadBodyResponses": 0,
+                "duplicateMetadataResponses": 0,
+                "returnedBodyCharacters": 7528,
+                "returnedBodyBytes": 7530,
+                "readReasons": [
+                  {
+                    "requestKey": "initial-authoring",
+                    "replayed": false,
+                    "sequence": 119,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Read authority and visual graph publication recipes"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 95,
+                        "key": "completion-authority",
+                        "delivery": "body",
+                        "bodyCharacters": 889,
+                        "bodyBytes": 889
+                      },
+                      {
+                        "nodeId": 97,
+                        "key": "publish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 2025,
+                        "bodyBytes": 2025
+                      },
+                      {
+                        "nodeId": 99,
+                        "key": "detail-basic",
+                        "delivery": "body",
+                        "bodyCharacters": 1048,
+                        "bodyBytes": 1048
+                      },
+                      {
+                        "nodeId": 101,
+                        "key": "detail-theme",
+                        "delivery": "body",
+                        "bodyCharacters": 716,
+                        "bodyBytes": 716
+                      },
+                      {
+                        "nodeId": 103,
+                        "key": "layout",
+                        "delivery": "body",
+                        "bodyCharacters": 1231,
+                        "bodyBytes": 1233
+                      }
+                    ]
+                  },
+                  {
+                    "requestKey": "finish-and-preview",
+                    "replayed": false,
+                    "sequence": 120,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Check preview and terminal publication requirements"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 98,
+                        "key": "finish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 920,
+                        "bodyBytes": 920
+                      },
+                      {
+                        "nodeId": 115,
+                        "key": "preview",
+                        "delivery": "body",
+                        "bodyCharacters": 699,
+                        "bodyBytes": 699
+                      }
+                    ]
+                  }
+                ],
+                "searchReasons": [],
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 134659,
+                  "cachedInputTokens": 121728,
+                  "outputTokens": 1908,
+                  "reasoningOutputTokens": 54,
+                  "totalTokens": 136567
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-21T14:07:26.998Z",
+            "firstGraphAt": "2026-10-21T14:08:22.903Z",
+            "acceptedAt": "2026-10-21T14:08:22.982Z",
+            "firstGraphSeconds": 55.9,
+            "acceptedSeconds": 56,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        },
+        {
+          "interactionId": 28,
+          "scores": {
+            "answer_quality": 7,
+            "recursive_coherence": 7,
+            "navigation_value": 6,
+            "presentation_quality": 7,
+            "follow_up_progress": 8
+          },
+          "coverage": {
+            "complete": true,
+            "layers": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "nodes": {
+              "required": 3,
+              "reviewed": 3,
+              "missing": 0
+            },
+            "actions": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "allocations": {
+              "required": 4,
+              "reviewed": 4,
+              "missing": 0,
+              "authoredActions": 1,
+              "missingOpportunities": 0,
+              "correctStops": 3
+            },
+            "turn": {
+              "required": 1,
+              "reviewed": 1,
+              "missing": 0
+            },
+            "missingSubjects": []
+          },
+          "screenshots": 7,
+          "tiles": 7,
+          "nativeThreadId": "01a15eca-d4c0-7991-9a6e-84a5ce5f7644",
+          "nativeUsageUpdateCount": 6,
+          "observedNativeSessionCounters": {
+            "inputTokens": 148889,
+            "cachedInputTokens": 130944,
+            "outputTokens": 2039,
+            "reasoningOutputTokens": 137,
+            "totalTokens": 150928
+          },
+          "judgeUsage": {
+            "input_tokens": 901402,
+            "cached_input_tokens": 841600,
+            "cache_write_input_tokens": 0,
+            "output_tokens": 17785,
+            "reasoning_output_tokens": 1533
+          },
+          "initialPromptCharacters": 16210,
+          "initialPromptUtf8Bytes": 16210,
+          "instructionRetrieval": {
+            "status": "recorded",
+            "successfulReads": 9,
+            "reasonCoverage": "complete",
+            "readProtocol": 2,
+            "uniqueModulesRead": 9,
+            "uniqueReadRequests": 2,
+            "firstBodyResponses": 9,
+            "replayBodyResponses": 0,
+            "rereadBodyResponses": 0,
+            "duplicateMetadataResponses": 0,
+            "returnedBodyCharacters": 9307,
+            "returnedBodyBytes": 9309,
+            "readReasons": [
+              {
+                "requestKey": "initial-authoring",
+                "replayed": false,
+                "sequence": 142,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Read authority and visual publication instructions"
+                },
+                "entries": [
+                  {
+                    "nodeId": 95,
+                    "key": "completion-authority",
+                    "delivery": "body",
+                    "bodyCharacters": 889,
+                    "bodyBytes": 889
+                  },
+                  {
+                    "nodeId": 97,
+                    "key": "publish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 2025,
+                    "bodyBytes": 2025
+                  },
+                  {
+                    "nodeId": 99,
+                    "key": "detail-basic",
+                    "delivery": "body",
+                    "bodyCharacters": 1048,
+                    "bodyBytes": 1048
+                  },
+                  {
+                    "nodeId": 101,
+                    "key": "detail-theme",
+                    "delivery": "body",
+                    "bodyCharacters": 716,
+                    "bodyBytes": 716
+                  }
+                ]
+              },
+              {
+                "requestKey": "flow-publication",
+                "replayed": false,
+                "sequence": 145,
+                "reason": {
+                  "purpose": "authoring",
+                  "detail": "Prepare temporal flow, prior-view control and final acceptance"
+                },
+                "entries": [
+                  {
+                    "nodeId": 98,
+                    "key": "finish-current",
+                    "delivery": "body",
+                    "bodyCharacters": 920,
+                    "bodyBytes": 920
+                  },
+                  {
+                    "nodeId": 103,
+                    "key": "layout",
+                    "delivery": "body",
+                    "bodyCharacters": 1231,
+                    "bodyBytes": 1233
+                  },
+                  {
+                    "nodeId": 104,
+                    "key": "navigation-reference",
+                    "delivery": "body",
+                    "bodyCharacters": 808,
+                    "bodyBytes": 808
+                  },
+                  {
+                    "nodeId": 102,
+                    "key": "detail-controls",
+                    "delivery": "body",
+                    "bodyCharacters": 971,
+                    "bodyBytes": 971
+                  },
+                  {
+                    "nodeId": 115,
+                    "key": "preview",
+                    "delivery": "body",
+                    "bodyCharacters": 699,
+                    "bodyBytes": 699
+                  }
+                ]
+              }
+            ],
+            "searchReasons": [],
+            "successfulSearches": 0
+          },
+          "timing": {
+            "schemaVersion": 1,
+            "instructionMetrics": {
+              "schemaVersion": 1,
+              "actualPromptCharacters": 16210,
+              "actualPromptUtf8Bytes": 16210,
+              "instructionDelivery": {
+                "versionKey": "codex-instruction-graph-v2",
+                "digest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224"
+              },
+              "instructionRetrieval": {
+                "status": "recorded",
+                "successfulReads": 9,
+                "reasonCoverage": "complete",
+                "readProtocol": 2,
+                "uniqueModulesRead": 9,
+                "uniqueReadRequests": 2,
+                "firstBodyResponses": 9,
+                "replayBodyResponses": 0,
+                "rereadBodyResponses": 0,
+                "duplicateMetadataResponses": 0,
+                "returnedBodyCharacters": 9307,
+                "returnedBodyBytes": 9309,
+                "readReasons": [
+                  {
+                    "requestKey": "initial-authoring",
+                    "replayed": false,
+                    "sequence": 142,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Read authority and visual publication instructions"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 95,
+                        "key": "completion-authority",
+                        "delivery": "body",
+                        "bodyCharacters": 889,
+                        "bodyBytes": 889
+                      },
+                      {
+                        "nodeId": 97,
+                        "key": "publish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 2025,
+                        "bodyBytes": 2025
+                      },
+                      {
+                        "nodeId": 99,
+                        "key": "detail-basic",
+                        "delivery": "body",
+                        "bodyCharacters": 1048,
+                        "bodyBytes": 1048
+                      },
+                      {
+                        "nodeId": 101,
+                        "key": "detail-theme",
+                        "delivery": "body",
+                        "bodyCharacters": 716,
+                        "bodyBytes": 716
+                      }
+                    ]
+                  },
+                  {
+                    "requestKey": "flow-publication",
+                    "replayed": false,
+                    "sequence": 145,
+                    "reason": {
+                      "purpose": "authoring",
+                      "detail": "Prepare temporal flow, prior-view control and final acceptance"
+                    },
+                    "entries": [
+                      {
+                        "nodeId": 98,
+                        "key": "finish-current",
+                        "delivery": "body",
+                        "bodyCharacters": 920,
+                        "bodyBytes": 920
+                      },
+                      {
+                        "nodeId": 103,
+                        "key": "layout",
+                        "delivery": "body",
+                        "bodyCharacters": 1231,
+                        "bodyBytes": 1233
+                      },
+                      {
+                        "nodeId": 104,
+                        "key": "navigation-reference",
+                        "delivery": "body",
+                        "bodyCharacters": 808,
+                        "bodyBytes": 808
+                      },
+                      {
+                        "nodeId": 102,
+                        "key": "detail-controls",
+                        "delivery": "body",
+                        "bodyCharacters": 971,
+                        "bodyBytes": 971
+                      },
+                      {
+                        "nodeId": 115,
+                        "key": "preview",
+                        "delivery": "body",
+                        "bodyCharacters": 699,
+                        "bodyBytes": 699
+                      }
+                    ]
+                  }
+                ],
+                "searchReasons": [],
+                "successfulSearches": 0
+              },
+              "providerSessionUsage": {
+                "status": "recorded",
+                "scope": "native-session-cumulative-receipt",
+                "counters": {
+                  "inputTokens": 148889,
+                  "cachedInputTokens": 130944,
+                  "outputTokens": 2039,
+                  "reasoningOutputTokens": 137,
+                  "totalTokens": 150928
+                },
+                "nativeChildCoverage": "unknown",
+                "reason": null
+              }
+            },
+            "sentAt": "2026-10-21T14:08:33.337Z",
+            "firstGraphAt": "2026-10-21T14:09:16.648Z",
+            "acceptedAt": "2026-10-21T14:09:32.944Z",
+            "firstGraphSeconds": 43.3,
+            "acceptedSeconds": 59.6,
+            "graphWriteRejections": 0,
+            "programRuns": {
+              "programs": 4,
+              "patches": 0,
+              "failed": 0
+            }
+          }
+        }
+      ],
+      "observedCandidateSessionInputTokens": 283548,
+      "observedCandidateSessionOutputTokens": 3947,
+      "initialPromptCharacters": 32163,
+      "presentationScore": 6,
+      "comprehensionScore": 6.5
+    }
+  ],
+  "limits": [
+    "One matched two-turn case, one frozen screenshot judge per accepted turn; non-blind pilot, no statistical equivalence claim.",
+    "Ordered 1\u20138 ratings; missing ratings remain unknown, first-turn follow-up progress is not applicable.",
+    "Candidate observed native-session counters are separate from judge inference; complete native-child usage and dollar spend are unknown.",
+    "Initial capacity-failed run remains excluded from this matched retry comparison.",
+    "Manual pixel audit is a sample, not an independent quality rejudgment.",
+    "No pull request is attached; this workspace review is non-certifying until copied to the PR against this exact source digest.",
+    "This unchanged-source repeat and the prior completed comparison make two paired trials of the same case. They do not establish equivalence, a population-average benefit, or a general quality difference."
+  ],
+  "candidateMetricsSha256": "acb2896859bced0d0c6e51ba6ec71b9280621280bef3553e00484f2b1c530b2b",
+  "renderedSamplesSha256": "5999510f0df20161bf2a1ece56ae838f0fbcc6d9c022d6b2f7dff13326055fdc",
+  "priorRunId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+  "priorEvidenceFilesVerifiedUnchanged": 47,
+  "excludedAttemptRunId": "run-2026-10-21T13-47-16-083Z-ad7fb067",
+  "failedAttemptEvidenceSha256": "56406a454785418918d1157ee7e6fcea8a42d10ad6c57187efe4adb8e70570c2",
+  "retryPinCheckSha256": "8445105e08ba0c20f34d28a0d26c0f2ddd74480de682bac2f62dc9d265a02e25",
+  "summarySha256": "236d08e3280d32af8ca60c8dc5bce1179ae59450bbab083b3b13dd1e2bcf9b0e",
+  "verificationSha256": "79256458b09d912a8f0ced32c21a6ce32f0dc4bb88c60cd082603d67968e9e45",
+  "crossTrialComparison": [
+    {
+      "runId": "run-2026-10-20T19-15-56-658Z-4b80c41a",
+      "arms": [
+        {
+          "harness": "codex-basic",
+          "presentation": 4.5,
+          "comprehension": 5,
+          "observedCandidateInputTokens": 415138
+        },
+        {
+          "harness": "codex-instruction-graph-v2",
+          "presentation": 3.5,
+          "comprehension": 4.5,
+          "observedCandidateInputTokens": 275254
+        }
+      ]
+    },
+    {
+      "runId": "run-2026-10-21T14-00-47-155Z-40538473",
+      "arms": [
+        {
+          "harness": "codex-basic",
+          "presentation": 4,
+          "comprehension": 5,
+          "observedCandidateInputTokens": 438313
+        },
+        {
+          "harness": "codex-instruction-graph-v2",
+          "presentation": 6,
+          "comprehension": 6.5,
+          "observedCandidateInputTokens": 283548
+        }
+      ]
+    }
+  ],
+  "crossTrialInterpretation": "The direction of observed presentation ratings reversed: control4.5 vs V2 3.5 previously, control4 vs V2 6 in this repeat. Two paired trials of this same case, using the same non-blind screenshot judge, do not establish general quality equivalence or a causal quality difference.",
+  "judgeInferenceByArm": [
+    {
+      "harness": "codex-basic",
+      "usage": {
+        "input_tokens": 436612,
+        "cached_input_tokens": 374144,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 16119,
+        "reasoning_output_tokens": 2424
+      },
+      "scope": "Two completed screenshot-judge sessions; excluded from candidate token figures."
+    },
+    {
+      "harness": "codex-instruction-graph-v2",
+      "usage": {
+        "input_tokens": 1283433,
+        "cached_input_tokens": 1182720,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 30900,
+        "reasoning_output_tokens": 3252
+      },
+      "scope": "Two completed screenshot-judge sessions; excluded from candidate token figures."
+    }
+  ],
+  "captureObservations": [
+    {
+      "screenshotId": "shot-106f73d9-0bcd-40ae-b607-3d47e616cd12",
+      "interactionId": 26,
+      "target": {
+        "kind": "element",
+        "elementRef": "node-168"
+      },
+      "mode": "full",
+      "tileCount": 4,
+      "tileWidth": 303,
+      "tileHeight": 45,
+      "allTilesByteIdentical": true,
+      "tileSha256": "f3daa97eda2cb72c8512c068058ffd1ecedcd730da685f179b69b652ef3275f5",
+      "assessment": "Non-blocking redundant tiling of the correct node-label target. Label-only pixels do not establish detail content; detail-content judgments were checked against matching viewport/detail citations."
+    }
+  ]
+}

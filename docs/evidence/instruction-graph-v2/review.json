@@ -1,0 +1,240 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "/root/adversarial_review",
+  "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+  "sourceSnapshot": "source-snapshot.json",
+  "sourceFilesHashVerified": 42,
+  "corpusVersionKey": "codex-instruction-graph-v2",
+  "corpusDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224",
+  "scope": [
+    "PRD 12.4A and IG-001 through IG-013 checkpoint mapping, including TEL-005 frame inventory",
+    "Completion/capability-epoch/digest scoped instruction issuance, exact retries, suppressed duplicates, explicit rereads and concurrent requests",
+    "Pinned-corpus authority, legacy body-route refusal and active-epoch revalidation",
+    "V2 corpus mechanics against production client and sealed Advance/Return rules",
+    "UTF-8 chunk bounds, exact request identity, sanitized physical-delivery receipts and missing-evidence handling",
+    "Codex bootstrap, V6/native-helper propagation, runtime publication/pinning and inference-free recipe journey",
+    "Matched Eval pairing, both-route provider/model/family preflight and reason/usage evidence",
+    "Exact telemetry module-name registration and enabled-Current prerequisite in the shipped-recipe fixture"
+  ],
+  "resolvedFindings": [
+    "Core now enforces the declared 2400 UTF-8 byte bound with a multibyte boundary regression.",
+    "Sealed Advance guidance now requires the prospective Return requirements before Advance; accepted-history changes remain staged until terminal publication.",
+    "Publication and finish recipes now call out required attached navigation and unfinished drafts; layout guidance preserves the 1..5 and justified 6..8 production rule.",
+    "Recorder preserves valid 128-Unicode-scalar request keys instead of truncating by UTF-16 units.",
+    "Runtime journey now executes the shipped publication, visual-detail and finish recipe text through the real client/server seam."
+  ],
+  "verdict": "no_reviewed_source_or_evidence_blocker",
+  "unresolvedFindings": [],
+  "limitations": [
+    "Reason strings establish only stated operational purposes; issuance records do not prove comprehension.",
+    "V2 quality equivalence and whole-task context savings remain unproven until separately authorized live comparison and review.",
+    "V2 combines changed instruction chunking/content with retrieval bookkeeping; a pilot cannot isolate the contribution of each change.",
+    "Search-specific source, fixture and evidence review is recorded below with one independent executable test run; full heavy/live proof remains separate.",
+    "Final scoped verification and live-evidence audit is recorded below; the failed full npm check is not reclassified as a passing command."
+  ],
+  "status": "non_certifying_without_pr",
+  "invalidation": "Any change to a file in the source snapshot invalidates this assertion.",
+  "searchReview": {
+    "reviewer": "/root/adversarial_review",
+    "sourceDigest": "93c5d18cde68b8a0d58d098d36ac33da50220af342421a9b6b9a00443525333f",
+    "scopedBenchmarkSourceDigest": "f0c288397cc8175b42274d0afffc2ac34b07c165f8ed5f68fc7c391d0638ca1a",
+    "fileHashes": {
+      "docs/evidence/instruction-graph-v2/search-benchmark.json": "7223fca9d9a60b9eee293026312848622f0363bda7808e4ffb3291a2ac052b7b",
+      "fixtures/instruction-graph-v2-search-cases.json": "4482a793bc4df99d0ee8346ef7dd40b65387ef0f5cf2d2c10cd5815944187d7b",
+      "fixtures/instruction-graph-v2.json": "b55b45998ff65f948ac56e4c083d67a1434b5a9a9fd1054d551206edab6286d3",
+      "crates/relayer-graph-server/tests/instruction_graph_search_v2.rs": "7ba7ee54f57eb691997884bfd9210a79d776bc3378c954e720fcb25ef808f9af",
+      "crates/relayer-graph-server/src/instruction_retrieval.rs": "d110d4aa00435b696ef98c3906f1bf074d2abb36937c471880c6175a2f7cf03b",
+      "crates/relayer-graph-server/src/lib.rs": "fa1d51a4151ad9726cb98d447dc63f944ab8308ecf2960055e17d593000757b7"
+    },
+    "verdict": "no_reviewed_search_mechanics_or_evidence_blocker",
+    "observations": [
+      "Verified all 14 listed benchmark source hashes and independently recomputed their scoped digest; all 41 overall snapshot file hashes remain current.",
+      "Independently compared the four declared prerequisite closures against the frozen corpus; every gold case matches the actual transitive prerequisites.",
+      "Exact canonical-title enumeration proves lookup/projection mechanics only. The 12 natural-phrase exact misses are explicitly separate, with semantic relevance unmeasured.",
+      "Read the production authenticated-router/Ladybug fixture and its exact row-limit, five body-projection denials, foreign-corpus isolation and prerequisite-title lookup assertions.",
+      "Verified the captured test executable SHA-256, then independently executed that existing binary without building or inference."
+    ],
+    "independentExecution": {
+      "command": "target/debug/deps/instruction_graph_search_v2-f5f0b0e4dd03a25a --exact actual_v2_corpus_search_is_bounded_exact_and_dependency_complete --nocapture",
+      "executableSha256": "64a1ab7858f2d85cf03f4c83cc4365ca01c1f879cb7cfb0ef9b7f261db441a31",
+      "exitCode": 0,
+      "passed": 1,
+      "failed": 0,
+      "testSeconds": 2.72,
+      "observedMetrics": {
+        "aboveHardRowCapRejected": true,
+        "bodyProjectionsRejected": 5,
+        "corpusDigest": "e2e342244c7eb98e16ee142346e90fdd07bb62871b62a5740d429847b6e04224",
+        "corpusVersionKey": "codex-instruction-graph-v2",
+        "exactTitleLookups": {
+          "passed": 23,
+          "total": 23
+        },
+        "foreignCorpusMatches": 0,
+        "manifestDependencyGoldCases": 4,
+        "naturalPhraseExactMatches": {
+          "hits": 0,
+          "interpretation": "Exact title equality supplies no natural-language relevance matching",
+          "phrases": 12
+        },
+        "semanticRelevance": "unmeasured",
+        "truncatedDirectoryRows": [
+          5,
+          8
+        ],
+        "unsupportedTextQueriesRejected": 5
+      },
+      "build": "No compilation or provisioning; reused the executable whose hash matches the benchmark receipt."
+    },
+    "limits": [
+      "Does not establish semantic search, model topic selection, relevance precision/recall, task quality, rendered presentation, usage savings or native-helper coverage.",
+      "The four dependency cases validate declared manifest closure and exact title lookup, not arbitrary graph-neighbor traversal or a semantic dependency oracle.",
+      "Full deterministic heavy verification and V2 live comparison remain separate requirements; this independent run covers this named search test only."
+    ],
+    "status": "non_certifying_without_pr",
+    "reuseApplicability": {
+      "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+      "reason": "Only telemetry inventory, PRD mapping and recipe-fixture feature configuration changed; all recorded search-production, corpus, gold-fixture and benchmark-test hashes remain identical."
+    }
+  },
+  "verificationDeltaReview": {
+    "previousSourceDigest": "93c5d18cde68b8a0d58d098d36ac33da50220af342421a9b6b9a00443525333f",
+    "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+    "changedFiles": {
+      "desktop/shared/telemetry-module-inventory.mjs": "9e399fc98854377d976753ab3a3402f6e84ad7618e0ba8b10fce861f2f8956cc",
+      "docs/prd/index.html": "edfa617abb6e08c33978251a7beebb261a640f3c3ba78dff974436259717f8bc",
+      "test/instruction-graph-e2e.test.mjs": "c9a9f8e4a638b49192729df1f5b24b5b99effffacc11fe48b13c904403c57b92"
+    },
+    "verdict": "no_reviewed_delta_blocker",
+    "findings": [
+      "V2 recipe fixture now explicitly enables schemaRead/rootCurrentWrite required to execute the shipped Current recipe; original recipe assertions and reopen checks remain.",
+      "Telemetry inventory adds exactly the new compiled instruction-graph-v2 module and Rust instruction_retrieval module; privacy admission rules are unchanged.",
+      "PRD IG-013/TEL-005 maps this inventory seam explicitly."
+    ],
+    "evidenceObserved": {
+      "path": ".relayer/instruction-graph-v2-recipe-final.log",
+      "sha256": "b99565f3ab42d9e77b4083b5872aa400943d241f00bf9225c1b883e6625ae772",
+      "passed": 4,
+      "failed": 0,
+      "scope": "Read the focused log; did not independently rerun this recipe suite."
+    },
+    "limits": [
+      "Preserve the earlier disabled-Current fixture failure and telemetry-inventory failure.",
+      "Full current-snapshot deterministic verification remains pending; preceding source snapshots do not certify changed fixtures."
+    ]
+  },
+  "chapterReuseReview": {
+    "reviewer": "/root/adversarial_review",
+    "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+    "earlierSourceDigest": "93c5d18cde68b8a0d58d098d36ac33da50220af342421a9b6b9a00443525333f",
+    "verdict": "reuse_of_unchanged_scoped_chapters_is_sound_not_a_full_command_pass",
+    "exactDelta": {
+      "desktop/shared/telemetry-module-inventory.mjs": {
+        "before": null,
+        "current": "9e399fc98854377d976753ab3a3402f6e84ad7618e0ba8b10fce861f2f8956cc"
+      },
+      "docs/prd/index.html": {
+        "before": "9356c25b27fe852640f1d14eb080e1a43cd04b34f723197c53db8e4bb22b74a5",
+        "current": "edfa617abb6e08c33978251a7beebb261a640f3c3ba78dff974436259717f8bc"
+      },
+      "test/instruction-graph-e2e.test.mjs": {
+        "before": "d7b10f7b41688eabeadd2ed45cafdd3b90a665aed1742cc9e825fce68392f126",
+        "current": "c9a9f8e4a638b49192729df1f5b24b5b99effffacc11fe48b13c904403c57b92"
+      }
+    },
+    "logsInspected": {
+      ".relayer/instruction-graph-v2-check-final.log": "dcd28891411204016a1a209dcd26ef538ca10a04de1aa842f624ded618410225",
+      ".relayer/instruction-graph-v2-recipe-final.log": "b99565f3ab42d9e77b4083b5872aa400943d241f00bf9225c1b883e6625ae772",
+      ".relayer/instruction-graph-v2-telemetry-repair.log": "3198a019381cd8ec1df5d5cadcdc68104b738d86283eefa9c082eb25c6c287bb"
+    },
+    "observedResults": {
+      "fullNpmCheck": {
+        "exitCode": 1,
+        "vitestFilesPassed": 341,
+        "vitestFilesFailed": 2,
+        "vitestFilesSkipped": 1,
+        "vitestTestsPassed": 4592,
+        "vitestTestsFailed": 2,
+        "vitestTestsSkipped": 3,
+        "failedBoundaries": [
+          "Disabled-Current shipped-recipe fixture",
+          "Missing new module names in telemetry inventory"
+        ]
+      },
+      "repairedRuntimeJourney": {
+        "filesPassed": 1,
+        "testsPassed": 4,
+        "testsFailed": 0
+      },
+      "repairedTelemetryPortfolio": {
+        "filesPassed": 5,
+        "testsPassed": 19,
+        "testsFailed": 0
+      }
+    },
+    "reasoning": [
+      "All Rust production/test inputs, corpus, harness implementation, graph client and Eval comparison files are byte-identical across the recorded three-file delta. Reusing their completed chapters preserves the tested executable snapshot.",
+      "The changed fixture configuration is covered by its focused four-test actual runtime/client journey, with original assertions retained.",
+      "The changed static telemetry inventory is covered by all five affected telemetry suites; the only production change is two exact code-owned names.",
+      "The PRD checkpoint-mapping delta requires its own readability gate. Chapters skipped by the failed npm && chain must run separately and cannot be inferred from that outer command."
+    ],
+    "limitations": [
+      "No claim that npm run check passed on either complete snapshot; its failure remains durable evidence.",
+      "This is a portfolio of explicitly scoped chapter results, not a green monolithic invocation. Do not add overlapping passing counts to claim a new full-suite total.",
+      "Secret-boundary, Python, receipt/readability, final build and browser results must be recorded from their separate completed commands. Parent reports these remaining test/lint chapters passed; this review has not independently inspected their outputs. Final build/browser were still finishing when this assertion was written.",
+      "No unaffected Rust/full-suite rerun is required solely because of this reviewed delta; new source changes, failures or unresolved boundaries would invalidate that reuse judgment."
+    ],
+    "status": "non_certifying_without_pr"
+  },
+  "finalEvidenceAudit": {
+    "reviewer": "/root/adversarial_review",
+    "sourceDigest": "50a7554dcb602960ec1ab2b7ab685cdb70420c06bc2f611c37d030b700409237",
+    "evidenceHashes": {
+      "docs/evidence/instruction-graph-v2/live-comparison.json": "7ce6d3428d27f1b97cecce95e09b0b70dcbe240ffc8c9387768eef652940f62a",
+      "docs/evidence/instruction-graph-v2/trace-analysis.json": "690fc99f1c980f405345477f06bf83c3fd57dc24bbaae338a5be6b9cf8ebb5c1",
+      "docs/evidence/instruction-graph-v2/verification.json": "a73d077854ca1879cee2f222130813e51e35fc1e16b2ce8dc9f14579f8f902f5"
+    },
+    "runId": "run-2026-10-20T17-15-46-850Z-7c3b327d",
+    "immutableBundleSha256": "1410af35c076c28366e5ab656d8262634e9daba8b12f756b3173be3fe3bc6170",
+    "verdict": "no_reviewed_evidence_claim_blocker",
+    "independentChecks": [
+      "All 42 source hashes still match. All eight verification log hashes and sizes match.",
+      "Original immutable live bundle hash and byte length match the sanitized receipt; its recorded comparison object matches exactly.",
+      "All four provider event streams and graph-operation ledgers match recorded SHA-256, length, count and completion identities.",
+      "Recomputed each turn using current production instructionMetricsFromTrace and each cell using aggregateInstructionMetrics; every metric matched the immutable run.",
+      "Recomputed production finalizeInstructionGraphComparison: controlled-route/input/permission/V6 and exact-pin/reasoned-retrieval checks passed.",
+      "Independently checked trace-analysis per-request sums, first/max inputs, uncached arithmetic, reason histories and artifact receipts.",
+      "Inspected completed build log and 46 browser PASS chapter lines. Earlier failed full-check results remain explicitly separate from scoped repair and remaining-chapter receipts."
+    ],
+    "observed": {
+      "acceptedRoots": 4,
+      "distinctNativeUsageSessions": 4,
+      "semanticChildren": 0,
+      "reasonedRetrievalRequests": 4,
+      "instructionBodyDeliveries": 16,
+      "returnedBodyCharacters": 16835,
+      "returnedBodyBytes": 16839,
+      "instructionSearches": 0,
+      "rereadBodyResponses": 0,
+      "replayBodyResponses": 0,
+      "duplicateMetadataResponses": 0,
+      "controlPromptCharacters": 159383,
+      "treatmentPromptCharacters": 32163,
+      "controlObservedInputTokens": 404531,
+      "treatmentObservedInputTokens": 281600,
+      "controlUncachedInputTokens": 57907,
+      "treatmentUncachedInputTokens": 39936,
+      "controlGradingInclusiveMs": 104908,
+      "treatmentGradingInclusiveMs": 95734
+    },
+    "limits": [
+      "No duplicate-body demand occurred in this pilot; zero rereads/suppressed duplicates do not causally demonstrate the effect of server suppression.",
+      "The comparison combines instruction chunking/content and retrieval bookkeeping; one ordered two-turn pilot does not isolate causes or establish general savings.",
+      "Native-helper coverage and whole-task total input remain unknown. Reasons are stated operational purposes, not private deliberation or proof of comprehension.",
+      "Presentation quality remains unjudged by this audit; no semantic-quality equivalence is certified.",
+      "Full npm run check remains exit 1. Its two known affected boundaries passed scoped repairs; unchanged chapter reuse and separately completed build/browser results are a scoped portfolio, not a green full command.",
+      "No new provider inference or full-suite rerun was performed by this reviewer."
+    ],
+    "status": "non_certifying_without_pr"
+  }
+}

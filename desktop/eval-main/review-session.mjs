@@ -99,6 +99,9 @@ function reviewUiState(state) {
 }
 
 export class ReviewSession {
+  #screenshotTail = Promise.resolve();
+  #captureUnavailable = null;
+
   constructor({
     executionId,
     readOnly,
@@ -146,13 +149,25 @@ export class ReviewSession {
   async screenshot({ target, mode = "visible", label }) {
     validateScreenshotInput({ target, mode, label });
     this.#assertOpen();
+    const input = structuredClone({ target, mode, label });
+    const result = this.#screenshotTail.then(() => this.#captureScreenshot(input));
+    this.#screenshotTail = result.catch(() => {});
+    return result;
+  }
+
+  async #captureScreenshot({ target, mode, label }) {
+    this.#assertOpen();
+    if (this.#captureUnavailable) {
+      throw new Error("Review screenshots are unavailable after an uncertain capture.", { cause: this.#captureUnavailable });
+    }
     const initialState = await this.#snapshot();
     let plan;
     let state;
     let ownsCapture = false;
+    let captureError;
     const tileArtifacts = [];
     try {
-      plan = await this.#rendererCommand("capturePlan", { target, mode });
+      plan = await this.#captureCommand("capturePlan", { target, mode });
       ownsCapture = target.kind === "element";
       state = await this.#snapshot();
       if (presentationKey(state) !== presentationKey(initialState)) {
@@ -162,7 +177,7 @@ export class ReviewSession {
       for (const tile of plan.tiles) {
         const prepared = target.kind === "viewport"
           ? { index: tile.index, clip: plan.clip }
-          : await this.#rendererCommand("prepareCaptureTile", tile);
+          : await this.#captureCommand("prepareCaptureTile", tile);
         if (presentationKey(await this.#snapshot()) !== presentationKey(state)) {
           throw new Error("The production workspace changed presentation while capturing the screenshot.");
         }
@@ -189,8 +204,19 @@ export class ReviewSession {
           contentDigest: sha256(bytes),
         });
       }
+    } catch (error) {
+      captureError = error;
+      throw error;
     } finally {
-      if (ownsCapture) await this.#rendererCommand("restoreCapture");
+      if (ownsCapture) {
+        try {
+          await this.#captureCommand("restoreCapture");
+        } catch (error) {
+          this.#captureUnavailable = error;
+          if (captureError) throw new AggregateError([captureError, error], "Review screenshot capture and restoration failed.");
+          throw error;
+        }
+      }
     }
 
     const screenshotId = `shot-${randomUUID()}`;
@@ -367,12 +393,23 @@ export class ReviewSession {
     });
   }
 
+  async #captureCommand(command, payload) {
+    try {
+      return await this.#rendererCommand(command, payload);
+    } catch (error) {
+      // A timed-out renderer command can still finish later and mutate its
+      // capture slot. Refuse subsequent screenshots rather than reuse it.
+      if (error?.code === "REVIEW_COMMAND_TIMEOUT") this.#captureUnavailable = error;
+      throw error;
+    }
+  }
+
   #rendererCommand(command, payload) {
     if (this.transport) {
       let timer;
       return Promise.race([
         this.transport.command(command, payload),
-        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Production review command timed out: ${command}`)), this.commandTimeoutMs); }),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(Object.assign(new Error(`Production review command timed out: ${command}`), { code: "REVIEW_COMMAND_TIMEOUT" })), this.commandTimeoutMs); }),
       ]).finally(() => clearTimeout(timer));
     }
     if ((this.transport ? this.transport.isClosed() : this.webContents.isDestroyed?.())) return Promise.reject(new Error("The production review window is closed."));
@@ -390,7 +427,7 @@ export class ReviewSession {
       };
       const timeout = setTimeout(() => {
         cleanup();
-        reject(new Error(`Production review command timed out: ${command}`));
+        reject(Object.assign(new Error(`Production review command timed out: ${command}`), { code: "REVIEW_COMMAND_TIMEOUT" }));
       }, this.commandTimeoutMs);
       this.ipc.on(responseChannel, onResponse);
       this.webContents.send(COMMAND_CHANNEL, { responseChannel, command, payload });

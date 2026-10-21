@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "sourceDigest": "e382558a8456b94d23040bf68edba924345a2db0928b6961cae04a64f336141d",
+  "sourceFiles": 34,
+  "proofSourceDigest": "714f45520005eb84cadc390db9bb0dfee23e1fae62b6659a5ee0e640e8cc8664",
+  "sourceDeltaSinceCompleteExecutableProof": [
+    "docs/prd/index.html"
+  ],
+  "requiredVerification": [
+    "npm run check",
+    "npm run build",
+    "npm run test:eval-web"
+  ],
+  "actualVerification": {
+    "fullCheck": {
+      "sourceDigest": "714f45520005eb84cadc390db9bb0dfee23e1fae62b6659a5ee0e640e8cc8664",
+      "exitCode": 1,
+      "passedChapters": [
+        "Rust format/clippy/workspace tests",
+        "Crash support and real Ladybug instruction-search test",
+        "Native/runtime and workspace builds",
+        "TypeScript workspace checks",
+        "343 Vitest files,4583 tests",
+        "Two secret-boundary tests",
+        "100 Python tests",
+        "Ladybug receipts"
+      ],
+      "vitestSkippedFiles": 1,
+      "vitestSkippedTests": 3,
+      "failure": "Final PRD readability gate: added sentence counted28words"
+    },
+    "readabilityRepair": {
+      "sourceDigest": "e382558a8456b94d23040bf68edba924345a2db0928b6961cae04a64f336141d",
+      "command": "npm run prd:check-readability",
+      "exitCode": 0
+    },
+    "build": {
+      "sourceDigest": "e382558a8456b94d23040bf68edba924345a2db0928b6961cae04a64f336141d",
+      "exitCode": 0
+    },
+    "evalWeb": {
+      "sourceDigest": "714f45520005eb84cadc390db9bb0dfee23e1fae62b6659a5ee0e640e8cc8664",
+      "exitCode": 0,
+      "applicability": "No executable source changed after this proof"
+    },
+    "focusedExporterTests": {
+      "testsPassed": 8,
+      "exitCode": 0
+    }
+  },
+  "live": {
+    "sourceDigest": "714f45520005eb84cadc390db9bb0dfee23e1fae62b6659a5ee0e640e8cc8664",
+    "runId": "run-2026-10-20T13-21-23-927Z-2b959113",
+    "status": "passed",
+    "evidence": "live-comparison.json",
+    "priorFailedRun": "run-2026-10-20T13-12-15-499Z-ef6f3d89",
+    "declaredCostCapUsd": 10,
+    "qualityEquivalence": "unproven",
+    "wholeTaskContextSavings": "unproven"
+  },
+  "logs": [
+    {
+      "path": ".relayer/instruction-graph-v1/check-trace-repair.log",
+      "sha256": "82479cb6cc28456f8c5a5abf7d747abcfba9442d8400e0d7ceb96a7a36feba94",
+      "bytes": 150356
+    },
+    {
+      "path": ".relayer/instruction-graph-v1/prd-trace-repair.log",
+      "sha256": "bf54c46d3bfe97d64358d7b626bc48534c55954c760d95098fcf6762b10ab321",
+      "bytes": 166
+    },
+    {
+      "path": ".relayer/instruction-graph-v1/build-trace-repair.log",
+      "sha256": "98291ab49eedc76fdfd955d01df49a71fd5bffd38fb9f0bd11b5697ccc3c9e3a",
+      "bytes": 2040
+    },
+    {
+      "path": ".relayer/instruction-graph-v1/eval-web-trace-repair.log",
+      "sha256": "dcf9f9b009a16471a65e8303ecd946c3517b3653ebadf5458663b412bef79ea8",
+      "bytes": 8457
+    },
+    {
+      "path": ".relayer/instruction-graph-v1/trace-export-red.log",
+      "sha256": "5dc125d83bfc2d33e8516c8bced3aa6851dd0948cebe224ab523a6129c3895eb",
+      "bytes": 1793
+    },
+    {
+      "path": ".relayer/instruction-graph-v1/trace-export-green.log",
+      "sha256": "0f5b37190f1572aa35a6715eecbe204feebdf707e50d868461108323a393f729",
+      "bytes": 1241
+    },
+    {
+      "path": ".relayer/instruction-graph-v1/trace-export-green-2.log",
+      "sha256": "43d4c166c87463fe247cf90f0b3a76337ab44d8a2e842107c3f220c10a9a9301",
+      "bytes": 237
+    }
+  ],
+  "review": {
+    "reviewer": "/root/adversarial_review",
+    "sourceDigest": "e382558a8456b94d23040bf68edba924345a2db0928b6961cae04a64f336141d",
+    "status": "non_certifying_without_pr",
+    "verdict": "no_reviewed_source_or_evidence_claim_blocker",
+    "evidenceAudit": "All34source hashes and seven log hashes/sizes verified; valid executable chapter reuse after PRD-only prose repair; live bundle/measurements/limits substantiated."
+  }
+}
