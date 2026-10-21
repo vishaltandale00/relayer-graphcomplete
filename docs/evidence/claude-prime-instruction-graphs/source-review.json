@@ -1,11 +1,11 @@
 {
   "reviewer": "/root/adversarial_review",
-  "sourceScopeDigest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0",
-  "sourceFileCount": 46,
+  "sourceScopeDigest": "a1672ab91ac1c57b7eca66f701efefee14e84e0d88fe192f89cf88d01bdd6e0b",
+  "sourceFileCount": 47,
   "sourceSnapshot": "docs/evidence/claude-prime-instruction-graphs/source-snapshot.json",
   "allSourceFileHashesVerified": true,
-  "scope": "Original43-file authority/mechanics/default review plus managed-runtime Python recipe identity, real Python visual fixture replacement and final PRD mapping.",
-  "verdict": "No unresolved source blocker; replacement fixture preserves reviewed original boundaries and passes its observed focused portfolio.",
+  "scope": "Prior 46-file provider corpus, authority, mechanics, defaults, packaging-integrity and visual-fixture review, plus test-only provider-selector setup amortization and IG-026 PRD mapping.",
+  "verdict": "No unresolved source blocker. The shared-runtime selector fixture preserves the reviewed provider boundaries and all six original assertion bodies; the focused portfolio reports six passes.",
   "unresolvedSourceFindings": [],
   "status": "non_certifying_without_pr",
   "resolvedFindings": [
@@ -54,9 +54,67 @@
   },
   "limits": [
     "The optional RELAYER_TEST_PRIME_PYTHON/ipykernel fixture branch was source-reviewed but not executed by this focused portfolio.",
-    "Full npm run check remains separately running at this assertion; no final full-command pass is asserted here.",
     "No provider inference, quality-equivalence or whole-task savings claim is made.",
     "Logs establish their reported chapter outcomes; other required heavy entry points remain separately audited.",
-    "Source changes invalidate this assertion. Record it in the PR against the exact snapshot."
-  ]
+    "Source changes invalidate this assertion. Record it in the PR against the exact snapshot.",
+    "Full npm run check for the final 47-file source is separately running at this assertion. No final full-command pass or repaired CI pass is asserted.",
+    "The original CI six-timeout failure remains failed. Exact CI timeout phase is unknown; the focused Mac pass does not establish a CI latency bound."
+  ],
+  "selectorFixtureSubsumption": {
+    "verdict": "Sound for zero-inference provider discovery/default/composer routing; repeated cold setup is amortized without substituting cached corpus bytes or changing production behavior.",
+    "sourceHash": "0a2678dd7dbcc3ceb3190e57ba09e5b70911533b18700f73fa963d6ce631f103",
+    "originalCaseBodyAndHelpersByteIdenticalToHead": true,
+    "caseBodySha256": "db2025f082ad410a13220575ed5b227c764e2c690e3e1a5698565571bdf3e9ed",
+    "preservedBoundaries": [
+      "Each flow has its own fresh user-data directory, native app-server process, product SQLite database and provider catalog.",
+      "All six original flow bodies, helpers, provider/model order assertions, onboarding defaults, Settings preservation, family-only composer routing and 15000 ms case deadline are byte-identical to HEAD.",
+      "The one shared real runtime loads all three actual default YAML configurations and publishes their immutable corpora; its provider execution callback always rejects. No execution, recursive scheduling or new graph task is exercised by this selector fixture.",
+      "Per-case app servers close after each test; the shared runtime closes after all tests, with directory removal in finally. Vitest invokes this teardown after setup failure.",
+      "The 45000 ms setup-hook budget is separate from flow deadlines. Dedicated runtime journeys retain cold publication, acceptance and reopen proof."
+    ],
+    "authorityReview": "RelayerAppServerService passes only runtime URLs, tokens and catalog to its child. Its providerDefinitionStore calls that app server's own authenticated endpoints, and close terminates only its own child. Sharing the graph catalog does not share provider persistence or bind execution in these zero-inference cases.",
+    "mapping": [
+      "PRD 2.1 provider connection and managed-family ordering",
+      "PROV-008 paired defaults and Settings preservation",
+      "FAM-001 family-only composer request",
+      "FAM-004 compatible harness routing",
+      "IG-019 real trusted startup publication remains observed once",
+      "IG-023 dedicated cold/reopen runtime journeys remain intact",
+      "IG-026 records this setup/flow separation"
+    ],
+    "focusedLog": ".relayer/claude-prime-selector-fix-final.log",
+    "focusedLogSha256": "8e6a0e73f98df4d1445144322a58d17119cb152f9d9fa3da1cb9d9c9aa3afab9",
+    "observedFocusedResult": {
+      "filesPassed": 1,
+      "testsPassed": 6,
+      "durationSeconds": 5.13,
+      "coldSetupMilliseconds": 3631,
+      "publications": [
+        {
+          "versionKey": "codex-instruction-graph-v2",
+          "milliseconds": 851,
+          "status": 200
+        },
+        {
+          "versionKey": "claude-instruction-graph-v2",
+          "milliseconds": 846,
+          "status": 200
+        },
+        {
+          "versionKey": "prime-agent-instruction-graph-v2",
+          "milliseconds": 933,
+          "status": 200
+        }
+      ]
+    },
+    "preservedCiFailure": {
+      "log": ".relayer/claude-prime-ci-vitest.log",
+      "sha256": "31d5735e721e54a1a41a95ee2f9c7894b4db1a6b30df73c26869f97c598256e4",
+      "testsFailed": 6,
+      "testsPassed": 4631,
+      "testsSkipped": 34,
+      "reason": "All six selector cases exceeded 15000 ms. The log contains no phase measurements, so cold publication is a hypothesis, not a confirmed CI cause."
+    },
+    "performanceLimit": "Three-corpus cold startup adds real production work. Independent Mac measurement was 3021 ms runtime, versus 187 ms reopen; it is not CI evidence or a product startup-latency guarantee."
+  }
 }

@@ -52,7 +52,7 @@
     },
     {
       "path": "docs/prd/index.html",
-      "sha256": "3716d18e21d97caad94cf5a4affd4ddc8121992b171900a7f51687b7f1398a71"
+      "sha256": "b3b1a051f000affdcb44122dd154eb386ef99ddae80860cbf7321f837dc271a4"
     },
     {
       "path": "fixtures/claude-instruction-graph-v2.json",
@@ -179,6 +179,10 @@
       "sha256": "cd923c1b4465ec391487d43443f100bcb88d6139beebed2e599ebf3b3b080e61"
     },
     {
+      "path": "test/provider-straightforward-flow.test.mjs",
+      "sha256": "0a2678dd7dbcc3ceb3190e57ba09e5b70911533b18700f73fa963d6ce631f103"
+    },
+    {
       "path": "test/support/prime-visual-fixture.mjs",
       "sha256": "ecd36b14c0838c5c4ca436bb4796109f14653eef04dc36cf6b1cb71a9f145407"
     },
@@ -187,5 +191,5 @@
       "sha256": "a3d911a5ec66ec25c78b3e88b1de0a8b74ab06c680c79b65832f225d1fb169b4"
     }
   ],
-  "digest": "f08f91cfbef5ad9340ffabe574f90ea7d60fe9c2fb205ea42d623cd797dd70c0"
+  "digest": "a1672ab91ac1c57b7eca66f701efefee14e84e0d88fe192f89cf88d01bdd6e0b"
 }

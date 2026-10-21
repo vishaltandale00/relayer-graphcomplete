@@ -93,6 +93,24 @@
         "actual unsigned development afterPack",
         "test/prime-managed-runtime.test.mjs"
       ]
+    },
+    "IG-026": {
+      "seams": [
+        "One real three-default runtime publishes the immutable catalog before selector tests; no inference or runtime execution is permitted",
+        "Six native app-server/profile/provider stores remain fresh and isolated; provider discovery/order, onboarding defaults, Settings preserving defaults and composer family routing remain observed",
+        "Each flow retains its 15-second deadline; bounded 45-second heavy setup is distinct and reports cold publication phases; runtime closes even on setup failure"
+      ],
+      "productPromises": [
+        "PRD2.1 successful provider connection and product-managed family ordering",
+        "PROV-008 paired provider/family defaults and preservation",
+        "FAM-001 family-only composer request",
+        "FAM-004 compatible harness resolution"
+      ],
+      "tests": [
+        "test/provider-straightforward-flow.test.mjs (all six original assertion sets retained)",
+        "test/instruction-graph-e2e.test.mjs retains dedicated cold publication/reopen proof"
+      ],
+      "limits": "Amortizes repeated setup, not a product startup-latency guarantee. Three-corpus cold publication adds real work. CI first-attempt exact timeout phase was not captured."
     }
   },
   "requiredHeavyEntryPoints": [
