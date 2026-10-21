@@ -1607,24 +1607,14 @@ export function compactSubmittedText(value, limit = 80) {
 }
 
 export function submittedInputHistoryPresentation(input) {
-  const prompt = input?.action?.prompt || "Input";
   if (typeof input?.value?.text === "string") {
     const fullValue = input.value.text;
-    const compactValue = compactSubmittedText(fullValue);
-    if (fullValue !== compactValue) {
-      return Object.freeze({
-        kind: "disclosure",
-        compactValue,
-        fullValue,
-        ariaLabel: `Show full submitted value for ${prompt}`,
-      });
-    }
-    return Object.freeze({ kind: "plain", compactValue });
+    return Object.freeze({ compactValue: compactSubmittedText(fullValue), fullValue });
   }
-  const compactValue = Array.isArray(input?.value?.selected)
+  const fullValue = Array.isArray(input?.value?.selected)
     ? input.value.selected.map((option) => option.label).join(", ")
     : (input?.value?.selectedKeys || []).join(", ");
-  return Object.freeze({ kind: "plain", compactValue });
+  return Object.freeze({ compactValue: compactSubmittedText(fullValue), fullValue });
 }
 
 // History state is supplied by the renderer integration so Product and Eval use the same
@@ -4952,38 +4942,40 @@ export function createProductWorkspace({
     const host = $("#interactionInputHistory");
     const inputs = interaction?.submittedInputs || [];
     host.classList.toggle("hidden", inputs.length === 0);
+    // A turn's submitted inputs never change, so a refresh keeps open rows and the list's scroll.
+    const key = inputs.length && interaction?.id != null ? `${interaction.id}:${inputs.length}` : "";
+    if (key && host.dataset.inputsKey === key) return;
+    host.dataset.inputsKey = key;
     if (!inputs.length) {
       host.replaceChildren();
       return;
     }
     const heading = graphDocument.createElement("strong");
-    heading.textContent = "Submitted inputs";
+    heading.textContent = `Submitted inputs · ${inputs.length}`;
     const list = graphDocument.createElement("div");
     list.className = "interaction-input-history-list";
     inputs.forEach((input) => {
-      const item = graphDocument.createElement("section");
+      // One line per input; opening the row wraps the full question and answer in place.
+      const item = graphDocument.createElement("details");
       item.className = "interaction-input-history-item";
-      const prompt = graphDocument.createElement("strong");
+      const summary = graphDocument.createElement("summary");
+      const prompt = graphDocument.createElement("span");
       prompt.textContent = input.action?.prompt || "Input";
-      const presentation = submittedInputHistoryPresentation(input);
-      const value = presentation.kind === "disclosure"
-        ? (() => {
-            const disclosure = graphDocument.createElement("details");
-            disclosure.className = "interaction-input-history-disclosure";
-            const summary = graphDocument.createElement("summary");
-            summary.textContent = presentation.compactValue;
-            summary.setAttribute("aria-label", presentation.ariaLabel);
-            const full = graphDocument.createElement("p");
-            full.textContent = presentation.fullValue;
-            disclosure.append(summary, full);
-            return disclosure;
-          })()
-        : (() => {
-            const text = graphDocument.createElement("span");
-            text.textContent = presentation.compactValue;
-            return text;
-          })();
-      item.append(prompt, value);
+      const value = graphDocument.createElement("span");
+      const { compactValue, fullValue } = submittedInputHistoryPresentation(input);
+      // The summary (the toggle's accessible name) holds only the bounded prefix; the exact
+      // value is mounted as the row's body only while it is open.
+      value.textContent = compactValue;
+      // Not a <p>: the banner clamps its paragraphs to two lines.
+      const full = graphDocument.createElement("div");
+      full.className = "interaction-input-history-full";
+      item.addEventListener("toggle", () => {
+        full.textContent = item.open ? fullValue : "";
+        if (item.open) item.append(full);
+        else full.remove();
+      });
+      summary.append(prompt, value);
+      item.append(summary);
       list.append(item);
     });
     host.replaceChildren(heading, list);
